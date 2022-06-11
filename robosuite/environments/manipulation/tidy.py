@@ -1,6 +1,7 @@
 from collections import OrderedDict
 
 import numpy as np
+from copy import deepcopy
 
 from robosuite.environments.manipulation.single_arm_env import SingleArmEnv
 from robosuite.models.arenas import TableArena
@@ -8,11 +9,11 @@ from robosuite.models.objects import BoxObject
 from robosuite.models.tasks import ManipulationTask
 from robosuite.utils.mjcf_utils import CustomMaterial
 from robosuite.utils.observables import Observable, sensor
-from robosuite.utils.placement_samplers import UniformRandomSampler
+from robosuite.utils.placement_samplers import UniformRandomSampler,SequentialCompositeSampler
 from robosuite.utils.transform_utils import convert_quat
 
-from robosuite.utils.mjcf_utils import CustomMaterial, array_to_string
-from robosuite_task_zoo.models.tool_use import LShapeTool, PotObject
+from robosuite.utils.mjcf_utils import CustomMaterial, array_to_string, add_material
+from robosuite_task_zoo.models.kitchen import PotObject, StoveObject, ButtonObject, ServingRegionObject
 
 
 class Tidy(SingleArmEnv):
@@ -144,7 +145,7 @@ class Tidy(SingleArmEnv):
         gripper_types="default",
         initialization_noise="default",
         table_full_size=(0.8, 0.8, 0.05),
-        table_friction=(1.0, 5e-3, 1e-4),
+        table_friction=(0.6, 5e-3, 1e-4),
         use_camera_obs=True,
         use_object_obs=True,
         reward_scale=1.0,
@@ -339,6 +340,27 @@ class Tidy(SingleArmEnv):
             tex_attrib=tex_attrib,
             mat_attrib=mat_attrib,
         )
+        darkwood = CustomMaterial(
+            texture="WoodDark",
+            tex_name="darkwood",
+            mat_name="MatDarkWood",
+            tex_attrib={"type": "cube"},
+            mat_attrib={"texrepeat": "3 3", "specular": "0.4", "shininess": "0.1"}
+        )
+        redwood = CustomMaterial(
+            texture="WoodRed",
+            tex_name="redwood",
+            mat_name="MatRedWood",
+            tex_attrib=tex_attrib,
+            mat_attrib=mat_attrib,
+        )
+        metal = CustomMaterial(
+            texture="Metal",
+            tex_name="metal",
+            mat_name="MatMetal",
+            tex_attrib={"type": "cube"},
+            mat_attrib={"specular": "1", "shininess": "0.3", "rgba": "0.9 0.9 0.9 1"}
+        )
         self.cubeA = BoxObject(
             name="cubeA",
             size_min=[0.02, 0.02, 0.02],
@@ -353,31 +375,65 @@ class Tidy(SingleArmEnv):
             rgba=[0, 1, 0, 1],
             material=greenwood,
         )
+
+        self.serving_region = ServingRegionObject(
+            name="ServingRegionRed"
+        )
+
+        serving_region_object = self.serving_region.get_obj()
+        serving_region_object.set("pos", array_to_string((0.18, -0.15, 0.003)))
+        mujoco_arena.table_body.append(serving_region_object)
+
         self.pot = PotObject(
             name="PotObject",
         )
-        pot_object = self.pot.get_obj()
-        pot_object.set("pos", array_to_string((0.0, 0.18, self.table_offset[2] + 0.05)))
 
         cubes = [self.cubeA, self.cubeB]
         mujoco_objects = [self.cubeA, self.cubeB, self.pot]
+        for obj_body in [
+                self.serving_region,
+        ]:
+            for material in [darkwood, metal, redwood]:
+                tex_element, mat_element, _, used = add_material(root=obj_body.worldbody,
+                                                                 naming_prefix=obj_body.naming_prefix,
+                                                                 custom_material=deepcopy(material))
+                obj_body.asset.append(tex_element)
+                obj_body.asset.append(mat_element)
 
         # Create placement initializer
-        if self.placement_initializer is not None:
-            self.placement_initializer.reset()
-            self.placement_initializer.add_objects(cubes)
-        else:
-            self.placement_initializer = UniformRandomSampler(
-                name="ObjectSampler",
-                mujoco_objects=cubes,
-                x_range=[-0.08, 0.08],
-                y_range=[-0.08, 0.08],
-                rotation=None,
+        # if self.placement_initializer is not None:
+        #     self.placement_initializer.reset()
+        #     self.placement_initializer.add_objects(cubes)
+        # else:
+
+        self.placement_initializer = SequentialCompositeSampler(name="ObjectSampler")
+        self.placement_initializer.append_sampler(
+            UniformRandomSampler(
+            name="ObjectSampler-cubes",
+            mujoco_objects=cubes,
+            x_range=[-0.1, 0.1],
+            y_range=[0.1, 0.3],
+            rotation=None,
+            ensure_object_boundary_in_range=False,
+            ensure_valid_placement=True,
+            reference_pos=self.table_offset,
+            z_offset=0.01,
+        ))
+
+        self.placement_initializer.append_sampler(
+            sampler=UniformRandomSampler(
+                name="ObjectSampler-pot",
+                mujoco_objects=self.pot,
+                x_range=[0.03, 0.035],
+                y_range=[-0.15, -0.13],
+                rotation=(-0.1, 0.1),
+                rotation_axis='z',
                 ensure_object_boundary_in_range=False,
                 ensure_valid_placement=True,
                 reference_pos=self.table_offset,
                 z_offset=0.01,
-            )
+        ))
+
 
         # task includes arena, robot, and objects of interest
         self.model = ManipulationTask(
@@ -385,6 +441,8 @@ class Tidy(SingleArmEnv):
             mujoco_robots=[robot.robot_model for robot in self.robots],
             mujoco_objects=mujoco_objects,
         )
+
+        self.model.merge_assets(self.serving_region)
 
     def _setup_references(self):
         """
@@ -399,6 +457,7 @@ class Tidy(SingleArmEnv):
         self.cubeB_body_id = self.sim.model.body_name2id(self.cubeB.root_body)
 
         self.pot_body_id = self.sim.model.body_name2id(self.pot.root_body)
+        self.serving_region_id = self.sim.model.body_name2id(self.serving_region.root_body)
 
     def _reset_internal(self):
         """
@@ -504,8 +563,33 @@ class Tidy(SingleArmEnv):
                     else np.zeros(3)
                 )
 
+            @sensor(modality=modality)
+            def serving_pos(obs_cache):
+                return np.array(self.sim.data.body_xpos[self.serving_region_id])
+
+            @sensor(modality=modality)
+            def serving_quat(obs_cache):
+                return convert_quat(np.array(self.sim.data.body_xquat[self.serving_region_id]), to="xyzw")
+
+            @sensor(modality=modality)
+            def gripper_to_serving(obs_cache):
+                return (
+                    obs_cache["serving_pos"] - obs_cache[f"{pf}eef_pos"]
+                    if "serving_pos" in obs_cache and f"{pf}eef_pos" in obs_cache
+                    else np.zeros(3)
+                )
+
+            @sensor(modality=modality)
+            def pot_to_serving(obs_cache):
+                return (
+                    obs_cache["serving_pos"] - obs_cache["pot_pos"]
+                    if "pot_pos" in obs_cache and "serving_pos" in obs_cache
+                    else np.zeros(3)
+                )
+
             sensors = [cubeA_pos, cubeA_quat, cubeB_pos, cubeB_quat, gripper_to_cubeA, gripper_to_cubeB, cubeA_to_cubeB,
-                       pot_pos, pot_quat, gripper_to_pot, cubeA_to_pot, cubeB_to_pot]
+                       pot_pos, pot_quat, gripper_to_pot, cubeA_to_pot, cubeB_to_pot,
+                       serving_pos, serving_quat, gripper_to_serving, pot_to_serving]
             names = [s.__name__ for s in sensors]
 
             # Create observables
@@ -528,11 +612,21 @@ class Tidy(SingleArmEnv):
         cubeA_pos = self.sim.data.body_xpos[self.cubeA_body_id]
         cubeB_pos = self.sim.data.body_xpos[self.cubeB_body_id]
         pot_pos = self.sim.data.body_xpos[self.pot_body_id]
+        serving_pos = self.sim.data.body_xpos[self.serving_region_id]
         gripper_site_pos = self.sim.data.site_xpos[self.robots[0].eef_site_id]
-        if self.check_contact(self.cubeA, self.pot) and np.linalg.norm(pot_pos[:2] - cubeA_pos[:2]) < 0.06 and np.abs(
-            pot_pos[2] - cubeA_pos[2]) < 0.05 and np.linalg.norm(gripper_site_pos - cubeA_pos) > 0.01: # TODO:
-            return True
-        return False
+
+        cube_in_pot = self.check_contact(self.cubeA, self.pot) \
+                      and np.linalg.norm(pot_pos[:2] - cubeA_pos[:2]) < 0.06 \
+                      and np.abs(pot_pos[2] - cubeA_pos[2]) < 0.05 \
+                      and np.linalg.norm(gripper_site_pos - cubeA_pos) > 0.01  # TODO:
+
+        pot_in_serving_region = np.abs((pot_pos - serving_pos)[0]) < 0.02 \
+                                and np.abs((pot_pos - serving_pos)[1]) < 0.05 \
+                                and np.abs((pot_pos - serving_pos)[2]) < 0.03 \
+                                and np.linalg.norm((gripper_site_pos - pot_pos)) > 0.05
+
+
+        return cube_in_pot and pot_in_serving_region
 
     def visualize(self, vis_settings):
         """

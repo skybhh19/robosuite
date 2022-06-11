@@ -21,9 +21,10 @@ import robosuite as suite
 from robosuite import load_controller_config
 from robosuite.utils.input_utils import input2action
 from robosuite.wrappers import DataCollectionWrapper, VisualizationWrapper
+import robosuite.utils.transform_utils as T
 
 
-def collect_human_trajectory(env, device, arm, env_configuration):
+def collect_human_trajectory(env, device, arm, env_configuration, only_yaw):
     """
     Use the device (keyboard or SpaceNav 3D mouse) to collect a demonstration.
     The rollout trajectory is saved to files in npz format.
@@ -47,6 +48,8 @@ def collect_human_trajectory(env, device, arm, env_configuration):
     device.start_control()
 
     # Loop until we get a reset from the input or the task completes
+    max_orn = [-100] * 3
+    min_orn = [100] * 3
     while True:
         # Set active robot
         active_robot = env.robots[0] if env_configuration == "bimanual" else env.robots[arm == "left"]
@@ -60,8 +63,26 @@ def collect_human_trajectory(env, device, arm, env_configuration):
         if action is None:
             break
 
+        if only_yaw:
+            action[3:5] = np.array([0, 0])
+
         # Run environment step
-        env.step(action)
+        obs, _, _, _ = env.step(action)
+        # print(action[5])
+        euler_orn = T.mat2euler(T.quat2mat(obs['robot0_eef_quat']))
+        # for i in range(3):
+        #     if euler_orn[i] > np.pi:
+        #        euler_orn[i] -= 2 * np.pi
+        #     elif euler_orn[i] < -np.pi:
+        #         euler_orn[i] += 2 * np.pi
+        #     max_orn[i] = max(max_orn[i], euler_orn[i])
+        #     min_orn[i] = min(min_orn[i], euler_orn[i])
+        print(euler_orn)
+        print(obs['robot0_eef_quat'])
+        input()
+        # print(max_orn, min_orn)
+        # print(np.array(max_orn) - np.array(min_orn))
+        # print()
         env.render()
 
         # Also break if we complete the task
@@ -183,6 +204,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--controller", type=str, default="OSC_POSE", help="Choice of controller. Can be 'IK_POSE' or 'OSC_POSE'"
     )
+    parser.add_argument('--only-yaw', action='store_true', default=False)
     parser.add_argument("--device", type=str, default="keyboard")
     parser.add_argument("--pos-sensitivity", type=float, default=1.0, help="How much to scale position user inputs")
     parser.add_argument("--rot-sensitivity", type=float, default=1.0, help="How much to scale rotation user inputs")
@@ -246,5 +268,5 @@ if __name__ == "__main__":
 
     # collect demonstrations
     while True:
-        collect_human_trajectory(env, device, args.arm, args.config)
+        collect_human_trajectory(env, device, args.arm, args.config, args.only_yaw)
         gather_demonstrations_as_hdf5(tmp_directory, new_dir, env_info)
