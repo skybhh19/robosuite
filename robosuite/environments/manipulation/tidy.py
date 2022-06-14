@@ -530,7 +530,8 @@ class Tidy(SingleArmEnv):
         pot_pos = self.sim.data.body_xpos[self.pot_body_id]
         gripper_site_pos = self.sim.data.site_xpos[self.robots[0].eef_site_id]
         if self.check_contact(self.cubeA, self.pot) and np.linalg.norm(pot_pos[:2] - cubeA_pos[:2]) < 0.06 and np.abs(
-            pot_pos[2] - cubeA_pos[2]) < 0.05 and np.linalg.norm(gripper_site_pos - cubeA_pos) > 0.01: # TODO:
+            pot_pos[2] - cubeA_pos[2]) < 0.05:
+            # and np.linalg.norm(gripper_site_pos - cubeA_pos) > 0.01: # TODO:
             return True
         return False
 
