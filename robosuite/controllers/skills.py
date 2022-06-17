@@ -5,7 +5,6 @@ from utils.primitive_utils import unscale_action
 
 class BaseSkill:
     def __init__(self,
-                 skill_type,
                  env,
                  image_obs_in_info,
                  reach_thres,
@@ -26,7 +25,6 @@ class BaseSkill:
                  yaw_thres=0.20,
                  **config
                  ):
-        self._skill_type = skill_type
         self._env = env
 
         self._num_ac_calls = None
@@ -207,12 +205,10 @@ class BaseSkill:
 
 class AtomicSkill(BaseSkill):
     def __init__(self,
-                 skill_type,
                  use_ori_params,
                  **config
                  ):
         super().__init__(
-            skill_type,
             use_ori_params=use_ori_params,
             max_ac_calls=1,
             **config
@@ -262,7 +258,7 @@ class AtomicSkill(BaseSkill):
 
 class GripperSkill(BaseSkill):
     def __init__(self,
-                 skill_type,
+                 skill_type='open',
                  max_ac_calls=4,
                  use_aff=True,
                  **config
@@ -273,6 +269,7 @@ class GripperSkill(BaseSkill):
             **config
         )
         self._use_aff = use_aff
+        self._skill_type = skill_type
 
     def get_param_dim(self):
         return 0
@@ -318,14 +315,12 @@ class ReachSkill(BaseSkill):
     STATES = ['INIT', 'LIFTED', 'HOVERING', 'REACHED']
 
     def __init__(self,
-                 skill_type,
                  use_gripper_params=False,
                  use_ori_params=True,
                  max_ac_calls=15,
                  use_aff=True,
                  **config):
         super().__init__(
-            skill_type,
             use_gripper_params=use_gripper_params,
             use_ori_params=use_ori_params,
             max_ac_calls=max_ac_calls,
@@ -443,7 +438,6 @@ class GraspSkill(BaseSkill):
     STATES = ['INIT', 'LIFTED', 'HOVERING', 'REACHED', 'GRASPED']
 
     def __init__(self,
-                 skill_type,
                  use_ori_params=True,
                  max_ac_calls=20,
                  max_reach_steps=15,
@@ -451,7 +445,6 @@ class GraspSkill(BaseSkill):
                  **config
                  ):
         super().__init__(
-            skill_type,
             use_ori_params=use_ori_params,
             max_ac_calls=max_ac_calls,
             max_reach_steps=max_reach_steps,

@@ -6,7 +6,7 @@ from robosuite.controllers.skills import (
     ReachSkill,
     GraspSkill,
     PushSkill,
-    GripperReleaseSkill,
+    GripperSkill,
 )
 
 def _setup_config(config):
@@ -18,7 +18,7 @@ class SkillController:
         'reach',
         'grasp',
         'push',
-        'open'
+        'gripper'
     ]
 
     def __init__(self,

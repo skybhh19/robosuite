@@ -77,9 +77,9 @@ def collect_human_trajectory(env, device, arm, env_configuration, only_yaw):
         #         euler_orn[i] += 2 * np.pi
         #     max_orn[i] = max(max_orn[i], euler_orn[i])
         #     min_orn[i] = min(min_orn[i], euler_orn[i])
-        print(euler_orn)
-        print(obs['robot0_eef_quat'])
-        input()
+        # print(euler_orn)
+        # print(obs['robot0_eef_quat'])
+        # input()
         # print(max_orn, min_orn)
         # print(np.array(max_orn) - np.array(min_orn))
         # print()

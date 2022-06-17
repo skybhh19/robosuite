@@ -255,59 +255,9 @@ class CleanUp(SingleArmEnv):
         Returns:
             float: reward value
         """
-        r_reach, r_lift, r_stack = self.staged_rewards()
-        if self.reward_shaping:
-            reward = max(r_reach, r_lift, r_stack)
-        else:
-            reward = 2.0 if r_stack > 0 else 0.0
-
-        if self.reward_scale is not None:
-            reward *= self.reward_scale / 2.0
-
-        return reward
-
-    def staged_rewards(self):
-        return
-        """
-        Helper function to calculate staged rewards based on current physical states.
-
-        Returns:
-            3-tuple:
-
-                - (float): reward for reaching and grasping
-                - (float): reward for lifting and aligning
-                - (float): reward for stacking
-        """
-        # reaching is successful when the gripper site is close to the center of the cube
-        cubeA_pos = self.sim.data.body_xpos[self.cubeA_body_id]
-        cubeB_pos = self.sim.data.body_xpos[self.cubeB_body_id]
-        gripper_site_pos = self.sim.data.site_xpos[self.robots[0].eef_site_id]
-        dist = np.linalg.norm(gripper_site_pos - cubeA_pos)
-        r_reach = (1 - np.tanh(10.0 * dist)) * 0.25
-
-        # grasping reward
-        grasping_cubeA = self._check_grasp(gripper=self.robots[0].gripper, object_geoms=self.cubeA)
-        if grasping_cubeA:
-            r_reach += 0.25
-
-        # lifting is successful when the cube is above the table top by a margin
-        cubeA_height = cubeA_pos[2]
-        table_height = self.table_offset[2]
-        cubeA_lifted = cubeA_height > table_height + 0.04
-        r_lift = 1.0 if cubeA_lifted else 0.0
-
-        # Aligning is successful when cubeA is right above cubeB
-        if cubeA_lifted:
-            horiz_dist = np.linalg.norm(np.array(cubeA_pos[:2]) - np.array(cubeB_pos[:2]))
-            r_lift += 0.5 * (1 - np.tanh(horiz_dist))
-
-        # stacking is successful when the block is lifted and the gripper is not holding the object
-        r_stack = 0
-        cubeA_touching_cubeB = self.check_contact(self.cubeA, self.cubeB)
-        if not grasping_cubeA and r_lift > 0 and cubeA_touching_cubeB:
-            r_stack = 2.0
-
-        return r_reach, r_lift, r_stack
+        if self._check_success():
+            return 1.0
+        return 0.0
 
 
     def _load_model(self):
@@ -373,44 +323,23 @@ class CleanUp(SingleArmEnv):
             self.pnp_objs.append(obj)
 
         self.push_objs = []
-        self.cubeA = BoxObject(
-            name="cubeA",
-            size_min=[0.02, 0.02, 0.02],
-            size_max=[0.02, 0.02, 0.02],
-            rgba=[1, 0, 0, 1],
-            material=redwood,
-        )
-        self.cubeB = BoxObject(
-            name="cubeB",
-            size_min=[0.025, 0.025, 0.025],
-            size_max=[0.025, 0.025, 0.025],
-            rgba=[0, 1, 0, 1],
-            material=greenwood,
-        )
+        num_push_objs = self.task_config['num_push_objs']
+        for i in range(num_push_objs):
+            if num_push_objs > 1:
+                color = 0.25 + 0.75 * i / (num_push_objs - 1)
+            else:
+                color = 1.0
+            push_size = np.array([0.0350, 0.0425, 0.02]) * 1.25
+            obj = BoxObject(
+                name="obj_push_{}".format(i),
+                size_min=push_size,
+                size_max=push_size,
+                rgba=[0, color, 0, 1],
+                material=pushmaterial,
+            )
+            self.push_objs.append(obj)
 
-        self.serving_region = ServingRegionObject(
-            name="ServingRegionRed"
-        )
-
-        serving_region_object = self.serving_region.get_obj()
-        serving_region_object.set("pos", array_to_string((0.18, -0.15, 0.003)))
-        mujoco_arena.table_body.append(serving_region_object)
-
-        self.pot = PotObject(
-            name="PotObject",
-        )
-
-        cubes = [self.cubeA, self.cubeB]
-        mujoco_objects = [self.cubeA, self.cubeB, self.pot]
-        for obj_body in [
-                self.serving_region,
-        ]:
-            for material in [darkwood, metal, redwood]:
-                tex_element, mat_element, _, used = add_material(root=obj_body.worldbody,
-                                                                 naming_prefix=obj_body.naming_prefix,
-                                                                 custom_material=deepcopy(material))
-                obj_body.asset.append(tex_element)
-                obj_body.asset.append(mat_element)
+        mujoco_objects = self.pnp_objs + self.push_objs
 
         # Create placement initializer
         # if self.placement_initializer is not None:
@@ -422,9 +351,9 @@ class CleanUp(SingleArmEnv):
         self.placement_initializer.append_sampler(
             UniformRandomSampler(
             name="ObjectSampler-cubes",
-            mujoco_objects=cubes,
-            x_range=[-0.1, 0.1],
-            y_range=[0.1, 0.3],
+            mujoco_objects=mujoco_objects,
+            x_range=[0.04, 0.16],
+            y_range=[-0.16, 0.16],
             rotation=None,
             ensure_object_boundary_in_range=False,
             ensure_valid_placement=True,
@@ -432,29 +361,12 @@ class CleanUp(SingleArmEnv):
             z_offset=0.01,
         ))
 
-        self.placement_initializer.append_sampler(
-            sampler=UniformRandomSampler(
-                name="ObjectSampler-pot",
-                mujoco_objects=self.pot,
-                x_range=[0.03, 0.035],
-                y_range=[-0.15, -0.13],
-                rotation=(-0.1, 0.1),
-                rotation_axis='z',
-                ensure_object_boundary_in_range=False,
-                ensure_valid_placement=True,
-                reference_pos=self.table_offset,
-                z_offset=0.01,
-        ))
-
-
         # task includes arena, robot, and objects of interest
         self.model = ManipulationTask(
             mujoco_arena=mujoco_arena,
             mujoco_robots=[robot.robot_model for robot in self.robots],
             mujoco_objects=mujoco_objects,
         )
-
-        self.model.merge_assets(self.serving_region)
 
     def _setup_references(self):
         """
@@ -464,27 +376,49 @@ class CleanUp(SingleArmEnv):
         """
         super()._setup_references()
 
-        # Additional object references from this env
-        self.cubeA_body_id = self.sim.model.body_name2id(self.cubeA.root_body)
-        self.cubeB_body_id = self.sim.model.body_name2id(self.cubeB.root_body)
+        self.table_body_id = self.sim.model.body_name2id("table")
 
-        self.pot_body_id = self.sim.model.body_name2id(self.pot.root_body)
-        self.serving_region_id = self.sim.model.body_name2id(self.serving_region.root_body)
+        self.pnp_obj_body_ids = []
+        for i in range(self.task_config['num_pnp_objs']):
+            obj = self.pnp_objs[i]
+            id = self.sim.model.body_name2id(obj.root_body)
+            self.pnp_obj_body_ids.append(id)
 
-    def in_bin(self, obj_pos):
-        pass
+        self.push_obj_body_ids = []
+        for i in range(self.task_config['num_push_objs']):
+            obj = self.push_objs[i]
+            id = self.sim.model.body_name2id(obj.root_body)
+            self.push_obj_body_ids.append(id)
 
-    def _get_env_info(self, action):
-        pass
+        self.bin_body_id = self.sim.model.body_name2id("bin")
 
-    def _get_skill_info(self):
-        pass
-
+    @property
     def obj_positions(self):
-        pass
+        pnp_obj_positions = [
+            self.sim.data.body_xpos[self.pnp_obj_body_ids[i]].copy()
+            for i in range(self.task_config['num_pnp_objs'])
+        ]
+        push_obj_positions = [
+            self.sim.data.body_xpos[self.push_obj_body_ids[i]].copy()
+            for i in range(self.task_config['num_push_objs'])
+        ]
+        return pnp_obj_positions + push_obj_positions
 
+    @property
     def obj_quats(self):
-        pass
+        pnp_obj_quats = [
+            convert_quat(
+                np.array(self.sim.data.body_xquat[self.pnp_obj_body_ids[i]]), to="xyzw"
+            )
+            for i in range(self.task_config['num_pnp_objs'])
+        ]
+        push_obj_quats = [
+            convert_quat(
+                np.array(self.sim.data.body_xquat[self.push_obj_body_ids[i]]), to="xyzw"
+            )
+            for i in range(self.task_config['num_push_objs'])
+        ]
+        return pnp_obj_quats + push_obj_quats
 
     def _reset_internal(self):
         """
@@ -517,106 +451,22 @@ class CleanUp(SingleArmEnv):
             pf = self.robots[0].robot_model.naming_prefix
             modality = "object"
 
-            # position and rotation of the first cube
             @sensor(modality=modality)
-            def cubeA_pos(obs_cache):
-                return np.array(self.sim.data.body_xpos[self.cubeA_body_id])
+            def obj_pos(obs_cache):
+                return np.array(self.obj_positions).flatten()
 
             @sensor(modality=modality)
-            def cubeA_quat(obs_cache):
-                return convert_quat(np.array(self.sim.data.body_xquat[self.cubeA_body_id]), to="xyzw")
+            def obj_quat(obs_cache):
+                return np.array(self.obj_quats).flatten()
 
             @sensor(modality=modality)
-            def cubeB_pos(obs_cache):
-                return np.array(self.sim.data.body_xpos[self.cubeB_body_id])
+            def obj_state(obs_cache):
+                obj_pos = np.array(self.obj_positions).flatten()
+                obj_quat = np.array(self.obj_quats).flatten()
+                return np.concatenate([obj_pos, obj_quat])
 
-            @sensor(modality=modality)
-            def cubeB_quat(obs_cache):
-                return convert_quat(np.array(self.sim.data.body_xquat[self.cubeB_body_id]), to="xyzw")
 
-            @sensor(modality=modality)
-            def gripper_to_cubeA(obs_cache):
-                return (
-                    obs_cache["cubeA_pos"] - obs_cache[f"{pf}eef_pos"]
-                    if "cubeA_pos" in obs_cache and f"{pf}eef_pos" in obs_cache
-                    else np.zeros(3)
-                )
-
-            @sensor(modality=modality)
-            def gripper_to_cubeB(obs_cache):
-                return (
-                    obs_cache["cubeB_pos"] - obs_cache[f"{pf}eef_pos"]
-                    if "cubeB_pos" in obs_cache and f"{pf}eef_pos" in obs_cache
-                    else np.zeros(3)
-                )
-
-            @sensor(modality=modality)
-            def cubeA_to_cubeB(obs_cache):
-                return (
-                    obs_cache["cubeB_pos"] - obs_cache["cubeA_pos"]
-                    if "cubeA_pos" in obs_cache and "cubeB_pos" in obs_cache
-                    else np.zeros(3)
-                )
-
-            @sensor(modality=modality)
-            def pot_pos(obs_cache):
-                return np.array(self.sim.data.body_xpos[self.pot_body_id])
-
-            @sensor(modality=modality)
-            def pot_quat(obs_cache):
-                return convert_quat(np.array(self.sim.data.body_xquat[self.pot_body_id]), to="xyzw")
-
-            @sensor(modality=modality)
-            def gripper_to_pot(obs_cache):
-                return (
-                    obs_cache["pot_pos"] - obs_cache[f"{pf}eef_pos"]
-                    if "pot_pos" in obs_cache and f"{pf}eef_pos" in obs_cache
-                    else np.zeros(3)
-                )
-
-            @sensor(modality=modality)
-            def cubeA_to_pot(obs_cache):
-                return (
-                    obs_cache["pot_pos"] - obs_cache["cubeA_pos"]
-                    if "cubeA_pos" in obs_cache and "pot_pos" in obs_cache
-                    else np.zeros(3)
-                )
-
-            @sensor(modality=modality)
-            def cubeB_to_pot(obs_cache):
-                return (
-                    obs_cache["pot_pos"] - obs_cache["cubeB_pos"]
-                    if "cubeB_pos" in obs_cache and "pot_pos" in obs_cache
-                    else np.zeros(3)
-                )
-
-            @sensor(modality=modality)
-            def serving_pos(obs_cache):
-                return np.array(self.sim.data.body_xpos[self.serving_region_id])
-
-            @sensor(modality=modality)
-            def serving_quat(obs_cache):
-                return convert_quat(np.array(self.sim.data.body_xquat[self.serving_region_id]), to="xyzw")
-
-            @sensor(modality=modality)
-            def gripper_to_serving(obs_cache):
-                return (
-                    obs_cache["serving_pos"] - obs_cache[f"{pf}eef_pos"]
-                    if "serving_pos" in obs_cache and f"{pf}eef_pos" in obs_cache
-                    else np.zeros(3)
-                )
-
-            @sensor(modality=modality)
-            def pot_to_serving(obs_cache):
-                return (
-                    obs_cache["serving_pos"] - obs_cache["pot_pos"]
-                    if "pot_pos" in obs_cache and "serving_pos" in obs_cache
-                    else np.zeros(3)
-                )
-
-            sensors = [cubeA_pos, cubeA_quat, cubeB_pos, cubeB_quat, gripper_to_cubeA, gripper_to_cubeB, cubeA_to_cubeB,
-                       pot_pos, pot_quat, gripper_to_pot, cubeA_to_pot, cubeB_to_pot,
-                       serving_pos, serving_quat, gripper_to_serving, pot_to_serving]
+            sensors = [obj_pos, obj_quat, obj_state]
             names = [s.__name__ for s in sensors]
 
             # Create observables
@@ -629,6 +479,28 @@ class CleanUp(SingleArmEnv):
 
         return observables
 
+    def in_bin(self, obj_pos):
+        bin_pos = np.array(self.sim.data.body_xpos[self.bin_body_id])
+        return abs(obj_pos[0] - bin_pos[0]) < 0.10 \
+               and abs(obj_pos[1] - bin_pos[1]) < 0.15 \
+               and obj_pos[2] < self.table_offset[2] + 0.05
+
+    def _check_success_pnp(self):
+        for i in range(self.task_config['num_pnp_objs']):
+            obj_pos = self.sim.data.body_xpos[self.pnp_obj_body_ids[i]]
+            if not self.in_bin(obj_pos):
+                return False
+        return True
+
+    def _check_success_push(self):
+        for i in range(self.task_config['num_push_objs']):
+            obj_pos = self.sim.data.body_xpos[self.push_obj_body_ids[i]]
+            target_pos_xy = self.table_offset[:2] + np.array([-0.15, 0.15])
+            d_push = np.linalg.norm(obj_pos[:2] - target_pos_xy)
+            if d_push > 0.10:
+                return False
+        return True
+
     def _check_success(self):
         """
         Check if blocks are stacked correctly.
@@ -636,24 +508,45 @@ class CleanUp(SingleArmEnv):
         Returns:
             bool: True if blocks are correctly stacked
         """
-        cubeA_pos = self.sim.data.body_xpos[self.cubeA_body_id]
-        cubeB_pos = self.sim.data.body_xpos[self.cubeB_body_id]
-        pot_pos = self.sim.data.body_xpos[self.pot_body_id]
-        serving_pos = self.sim.data.body_xpos[self.serving_region_id]
-        gripper_site_pos = self.sim.data.site_xpos[self.robots[0].eef_site_id]
+        if not self._check_success_pnp():
+            return False
+        if not self._check_success_push():
+            return False
+        return True
 
-        cube_in_pot = self.check_contact(self.cubeA, self.pot) \
-                      and np.linalg.norm(pot_pos[:2] - cubeA_pos[:2]) < 0.06 \
-                      and np.abs(pot_pos[2] - cubeA_pos[2]) < 0.05 \
-                      and np.linalg.norm(gripper_site_pos - cubeA_pos) > 0.01  # TODO:
+    def _get_skill_info(self):
+        pos_info = dict(
+            grasp=[],
+            push=[],
+            reach=[],
+        )
 
-        pot_in_serving_region = np.abs((pot_pos - serving_pos)[0]) < 0.02 \
-                                and np.abs((pot_pos - serving_pos)[1]) < 0.05 \
-                                and np.abs((pot_pos - serving_pos)[2]) < 0.03 \
-                                and np.linalg.norm((gripper_site_pos - pot_pos)) > 0.05
+        bin_pos = self.sim.data.body_xpos[self.bin_body_id].copy()
+        obj_positions = self.obj_positions
+        num_pnp_objs = self.task_config['num_pnp_objs']
 
+        pnp_objs = obj_positions[:num_pnp_objs]
+        push_objs = obj_positions[num_pnp_objs:]
 
-        return cube_in_pot and pot_in_serving_region
+        drop_pos = bin_pos + [0, 0, 0.15]
+
+        pos_info['grasp'] += pnp_objs
+        pos_info['push'] += push_objs
+        pos_info['reach'].append(drop_pos)
+
+        info = {}
+        for k in pos_info:
+            info[k + '_pos'] = pos_info[k]
+
+        return info
+
+    def _get_env_info(self, action):
+        env_info = {}
+        env_info['success_pnp'] = self._check_success_pnp()
+        env_info['success_push'] = self._check_success_push()
+        env_info['success'] = self._check_success()
+
+        return env_info
 
     def visualize(self, vis_settings):
         """
@@ -668,5 +561,5 @@ class CleanUp(SingleArmEnv):
         super().visualize(vis_settings=vis_settings)
 
         # Color the gripper visualization site according to its distance to the cube
-        if vis_settings["grippers"]:
-            self._visualize_gripper_to_target(gripper=self.robots[0].gripper, target=self.cubeA)
+        # if vis_settings["grippers"]:
+        #     self._visualize_gripper_to_target(gripper=self.robots[0].gripper, target=self.cubeA)
