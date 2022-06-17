@@ -112,3 +112,4 @@ mjkey.txt
 .idea
 
 .pytest_cache/
+robosuite/models/assets/demonstrations/
