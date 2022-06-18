@@ -298,13 +298,13 @@ class OperationalSpaceController(Controller):
         self.goal_pos = set_goal_position(
             scaled_delta[:3], self.ee_pos, position_limit=self.position_limits, set_pos=set_pos
         )
-        print("goal orn", self.goal_ori)
-        print(self.sim.model.site_name2id(self.eef_name))
-        print("site pos", self.sim.data.site_xpos[self.sim.model.site_name2id(self.eef_name)])
-        print("site mat", self.sim.data.site_xmat[self.sim.model.site_name2id(self.eef_name)].reshape([3, 3]))
-        print("body pos", self.sim.data.site_xpos[4])
-        print("body mat", self.sim.data.get_body_xmat('robot0_right_hand'))
-        print("body quat", T.convert_quat(self.sim.data.get_body_xquat('robot0_right_hand'), to="xyzw"))
+        # print("goal orn", self.goal_ori)
+        # print(self.sim.model.site_name2id(self.eef_name))
+        # print("site pos", self.sim.data.site_xpos[self.sim.model.site_name2id(self.eef_name)])
+        # print("site mat", self.sim.data.site_xmat[self.sim.model.site_name2id(self.eef_name)].reshape([3, 3]))
+        # print("body pos", self.sim.data.site_xpos[4])
+        # print("body mat", self.sim.data.get_body_xmat('robot0_right_hand'))
+        # print("body quat", T.convert_quat(self.sim.data.get_body_xquat('robot0_right_hand'), to="xyzw"))
         if self.interpolator_pos is not None:
             self.interpolator_pos.set_goal(self.goal_pos)
 

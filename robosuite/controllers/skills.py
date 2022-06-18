@@ -5,39 +5,32 @@ from utils.primitive_utils import unscale_action
 
 class BaseSkill:
     def __init__(self,
-                 skill_type,
                  env,
                  image_obs_in_info,
+                 aff_type,
+                 global_xyz_bounds,
+                 delta_xyz_scale,
+                 yaw_bounds,
+                 lift_height,
                  reach_thres,
                  aff_thres,
-                 aff_type,
-                 binary_gripper,
+                 yaw_thres,
                  aff_tanh_scaling,
-                 global_xyz_bounds=np.array([
-                    [-0.30, -0.30, 0.80],
-                    [0.15, 0.30, 0.90]
-                 ]),
-                 delta_xyz_bounds=np.array([0.15, 0.15, 0.05]),
-                 yaw_bounds=np.array([
-                     [-np.pi / 2],
-                     [np.pi / 2]
-                 ]),
-                 lift_height=0.95,
-                 yaw_thres=0.20,
+                 binary_gripper,
                  **config
                  ):
-        self._skill_type = skill_type
         self._env = env
 
         self._num_ac_calls = None
         self._params = None
         self._state = None
+        self._normalize_params = None
         # self._aff_reward = None
         # self._aff_success = None
 
         self._config = dict(
             global_xyz_bounds=global_xyz_bounds,
-            delta_xyz_bounds=delta_xyz_bounds,
+            delta_xyz_scale=delta_xyz_scale,
             yaw_bounds=yaw_bounds,
             lift_height=lift_height,
             reach_thres=reach_thres,
@@ -75,21 +68,23 @@ class BaseSkill:
         raise NotImplementedError
 
     def get_aff_reward_and_success(self):
+        assert self._num_ac_calls is None or self._num_ac_calls == 0
         if self._config['aff_type'] is None:
             return 1.0, True
 
         aff_centers = self._get_aff_centers()
-        reach_pos = self._get_reach_pos()
 
         if aff_centers is None:
             return 1.0, True
 
-        if len(aff_centers):
+        reach_pos = self._get_reach_pos()
+
+        if not len(aff_centers):
             return 0.0, False
 
-        thres = self._config['aff_thers']
+        thres = self._config['aff_thres']
         within_thres = (np.abs(aff_centers - reach_pos) <= thres)
-        aff_success = np.any(np.all(within_thres, axis=1)) # close to one of the key points
+        aff_success = np.any(np.all(within_thres, axis=1))  # close to one of the key points
 
         if self._config['aff_type'] == 'dense':
             if aff_success:
@@ -103,7 +98,8 @@ class BaseSkill:
 
         return aff_reward, aff_success
 
-    def _reset(self, params):
+    def _reset(self, params, norm):
+        self._normalize_params = norm
         self._params = np.array(params).copy()
         self._num_ac_calls = 0
         self._state = None
@@ -185,8 +181,11 @@ class BaseSkill:
         self._update_state()
         self._num_ac_calls += 1
 
-    def forward(self, params):
-        self._reset(params)
+    def act(self, params, norm):
+        self._reset(params, norm)
+        aff_reward, aff_success = self.get_aff_reward_and_success()
+        if not aff_success:
+            return None
         image_obs = []
         reward_sum = 0
         while True:
@@ -202,19 +201,20 @@ class BaseSkill:
         if self._config['image_obs_in_info']:
             info['image_obs'] = image_obs
         self._update_info(info)
-        return obs, reward, done, info
+        return dict(obs=obs, info=info)
 
+    def check_interesting_interaction(self):
+        assert self.skill_done()
 
 class AtomicSkill(BaseSkill):
     def __init__(self,
-                 skill_type,
                  use_ori_params,
+                 max_ac_calls,
                  **config
                  ):
         super().__init__(
-            skill_type,
+            max_ac_calls=max_ac_calls,
             use_ori_params=use_ori_params,
-            max_ac_calls=1,
             **config
         )
 
@@ -260,19 +260,21 @@ class AtomicSkill(BaseSkill):
         else:
             return np.concatenate([pos, gripper_action])
 
+    def check_interesting_interaction(self):
+        super().check_interesting_interaction()
+        return True
+
 class GripperSkill(BaseSkill):
     def __init__(self,
+                 max_ac_calls,
                  skill_type,
-                 max_ac_calls=4,
-                 use_aff=True,
                  **config
                  ):
         super().__init__(
-            skill_type,
             max_ac_calls=max_ac_calls,
             **config
         )
-        self._use_aff = use_aff
+        self._skill_type = skill_type
 
     def get_param_dim(self):
         return 0
@@ -280,11 +282,16 @@ class GripperSkill(BaseSkill):
     def _update_state(self):
         self._state = None
 
-    def get_pos_ac(self):
+    def _get_pos_ac(self):
         return None
 
-    def get_ori_ac(self):
+    def _get_ori_ac(self):
         return None
+
+    def _get_reach_pos(self):
+        obs = get_obs(self._env)
+        eef_pos = get_eef_pos(obs)
+        return eef_pos
 
     def get_gripper_ac(self):
         if self._skill_type in ['close']:
@@ -313,19 +320,26 @@ class GripperSkill(BaseSkill):
             return np.concatenate([[0, 0, 0, 0, 0, 0], gripper_action])
         return np.concatenate([[0, 0, 0], gripper_action])
 
+    def check_interesting_interaction(self):
+        super().check_interesting_interaction()
+        for obj in self._env.grasp_objs:
+            obj_pos = self._env.sim.data.body_xpos[obj]
+            obs = get_obs(self._env)
+            eef_pos = get_eef_pos(obs)
+            if np.linalg.norm(obj_pos - eef_pos) < 0.005 and not self._env._check_grasp(gripper=self._env.robots[0].gripper, object_geoms=obj):
+                return True
+        return False
+
 class ReachSkill(BaseSkill):
 
     STATES = ['INIT', 'LIFTED', 'HOVERING', 'REACHED']
 
     def __init__(self,
-                 skill_type,
-                 use_gripper_params=False,
-                 use_ori_params=True,
-                 max_ac_calls=15,
-                 use_aff=True,
+                 max_ac_calls,
+                 use_gripper_params,
+                 use_ori_params,
                  **config):
         super().__init__(
-            skill_type,
             use_gripper_params=use_gripper_params,
             use_ori_params=use_ori_params,
             max_ac_calls=max_ac_calls,
@@ -341,9 +355,12 @@ class ReachSkill(BaseSkill):
         return param_dim
 
     def _get_reach_pos(self):
-        pos = self._get_unnormalized_params(
-            self._params[:3], self._config['global_xyz_bounds']
-        )
+        if self._normalize_params:
+            pos = self._get_unnormalized_params(
+                self._params[:3], self._config['global_xyz_bounds']
+            )
+        else:
+            pos = self._params[:3]
         return pos
 
     def _update_state(self):
@@ -351,7 +368,7 @@ class ReachSkill(BaseSkill):
         cur_pos = get_eef_pos(obs)
         goal_pos = self._get_reach_pos()
 
-        th = self._config['reach_threshold']
+        th = self._config['reach_thres']
         reached_lift = (cur_pos[2] >= self._config['lift_height'] - th)
         reached_xy = (np.linalg.norm(cur_pos[0:2] - goal_pos[0:2]) < th)
         reached_xyz = (np.linalg.norm(cur_pos - goal_pos) < th)
@@ -394,7 +411,10 @@ class ReachSkill(BaseSkill):
         if self._state == 'INIT':
             return None
         param_y = self._params[3:4].copy()
-        ori_y = self._get_unnormalized_params(param_y, self._config['yaw_bounds'])
+        if self._normalize_params:
+            ori_y = self._get_unnormalized_params(param_y, self._config['yaw_bounds'])
+        else:
+            ori_y = param_y
         return ori_y
 
     def _get_gripper_ac(self):
@@ -443,15 +463,13 @@ class GraspSkill(BaseSkill):
     STATES = ['INIT', 'LIFTED', 'HOVERING', 'REACHED', 'GRASPED']
 
     def __init__(self,
-                 skill_type,
-                 use_ori_params=True,
-                 max_ac_calls=20,
-                 max_reach_steps=15,
-                 max_grasp_steps=5,
+                 max_ac_calls,
+                 max_reach_steps,
+                 max_grasp_steps,
+                 use_ori_params,
                  **config
                  ):
         super().__init__(
-            skill_type,
             use_ori_params=use_ori_params,
             max_ac_calls=max_ac_calls,
             max_reach_steps=max_reach_steps,
@@ -467,15 +485,18 @@ class GraspSkill(BaseSkill):
         else:
             return 3
 
-    def _reset(self, params):
-        super()._reset(params)
+    def _reset(self, params, norm):
+        super()._reset(params, norm)
         self._num_reach_steps = 0
         self._num_grasp_steps = 0
 
     def _get_reach_pos(self):
-        pos = self._get_unnormalized_params(
-            self._params[:3], self._config['global_xyz_bounds']
-        )
+        if self._normalize_params:
+            pos = self._get_unnormalized_params(
+                self._params[:3], self._config['global_xyz_bounds']
+            )
+        else:
+            pos = self._params[:3]
         return pos
 
     def _update_state(self):
@@ -483,7 +504,7 @@ class GraspSkill(BaseSkill):
         cur_pos = get_eef_pos(obs)
         goal_pos = self._get_reach_pos()
 
-        th = self._config['reach_threshold']
+        th = self._config['reach_thres']
         reached_lift = (cur_pos[2] >= self._config['lift_height'] - th)
         reached_xy = (np.linalg.norm(cur_pos[0:2] - goal_pos[0:2]) < th)
         reached_xyz = (np.linalg.norm(cur_pos - goal_pos) < th)
@@ -505,7 +526,7 @@ class GraspSkill(BaseSkill):
 
         assert self._state in GraspSkill.STATES
 
-    def get_pos_ac(self):
+    def _get_pos_ac(self):
         obs = get_obs(self._env)
         cur_pos = get_eef_pos(obs)
         goal_pos = self._get_reach_pos()
@@ -533,7 +554,10 @@ class GraspSkill(BaseSkill):
         if self._state == 'INIT':
             return None
         param_y = self._params[3:4].copy()
-        ori_y = self._get_unnormalized_params(param_y, self._config['yaw_bounds'])
+        if self._normalize_params:
+            ori_y = self._get_unnormalized_params(param_y, self._config['yaw_bounds'])
+        else:
+            ori_y = param_y
         return ori_y
 
     def _get_gripper_ac(self):
@@ -544,7 +568,7 @@ class GraspSkill(BaseSkill):
         return gripper_action
 
     def is_success(self):
-        return self._num_grasp_steps >= self._config['num_grasp_steps']
+        return self._num_ac_calls == self._config['max_ac_calls']
 
     def _get_aff_centers(self):
         info = self._get_info()
@@ -576,6 +600,13 @@ class GraspSkill(BaseSkill):
         action = unscale_action(self._env, action)
         return action
 
+    def check_interesting_interaction(self):
+        super().check_interesting_interaction()
+        for obj in self._env.grasp_objs:
+            if self._env._check_grasp(gripper=self._env.robots[0].gripper, object_geoms=obj):
+                return True
+        return False
+
 class PushSkill(BaseSkill):
     """
     params: reach_pos (3) + reach ori (1) + push_delta_pos (3)
@@ -583,13 +614,11 @@ class PushSkill(BaseSkill):
     STATES = ['INIT', 'LIFTED', 'HOVERING', 'REACHED', 'PUSHED']
 
     def __init__(self,
-                 skill_type,
-                 max_ac_calls=20,
-                 use_ori_params=True,
+                 max_ac_calls,
+                 use_ori_params,
                  **config
                  ):
         super().__init__(
-            skill_type,
             max_ac_calls=max_ac_calls,
             use_ori_params=use_ori_params,
             **config
@@ -602,10 +631,18 @@ class PushSkill(BaseSkill):
         else:
             return 6
 
+    def _reset(self, params):
+        super()._reset(params)
+        self._initial_push_obj_pos = []
+        for obj in self._env.push_objs:
+            self._initial_push_obj_pos.append(self._env.sim.data.body_xpos[obj])
+
     def _get_reach_pos(self):
-        pos = self._get_unnormalized_params(
-            self._params[:3], self._config['global_xyz_bounds'])
-        pos = pos.copy()
+        if self._normalize_params:
+            pos = self._get_unnormalized_params(
+                self._params[:3], self._config['global_xyz_bounds'])
+        else:
+            pos = self._params[:3]
         return pos
 
     def _get_push_pos(self):
@@ -614,7 +651,8 @@ class PushSkill(BaseSkill):
 
         delta_pos = self._params[-3:].copy()
         delta_pos = np.clip(delta_pos, -1, 1)
-        delta_pos *= self._config['delta_xyz_scale']
+        if self._normalize_params:
+            delta_pos *= self._config['delta_xyz_scale']
         pos += delta_pos
 
         return pos
@@ -625,7 +663,7 @@ class PushSkill(BaseSkill):
         src_pos = self._get_reach_pos()
         target_pos = self._get_push_pos()
 
-        th = self._config['reach_threshold']
+        th = self._config['reach_thres']
         reached_lift = (cur_pos[2] >= self._config['lift_height'] - th)
         reached_src_xy = (np.linalg.norm(cur_pos[0:2] - src_pos[0:2]) < th)
         reached_src_xyz = (np.linalg.norm(cur_pos - src_pos) < th)
@@ -678,7 +716,10 @@ class PushSkill(BaseSkill):
         if self._state == 'INIT':
             return None
         param_y = self._params[3:4].copy()
-        ori_y = self._get_unnormalized_params(param_y, self._config['yaw_bounds'])
+        if self._normalize_params:
+            ori_y = self._get_unnormalized_params(param_y, self._config['yaw_bounds'])
+        else:
+            ori_y = param_y
         return ori_y
 
     def _get_gripper_ac(self):
@@ -718,4 +759,16 @@ class PushSkill(BaseSkill):
 
         action = unscale_action(self._env, action)
         return action
+
+    def check_interesting_interaction(self):
+        super().check_interesting_interaction()
+        for obj_id in range(len(self._env.push_objs)):
+            obj = self._env.push_objs[obj_id]
+            obj_pos = self._env.sim.data.body_xpos[obj]
+            initial_obj_pos = self._initial_push_obj_pos[obj]
+            obs = get_obs(self._env)
+            eef_pos = get_eef_pos(obs)
+            if np.linalg.norm(obj_pos - eef_pos) < 0.02 and np.linalg.norm(obj_pos - initial_obj_pos) > 0.02:
+                return True
+        return False
 

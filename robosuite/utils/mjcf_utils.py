@@ -123,6 +123,9 @@ TEXTURE_FILES = {
     "Glass": "glass.png",
     "FeltGray": "gray-felt.png",
     "Lemon": "lemon.png",
+
+    "Jello": "jello.png",
+    "Spam": "spam.png",
 }
 
 TEXTURES = {
