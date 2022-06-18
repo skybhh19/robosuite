@@ -329,7 +329,7 @@ class CleanUp(SingleArmEnv):
                 color = 0.25 + 0.75 * i / (num_push_objs - 1)
             else:
                 color = 1.0
-            push_size = np.array([0.0350, 0.0425, 0.02]) * 1.25
+            push_size = np.array([0.0350, 0.0425, 0.025]) * 1.20
             obj = BoxObject(
                 name="obj_push_{}".format(i),
                 size_min=push_size,
@@ -338,6 +338,8 @@ class CleanUp(SingleArmEnv):
                 material=pushmaterial,
             )
             self.push_objs.append(obj)
+
+        self.grasp_objs = self.pnp_objs
 
         mujoco_objects = self.pnp_objs + self.push_objs
 
