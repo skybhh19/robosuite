@@ -385,6 +385,7 @@ class CleanUp(SingleArmEnv):
             obj = self.pnp_objs[i]
             id = self.sim.model.body_name2id(obj.root_body)
             self.pnp_obj_body_ids.append(id)
+        self.grasp_obj_body_ids = self.pnp_obj_body_ids
 
         self.push_obj_body_ids = []
         for i in range(self.task_config['num_push_objs']):

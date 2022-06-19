@@ -8,6 +8,7 @@ class BaseSkill:
                  env,
                  image_obs_in_info,
                  aff_type,
+                 render,
                  global_xyz_bounds,
                  delta_xyz_scale,
                  yaw_bounds,
@@ -40,6 +41,7 @@ class BaseSkill:
             binary_gripper=binary_gripper,
             aff_tanh_scaling=aff_tanh_scaling,
             image_obs_in_info=image_obs_in_info,
+            render=render,
             **config,
         )
 
@@ -69,6 +71,7 @@ class BaseSkill:
 
     def get_aff_reward_and_success(self):
         assert self._num_ac_calls is None or self._num_ac_calls == 0
+
         if self._config['aff_type'] is None:
             return 1.0, True
 
@@ -99,8 +102,8 @@ class BaseSkill:
         return aff_reward, aff_success
 
     def _reset(self, params, norm):
-        self._normalize_params = norm
         self._params = np.array(params).copy()
+        self._normalize_params = norm
         self._num_ac_calls = 0
         self._state = None
 
@@ -164,7 +167,10 @@ class BaseSkill:
         obs = get_obs(self._env)
         cur_quat = get_eef_quat(obs)
         cur_y = T.mat2euler(T.quat2mat(cur_quat), axes='rxyz')
-        target_y = self._get_ori_ac().copy()
+        target_y = self._get_ori_ac()
+        if target_y is None:
+            return True
+        target_y = target_y.copy()
         ee_yaw_diff = np.minimum(
             (cur_y - target_y) % (2 * np.pi),
             (target_y - cur_y) % (2 * np.pi)
@@ -191,6 +197,8 @@ class BaseSkill:
         while True:
             action = self._get_action()
             obs, reward, done, info = self._env.step(action)
+            if self._config['render']:
+                self._env.render()
             reward_sum += reward
             if self._config['image_obs_in_info']:
                 image_obs.append(obs['agentview_image'])
@@ -205,6 +213,7 @@ class BaseSkill:
 
     def check_interesting_interaction(self):
         assert self.skill_done()
+        return True
 
 class AtomicSkill(BaseSkill):
     def __init__(self,
@@ -223,6 +232,9 @@ class AtomicSkill(BaseSkill):
             return 5
         else:
             return 4
+
+    def _update_state(self):
+        self._state = None
 
     def _get_pos_ac(self):
         self._check_params_dim()
@@ -272,6 +284,7 @@ class GripperSkill(BaseSkill):
                  ):
         super().__init__(
             max_ac_calls=max_ac_calls,
+            _use_ori_params=False,
             **config
         )
         self._skill_type = skill_type
@@ -293,7 +306,7 @@ class GripperSkill(BaseSkill):
         eef_pos = get_eef_pos(obs)
         return eef_pos
 
-    def get_gripper_ac(self):
+    def _get_gripper_ac(self):
         if self._skill_type in ['close']:
             gripper_action = np.array([1, ])
         elif self._skill_type in ['open']:
@@ -322,11 +335,12 @@ class GripperSkill(BaseSkill):
 
     def check_interesting_interaction(self):
         super().check_interesting_interaction()
-        for obj in self._env.grasp_objs:
-            obj_pos = self._env.sim.data.body_xpos[obj]
+        for obj_id in range(len(self._env.grasp_objs)):
+            obj = self._env.grasp_objs[obj_id]
+            obj_pos = self._env.sim.data.body_xpos[self._env.grasp_obj_body_ids[obj_id]]
             obs = get_obs(self._env)
             eef_pos = get_eef_pos(obs)
-            if np.linalg.norm(obj_pos - eef_pos) < 0.005 and not self._env._check_grasp(gripper=self._env.robots[0].gripper, object_geoms=obj):
+            if np.linalg.norm(obj_pos - eef_pos) < 0.1 and not self._env._check_grasp(gripper=self._env.robots[0].gripper, object_geoms=obj):
                 return True
         return False
 
@@ -511,7 +525,7 @@ class GraspSkill(BaseSkill):
         reached_ori_y = self._reached_goal_ori_y()
 
         if self._state == 'GRASPED' or \
-                (self._state == 'REACHED' and (self._num_reach_steps >= self._config['num_reach_steps'])):
+                (self._state == 'REACHED'):
             self._state = 'GRASPED'
             self._num_grasp_steps += 1
         elif self._state == 'REACHED' or (reached_xyz and reached_ori_y):
@@ -548,7 +562,7 @@ class GraspSkill(BaseSkill):
 
         return pos
 
-    def get_ori_ac(self):
+    def _get_ori_ac(self):
         self._check_params_dim()
         assert self._config['use_ori_params']
         if self._state == 'INIT':
@@ -568,7 +582,7 @@ class GraspSkill(BaseSkill):
         return gripper_action
 
     def is_success(self):
-        return self._num_ac_calls == self._config['max_ac_calls']
+        return self._num_grasp_steps == self._config['max_grasp_steps']
 
     def _get_aff_centers(self):
         info = self._get_info()
@@ -631,11 +645,11 @@ class PushSkill(BaseSkill):
         else:
             return 6
 
-    def _reset(self, params):
-        super()._reset(params)
+    def _reset(self, params, norm):
+        super()._reset(params, norm)
         self._initial_push_obj_pos = []
-        for obj in self._env.push_objs:
-            self._initial_push_obj_pos.append(self._env.sim.data.body_xpos[obj])
+        for obj_id in range(len(self._env.push_objs)):
+            self._initial_push_obj_pos.append(self._env.sim.data.body_xpos[obj_id])
 
     def _get_reach_pos(self):
         if self._normalize_params:
@@ -763,12 +777,11 @@ class PushSkill(BaseSkill):
     def check_interesting_interaction(self):
         super().check_interesting_interaction()
         for obj_id in range(len(self._env.push_objs)):
-            obj = self._env.push_objs[obj_id]
-            obj_pos = self._env.sim.data.body_xpos[obj]
-            initial_obj_pos = self._initial_push_obj_pos[obj]
+            obj_pos = self._env.sim.data.body_xpos[self._env.push_obj_body_ids[obj_id]]
+            initial_obj_pos = self._initial_push_obj_pos[obj_id]
             obs = get_obs(self._env)
             eef_pos = get_eef_pos(obs)
-            if np.linalg.norm(obj_pos - eef_pos) < 0.02 and np.linalg.norm(obj_pos - initial_obj_pos) > 0.02:
+            if np.linalg.norm(obj_pos - eef_pos) < 0.1 and np.linalg.norm(obj_pos - initial_obj_pos) > 0.03:
                 return True
         return False
 

@@ -16,7 +16,8 @@ class SkillController:
                  env,
                  controller_type,
                  image_obs_in_info=False,
-                 aff_type='sparse'):
+                 aff_type='sparse',
+                 render=False):
 
         self._env = env
         if controller_type == 'OSC_POSE':
@@ -30,6 +31,7 @@ class SkillController:
             env=self._env,
             aff_type=aff_type,
             image_obs_in_info=image_obs_in_info,
+            render=render,
             use_ori_params=_use_ori_params,
             global_xyz_bounds=np.array([
                 [-0.30, -0.30, 0.80],
@@ -41,7 +43,7 @@ class SkillController:
                 [np.pi / 2]
             ]),
             lift_height=0.95,
-            reach_thres=0.02,
+            reach_thres=0.01,
             aff_thres=0.08,
             yaw_thres=0.20,
             aff_tanh_scaling=10.0,
@@ -60,20 +62,20 @@ class SkillController:
         )
 
         self.reach = ReachSkill(
-            max_ac_calls=15,
+            max_ac_calls=25,
             use_gripper_params=True,
             **base_config
         )
 
         self.grasp = GraspSkill(
-            max_ac_calls=20,
-            max_reach_steps=15,
+            max_ac_calls=30,
+            max_reach_steps=25,
             max_grasp_steps=5,
             **base_config
         )
 
         self.push = PushSkill(
-            max_ac_calls=20,
+            max_ac_calls=50,
             **base_config
         )
 
