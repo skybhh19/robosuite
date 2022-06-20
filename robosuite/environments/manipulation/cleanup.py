@@ -312,7 +312,7 @@ class CleanUp(SingleArmEnv):
                 color = 0.25 + 0.75 * i / (num_pnp_objs - 1)
             else:
                 color = 1.0
-            pnp_size = np.array([0.04, 0.022, 0.033]) * 0.75
+            pnp_size = np.array([0.04, 0.022, 0.033]) * 0.7
             obj = BoxObject(
                 name="obj_pnp_{}".format(i),
                 size_min=pnp_size,
@@ -329,7 +329,7 @@ class CleanUp(SingleArmEnv):
                 color = 0.25 + 0.75 * i / (num_push_objs - 1)
             else:
                 color = 1.0
-            push_size = np.array([0.0350, 0.0425, 0.025]) * 1.20
+            push_size = np.array([0.0350, 0.0425, 0.025]) * 1.25
             obj = BoxObject(
                 name="obj_push_{}".format(i),
                 size_min=push_size,

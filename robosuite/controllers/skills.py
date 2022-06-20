@@ -69,7 +69,8 @@ class BaseSkill:
     def _get_reach_pos(self):
         raise NotImplementedError
 
-    def get_aff_reward_and_success(self):
+    def get_aff_reward_and_success(self, params, norm):
+        self._reset(params, norm)
         assert self._num_ac_calls is None or self._num_ac_calls == 0
 
         if self._config['aff_type'] is None:
@@ -140,17 +141,6 @@ class BaseSkill:
         low, high = bounds[0], bounds[1]
         return low + (high - low) * params
 
-    def _get_env_skill_info(self):
-        info = self._env._get_skill_info()
-        robot = self._env.robots[0]
-        info['cur_ee_pos'] = np.array(robot.sim.data.site_xpos[robot.eef_site_id])
-
-        # double check
-        obs = get_obs(self._env)
-        assert np.linalg.norm(info['cur_ee_pos'] - get_eef_pos(obs)) < 1e-4
-
-        return info
-
     def is_success(self):
         raise NotImplementedError
 
@@ -160,13 +150,14 @@ class BaseSkill:
     def _update_info(self, info):
         info['num_ac_calls'] = self._num_ac_calls
         info['skill_success'] = self.is_success()
+        info['env_success'] = self._env._check_success()
 
     def _reached_goal_ori_y(self):
         if not self._config['use_ori_params']:
             return True
         obs = get_obs(self._env)
         cur_quat = get_eef_quat(obs)
-        cur_y = T.mat2euler(T.quat2mat(cur_quat), axes='rxyz')
+        cur_y = T.mat2euler(T.quat2mat(cur_quat), axes='rxyz')[-1:]
         target_y = self._get_ori_ac()
         if target_y is None:
             return True
@@ -179,8 +170,6 @@ class BaseSkill:
 
     def _get_info(self):
         info = self._env._get_skill_info()
-        robot = self._env.robots[0]
-        info['cur_ee_pos'] = np.array(robot.sim.data.site_xpos[robot.eef_site_id])
         return info
 
     def _get_action(self):
@@ -189,14 +178,12 @@ class BaseSkill:
 
     def act(self, params, norm):
         self._reset(params, norm)
-        aff_reward, aff_success = self.get_aff_reward_and_success()
-        if not aff_success:
-            return None
         image_obs = []
         reward_sum = 0
         while True:
             action = self._get_action()
             obs, reward, done, info = self._env.step(action)
+            info['last_gripper_ac'] = action[-1:]
             if self._config['render']:
                 self._env.render()
             reward_sum += reward
@@ -317,7 +304,7 @@ class GripperSkill(BaseSkill):
         return gripper_action
 
     def is_success(self):
-        return self._num_ac_calls == self._config['max_ac_calls']
+        return self._num_ac_calls >= self._config['max_ac_calls']
 
     def _get_aff_centers(self):
         info = self._get_info()
@@ -582,7 +569,7 @@ class GraspSkill(BaseSkill):
         return gripper_action
 
     def is_success(self):
-        return self._num_grasp_steps == self._config['max_grasp_steps']
+        return self._num_grasp_steps >= self._config['max_grasp_steps']
 
     def _get_aff_centers(self):
         info = self._get_info()

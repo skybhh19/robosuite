@@ -56,26 +56,26 @@ class SkillController:
         )
 
         self.gripper_release = GripperSkill(
-            max_ac_calls=4,
+            max_ac_calls=10,
             skill_type='open',
             **base_config
         )
 
         self.reach = ReachSkill(
-            max_ac_calls=25,
+            max_ac_calls=30,
             use_gripper_params=True,
             **base_config
         )
 
         self.grasp = GraspSkill(
-            max_ac_calls=30,
-            max_reach_steps=25,
-            max_grasp_steps=5,
+            max_ac_calls=40,
+            max_reach_steps=30,
+            max_grasp_steps=10,
             **base_config
         )
 
         self.push = PushSkill(
-            max_ac_calls=50,
+            max_ac_calls=60,
             **base_config
         )
 
