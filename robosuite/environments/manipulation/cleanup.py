@@ -354,7 +354,7 @@ class CleanUp(SingleArmEnv):
             UniformRandomSampler(
             name="ObjectSampler",
             mujoco_objects=mujoco_objects,
-            x_range=[0.04, 0.16],
+            x_range=[0.04, 0.12],
             y_range=[-0.16, 0.16],
             rotation=None,
             ensure_object_boundary_in_range=False,

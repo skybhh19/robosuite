@@ -54,6 +54,12 @@ class BaseSkill:
     def get_param_dim(self):
         raise NotImplementedError
 
+    def get_param_spec(self):
+        param_dim = self.get_param_dim()
+        low = np.ones(param_dim) * -1.
+        high = np.ones(param_dim) * 1.
+        return low, high
+
     def _check_params_dim(self):
         if self._params is None:
             assert self.get_param_dim() == 0
@@ -180,9 +186,15 @@ class BaseSkill:
         self._reset(params, norm)
         image_obs = []
         reward_sum = 0
+        obs_list = []
+        action_list = []
+        obs = get_obs(self._env)
+        obs_list.append(obs)
         while True:
             action = self._get_action()
+            action_list.append(action)
             obs, reward, done, info = self._env.step(action)
+            obs_list.append(obs)
             info['last_gripper_ac'] = action[-1:]
             if self._config['render']:
                 self._env.render()
@@ -195,6 +207,8 @@ class BaseSkill:
 
         if self._config['image_obs_in_info']:
             info['image_obs'] = image_obs
+        info['obs_list'] = obs_list
+        info['action_list'] = action_list
         self._update_info(info)
         return dict(obs=obs, info=info)
 

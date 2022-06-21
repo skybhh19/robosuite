@@ -1,6 +1,7 @@
 import collections
 import copy
 import numpy as np
+from collections import OrderedDict
 
 from robosuite.controllers.skills import (
     AtomicSkill,
@@ -34,10 +35,10 @@ class SkillController:
             render=render,
             use_ori_params=_use_ori_params,
             global_xyz_bounds=np.array([
-                [-0.30, -0.30, 0.80],
-                [0.15, 0.30, 0.90]
+                [-0.25, -0.25, 0.80],
+                [0.15, 0.25, 0.90]
             ]),
-            delta_xyz_scale=np.array([0.15, 0.15, 0.05]),
+            delta_xyz_scale=np.array([0.2, 0.2, 0.05]),
             yaw_bounds=np.array([
                 [-np.pi / 2],
                 [np.pi / 2]
@@ -79,13 +80,16 @@ class SkillController:
             **base_config
         )
 
-        self.name_to_skill = dict(
+        self.name_to_skill = OrderedDict(
             atomic=self.atomic,
             gripper_release=self.gripper_release,
             reach=self.reach,
             grasp=self.grasp,
             push=self.push
         )
+
+    def get_skill(self, p_name):
+        return self.name_to_skill[p_name]
 
     def execute(self, p_name, output, norm, **kwargs):
         # len(args) = maximal argument length
