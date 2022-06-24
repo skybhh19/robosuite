@@ -36,15 +36,17 @@ class SkillController:
             use_ori_params=_use_ori_params,
             global_xyz_bounds=np.array([
                 [-0.25, -0.25, 0.80],
-                [0.15, 0.25, 0.90]
+                [0.13, 0.25, 0.90]
             ]),
-            delta_xyz_scale=np.array([0.2, 0.2, 0.05]),
+            delta_xyz_scale=np.array([0.2, 0.2, 0.02]),
             yaw_bounds=np.array([
                 [-np.pi / 2],
                 [np.pi / 2]
             ]),
             lift_height=0.95,
+            lift_thres=0.02,
             reach_thres=0.01,
+            push_thres=0.015,
             aff_thres=0.08,
             yaw_thres=0.20,
             aff_tanh_scaling=10.0,
@@ -63,20 +65,20 @@ class SkillController:
         )
 
         self.reach = ReachSkill(
-            max_ac_calls=30,
+            max_ac_calls=70,
             use_gripper_params=True,
             **base_config
         )
 
         self.grasp = GraspSkill(
-            max_ac_calls=40,
-            max_reach_steps=30,
+            max_ac_calls=80,
+            max_reach_steps=70,
             max_grasp_steps=10,
             **base_config
         )
 
         self.push = PushSkill(
-            max_ac_calls=60,
+            max_ac_calls=100,
             **base_config
         )
 

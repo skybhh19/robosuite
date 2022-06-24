@@ -354,7 +354,7 @@ class CleanUp(SingleArmEnv):
             UniformRandomSampler(
             name="ObjectSampler",
             mujoco_objects=mujoco_objects,
-            x_range=[0.04, 0.12],
+            x_range=[0.0, 0.08],
             y_range=[-0.16, 0.16],
             rotation=None,
             ensure_object_boundary_in_range=False,
@@ -500,7 +500,7 @@ class CleanUp(SingleArmEnv):
             obj_pos = self.sim.data.body_xpos[self.push_obj_body_ids[i]]
             target_pos_xy = self.table_offset[:2] + np.array([-0.15, 0.15])
             d_push = np.linalg.norm(obj_pos[:2] - target_pos_xy)
-            if d_push > 0.10:
+            if d_push > 0.09:
                 return False
         return True
 

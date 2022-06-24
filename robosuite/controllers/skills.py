@@ -13,7 +13,9 @@ class BaseSkill:
                  delta_xyz_scale,
                  yaw_bounds,
                  lift_height,
+                 lift_thres,
                  reach_thres,
+                 push_thres,
                  aff_thres,
                  yaw_thres,
                  aff_tanh_scaling,
@@ -34,7 +36,9 @@ class BaseSkill:
             delta_xyz_scale=delta_xyz_scale,
             yaw_bounds=yaw_bounds,
             lift_height=lift_height,
+            lift_thres=lift_thres,
             reach_thres=reach_thres,
+            push_thres=push_thres,
             yaw_thres=yaw_thres,
             aff_thres=aff_thres,
             aff_type=aff_type,
@@ -146,6 +150,13 @@ class BaseSkill:
         params = (params + 1) / 2
         low, high = bounds[0], bounds[1]
         return low + (high - low) * params
+
+    def _get_normalized_params(self, params, bounds):
+        low, high = bounds[0], bounds[1]
+        params = (params - low) / (high - low)
+        params = params * 2 - 1
+        params = np.clip(params, -1, 1)
+        return params
 
     def is_success(self):
         raise NotImplementedError
@@ -336,14 +347,15 @@ class GripperSkill(BaseSkill):
 
     def check_interesting_interaction(self):
         super().check_interesting_interaction()
-        for obj_id in range(len(self._env.grasp_objs)):
-            obj = self._env.grasp_objs[obj_id]
-            obj_pos = self._env.sim.data.body_xpos[self._env.grasp_obj_body_ids[obj_id]]
-            obs = get_obs(self._env)
-            eef_pos = get_eef_pos(obs)
-            if np.linalg.norm(obj_pos - eef_pos) < 0.1 and not self._env._check_grasp(gripper=self._env.robots[0].gripper, object_geoms=obj):
-                return True
-        return False
+        return True
+        # for obj_id in range(len(self._env.grasp_objs)):
+        #     obj = self._env.grasp_objs[obj_id]
+        #     obj_pos = self._env.sim.data.body_xpos[self._env.grasp_obj_body_ids[obj_id]]
+        #     obs = get_obs(self._env)
+        #     eef_pos = get_eef_pos(obs)
+        #     if np.linalg.norm(obj_pos - eef_pos) < 0.1 and not self._env._check_grasp(gripper=self._env.robots[0].gripper, object_geoms=obj):
+        #         return True
+        # return False
 
 class ReachSkill(BaseSkill):
 
@@ -384,8 +396,9 @@ class ReachSkill(BaseSkill):
         goal_pos = self._get_reach_pos()
 
         th = self._config['reach_thres']
-        reached_lift = (cur_pos[2] >= self._config['lift_height'] - th)
-        reached_xy = (np.linalg.norm(cur_pos[0:2] - goal_pos[0:2]) < th)
+        lift_th = self._config['lift_thres']
+        reached_lift = (cur_pos[2] >= self._config['lift_height'] - lift_th)
+        reached_xy = (np.linalg.norm(cur_pos[0:2] - goal_pos[0:2]) < lift_th)
         reached_xyz = (np.linalg.norm(cur_pos - goal_pos) < th)
         reached_ori_y = self._reached_goal_ori_y()
 
@@ -423,8 +436,8 @@ class ReachSkill(BaseSkill):
     def _get_ori_ac(self):
         self._check_params_dim()
         assert self._config['use_ori_params']
-        if self._state == 'INIT':
-            return None
+        # if self._state == 'INIT':
+        #     return None
         param_y = self._params[3:4].copy()
         if self._normalize_params:
             ori_y = self._get_unnormalized_params(param_y, self._config['yaw_bounds'])
@@ -520,8 +533,9 @@ class GraspSkill(BaseSkill):
         goal_pos = self._get_reach_pos()
 
         th = self._config['reach_thres']
-        reached_lift = (cur_pos[2] >= self._config['lift_height'] - th)
-        reached_xy = (np.linalg.norm(cur_pos[0:2] - goal_pos[0:2]) < th)
+        lift_th = self._config['lift_thres']
+        reached_lift = (cur_pos[2] >= self._config['lift_height'] - lift_th)
+        reached_xy = (np.linalg.norm(cur_pos[0:2] - goal_pos[0:2]) < lift_th)
         reached_xyz = (np.linalg.norm(cur_pos - goal_pos) < th)
         reached_ori_y = self._reached_goal_ori_y()
 
@@ -566,8 +580,8 @@ class GraspSkill(BaseSkill):
     def _get_ori_ac(self):
         self._check_params_dim()
         assert self._config['use_ori_params']
-        if self._state == 'INIT':
-            return None
+        # if self._state == 'INIT':
+        #     return None
         param_y = self._params[3:4].copy()
         if self._normalize_params:
             ori_y = self._get_unnormalized_params(param_y, self._config['yaw_bounds'])
@@ -678,11 +692,13 @@ class PushSkill(BaseSkill):
         src_pos = self._get_reach_pos()
         target_pos = self._get_push_pos()
 
-        th = self._config['reach_thres']
-        reached_lift = (cur_pos[2] >= self._config['lift_height'] - th)
-        reached_src_xy = (np.linalg.norm(cur_pos[0:2] - src_pos[0:2]) < th)
-        reached_src_xyz = (np.linalg.norm(cur_pos - src_pos) < th)
-        reached_target_xyz = (np.linalg.norm(cur_pos - target_pos) < th)
+        reach_th = self._config['reach_thres']
+        lift_th = self._config['lift_thres']
+        push_th = self._config['push_thres']
+        reached_lift = (cur_pos[2] >= self._config['lift_height'] - lift_th)
+        reached_src_xy = (np.linalg.norm(cur_pos[0:2] - src_pos[0:2]) < lift_th)
+        reached_src_xyz = (np.linalg.norm(cur_pos - src_pos) < reach_th)
+        reached_target_xyz = (np.linalg.norm(cur_pos - target_pos) < push_th)
         reached_ori_y = self._reached_goal_ori_y()
 
         if self._state == 'REACHED' and reached_target_xyz:
@@ -728,8 +744,8 @@ class PushSkill(BaseSkill):
     def _get_ori_ac(self):
         self._check_params_dim()
         assert self._config['use_ori_params']
-        if self._state == 'INIT':
-            return None
+        # if self._state == 'INIT':
+        #     return None
         param_y = self._params[3:4].copy()
         if self._normalize_params:
             ori_y = self._get_unnormalized_params(param_y, self._config['yaw_bounds'])
@@ -739,7 +755,7 @@ class PushSkill(BaseSkill):
 
     def _get_gripper_ac(self):
         self._check_params_dim()
-        gripper_action = np.array([0, ])
+        gripper_action = np.array([-1, ])
         return gripper_action
 
     def is_success(self):
@@ -753,11 +769,17 @@ class PushSkill(BaseSkill):
         return np.array(aff_centers, copy=True)
 
     def _get_action(self):
+        # print(self._state)
         super()._get_action()
         obs = get_obs(self._env)
         cur_pos = get_eef_pos(obs)
         pos = self._get_pos_ac()
-        pos_action = pos - cur_pos
+        if self._state == 'REACHED':
+            pos_action = (pos - cur_pos) * 1.5
+        else:
+            pos_action = pos - cur_pos
+        # print("action target pos", pos)
+        # print("cur pos", cur_pos)
         gripper_action = self._get_gripper_ac()
         if self._config['use_ori_params']:
             target_y = self._get_ori_ac()
@@ -771,7 +793,6 @@ class PushSkill(BaseSkill):
             action = np.concatenate([pos_action, ori_action, gripper_action])
         else:
             action = np.concatenate([pos_action, gripper_action])
-
         action = unscale_action(self._env, action)
         return action
 
