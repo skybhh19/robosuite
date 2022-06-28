@@ -19,6 +19,8 @@ PRIMITIVE_TO_ID = {
     'atomic': 4
 }
 
+DELTA_XYZ_SCALE = np.array([0.2, 0.2, 0.02])
+
 ID_TO_PRIMITIVE = ['reach', 'gripper_release', 'grasp', 'push', 'atomic']
 
 class SkillController:
@@ -28,7 +30,8 @@ class SkillController:
                  controller_type,
                  image_obs_in_info=False,
                  aff_type='sparse',
-                 render=False):
+                 render=False,
+                 reach_use_gripper=True):
 
         self._env = env
         if controller_type == 'OSC_POSE':
@@ -37,7 +40,6 @@ class SkillController:
             _use_ori_params = False
         else:
             raise NotImplementedError
-
         base_config = dict(
             env=self._env,
             aff_type=aff_type,
@@ -48,7 +50,7 @@ class SkillController:
                 [-0.25, -0.25, 0.80],
                 [0.11, 0.25, 0.90]
             ]),
-            delta_xyz_scale=np.array([0.2, 0.2, 0.02]),
+            delta_xyz_scale=DELTA_XYZ_SCALE,
             yaw_bounds=np.array([
                 [-np.pi / 2],
                 [np.pi / 2]
@@ -76,7 +78,7 @@ class SkillController:
 
         self.reach = ReachSkill(
             max_ac_calls=70,
-            use_gripper_params=True,
+            use_gripper_params=reach_use_gripper,
             **base_config
         )
 
