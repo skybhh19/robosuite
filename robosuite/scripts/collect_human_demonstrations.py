@@ -55,8 +55,9 @@ def collect_human_trajectory(env, device, arm, env_configuration, only_yaw):
     # Loop until we get a reset from the input or the task completes
     max_orn = [-100] * 3
     min_orn = [100] * 3
-    success = False
+    step_cnt = 0
     while True:
+        time.sleep(0.01)
         # Set active robot
         active_robot = env.robots[0] if env_configuration == "bimanual" else env.robots[arm == "left"]
 
@@ -88,7 +89,7 @@ def collect_human_trajectory(env, device, arm, env_configuration, only_yaw):
 
         # Run environment step
         obs, _, _, _ = env.step(action)
-        # print(action[5])
+        step_cnt += 1
         euler_orn = T.mat2euler(T.quat2mat(obs['robot0_eef_quat']))
         # for i in range(3):
         #     if euler_orn[i] > np.pi:
@@ -111,7 +112,6 @@ def collect_human_trajectory(env, device, arm, env_configuration, only_yaw):
 
         # state machine to check for having a success for 20 consecutive timesteps
         if env._check_success():
-            success = True
             if task_completion_hold_count > 0:
                 task_completion_hold_count -= 1  # latched state, decrement count
             else:
@@ -119,12 +119,12 @@ def collect_human_trajectory(env, device, arm, env_configuration, only_yaw):
         else:
             task_completion_hold_count = -1  # null the counter if there's no success
 
+    print("traj len", step_cnt)
     # cleanup for end of data collection episodes
     env.close()
-    return success
 
 
-def gather_demonstrations_as_hdf5(directory, out_dir, env_info, save_inds):
+def gather_demonstrations_as_hdf5(directory, out_dir, env_info):
     """
     Gathers the demonstrations saved in @directory into a
     single hdf5 file.
@@ -301,9 +301,6 @@ if __name__ == "__main__":
     os.makedirs(new_dir)
 
     # collect demonstrations
-    save_inds = []
     while True:
-        success = collect_human_trajectory(env, device, args.arm, args.config, args.only_yaw)
-        # save = (not args.only_success) or success
-        # save_inds.append(save)
-        gather_demonstrations_as_hdf5(tmp_directory, new_dir, env_info, save_inds=save_inds)
+        collect_human_trajectory(env, device, args.arm, args.config, args.only_yaw)
+        gather_demonstrations_as_hdf5(tmp_directory, new_dir, env_info)

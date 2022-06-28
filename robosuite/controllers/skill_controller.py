@@ -11,6 +11,16 @@ from robosuite.controllers.skills import (
     GripperSkill,
 )
 
+PRIMITIVE_TO_ID = {
+    'reach': 0,
+    'gripper_release': 1,
+    'grasp': 2,
+    'push': 3,
+    'atomic': 4
+}
+
+ID_TO_PRIMITIVE = ['reach', 'gripper_release', 'grasp', 'push', 'atomic']
+
 class SkillController:
 
     def __init__(self,
@@ -36,7 +46,7 @@ class SkillController:
             use_ori_params=_use_ori_params,
             global_xyz_bounds=np.array([
                 [-0.25, -0.25, 0.80],
-                [0.13, 0.25, 0.90]
+                [0.11, 0.25, 0.90]
             ]),
             delta_xyz_scale=np.array([0.2, 0.2, 0.02]),
             yaw_bounds=np.array([
