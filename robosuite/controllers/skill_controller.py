@@ -105,6 +105,9 @@ class SkillController:
     def get_skill(self, p_name):
         return self.name_to_skill[p_name]
 
+    def test_start_state(self, p_name):
+        return self.name_to_skill[p_name]._test_start_state()
+
     def execute(self, p_name, output, norm, **kwargs):
         # len(args) = maximal argument length
         skill = self.name_to_skill[p_name]
