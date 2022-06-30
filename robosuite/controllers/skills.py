@@ -240,24 +240,25 @@ class AtomicSkill(BaseSkill):
         )
 
     def get_param_dim(self):
-        if self._config['use_ori_params']:
-            return 5
-        else:
-            return 4
+        return 7
+        # if self._config['use_ori_params']:
+        #     return 5
+        # else:
+        #     return 4
 
     def _update_state(self):
         self._state = None
 
-    def _get_pos_ac(self):
-        self._check_params_dim()
-        pos = self._params[:3].copy()
-        return pos
-
-    def _get_ori_ac(self):
-        self._check_params_dim()
-        assert self._config['use_ori_params']
-        ori_y = self._params[3:4].copy()
-        return ori_y
+    # def _get_pos_ac(self):
+    #     self._check_params_dim()
+    #     pos = self._params[:3].copy()
+    #     return pos
+    #
+    # def _get_ori_ac(self):
+    #     self._check_params_dim()
+    #     assert self._config['use_ori_params']
+    #     ori_y = self._params[3:4].copy()
+    #     return ori_y
 
     def _get_gripper_ac(self):
         self._check_params_dim()
@@ -266,7 +267,7 @@ class AtomicSkill(BaseSkill):
             gripper_action = self._get_binary_gripper_ac(gripper_action)
         return gripper_action
 
-    def get_aff_reward_and_success(self):
+    def get_aff_reward_and_success(self, params, norm):
         reward, success = 1.0, True
         return reward, success
 
@@ -274,18 +275,23 @@ class AtomicSkill(BaseSkill):
         return True
 
     def _get_action(self):
+        self._check_params_dim()
         super()._get_action()
-        pos = self._get_pos_ac()
+        # pos = self._get_pos_ac()
         gripper_action = self._get_gripper_ac()
-        if self._config['use_ori_params']:
-            ori_rp = np.array([0, 0])
-            ori_y = self._get_ori_ac()
-            return np.concatenate([pos, ori_rp, ori_y, gripper_action])
-        else:
-            return np.concatenate([pos, gripper_action])
+        # if self._config['use_ori_params']:
+        #     ori_rp = np.array([0, 0])
+        #     ori_y = self._get_ori_ac()
+        #     return np.concatenate([pos, ori_rp, ori_y, gripper_action])
+        # else:
+        #     return np.concatenate([pos, gripper_action])
+        return np.concatenate([self._params[:-1], gripper_action])
 
     def check_interesting_interaction(self):
         super().check_interesting_interaction()
+        return True
+
+    def _test_start_state(self):
         return True
 
 class GripperSkill(BaseSkill):
@@ -356,6 +362,9 @@ class GripperSkill(BaseSkill):
         #     if np.linalg.norm(obj_pos - eef_pos) < 0.1 and not self._env._check_grasp(gripper=self._env.robots[0].gripper, object_geoms=obj):
         #         return True
         # return False
+
+    def _test_start_state(self):
+        return True
 
 class ReachSkill(BaseSkill):
 
@@ -486,6 +495,9 @@ class ReachSkill(BaseSkill):
 
         action = unscale_action(self._env, action)
         return action
+
+    def _test_start_state(self):
+        return True
 
 class GraspSkill(BaseSkill):
     STATES = ['INIT', 'LIFTED', 'HOVERING', 'REACHED', 'GRASPED']
@@ -635,6 +647,12 @@ class GraspSkill(BaseSkill):
             if self._env._check_grasp(gripper=self._env.robots[0].gripper, object_geoms=obj):
                 return True
         return False
+
+    def _test_start_state(self):
+        for obj in self._env.grasp_objs:
+            if self._env._check_grasp(gripper=self._env.robots[0].gripper, object_geoms=obj):
+                return False
+        return True
 
 class PushSkill(BaseSkill):
     """
@@ -806,4 +824,10 @@ class PushSkill(BaseSkill):
             if np.linalg.norm(obj_pos - eef_pos) < 0.1 and np.linalg.norm(obj_pos - initial_obj_pos) > 0.03:
                 return True
         return False
+
+    def _test_start_state(self):
+        for obj in self._env.grasp_objs:
+            if self._env._check_grasp(gripper=self._env.robots[0].gripper, object_geoms=obj):
+                return False
+        return True
 
