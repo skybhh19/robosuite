@@ -90,7 +90,7 @@ class SkillController:
         )
 
         self.push = PushSkill(
-            max_ac_calls=100,
+            max_ac_calls=120,
             **base_config
         )
 
