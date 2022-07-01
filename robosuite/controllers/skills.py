@@ -397,6 +397,8 @@ class ReachSkill(BaseSkill):
             )
         else:
             pos = self._params[:3]
+        if pos[0] > 0.08:
+            pos[2] = min(0.85, pos[2])
         return pos
 
     def _update_state(self):
@@ -431,10 +433,10 @@ class ReachSkill(BaseSkill):
 
         if self._state == 'INIT':
             pos = cur_pos.copy()
-            pos[2] = self._config['lift_height']
+            pos[2] = max(self._config['lift_height'], pos[2])
         elif self._state == 'LIFTED':
             pos = goal_pos.copy()
-            pos[2] = self._config['lift_height']
+            pos[2] = max(self._config['lift_height'], pos[2])
         elif self._state in ['HOVERING', 'REACHED']:
             pos = goal_pos.copy()
         else:
@@ -537,6 +539,8 @@ class GraspSkill(BaseSkill):
             )
         else:
             pos = self._params[:3]
+        if pos[0] > 0.08:
+            pos[2] = min(0.85, pos[2])
         return pos
 
     def _update_state(self):
@@ -574,10 +578,10 @@ class GraspSkill(BaseSkill):
 
         if self._state == 'INIT':
             pos = cur_pos.copy()
-            pos[2] = self._config['lift_height']
+            pos[2] = max(self._config['lift_height'], pos[2])
         elif self._state == 'LIFTED':
             pos = goal_pos.copy()
-            pos[2] = self._config['lift_height']
+            pos[2] = max(self._config['lift_height'], pos[2])
         elif self._state == 'HOVERING':
             pos = goal_pos.copy()
         elif self._state == 'REACHED':
@@ -845,6 +849,9 @@ class PushSkill(BaseSkill):
                 self._params[:3], self._config['global_xyz_bounds'])
         else:
             pos = self._params[:3]
+
+        if pos[0] > 0.08:
+            pos[2] = min(0.85, pos[2])
         return pos
 
     def _get_push_pos(self):
@@ -852,11 +859,13 @@ class PushSkill(BaseSkill):
         pos = src_pos.copy()
 
         delta_pos = self._params[-3:].copy()
-        delta_pos = np.clip(delta_pos, -1, 1)
         if self._normalize_params:
+            delta_pos = np.clip(delta_pos, -1, 1)
             delta_pos *= self._config['delta_xyz_scale']
         pos += delta_pos
 
+        if pos[0] > 0.08:
+            pos[2] = min(0.85, pos[2])
         return pos
 
     def _update_state(self):
@@ -899,10 +908,10 @@ class PushSkill(BaseSkill):
 
         if self._state == 'INIT':
             pos = cur_pos.copy()
-            pos[2] = self._config['lift_height']
+            pos[2] = max(self._config['lift_height'], pos[2])
         elif self._state == 'LIFTED':
             pos = src_pos.copy()
-            pos[2] = self._config['lift_height']
+            pos[2] = max(self._config['lift_height'], pos[2])
         elif self._state == 'HOVERING':
             pos = src_pos.copy()
         elif self._state == 'REACHED':
@@ -911,7 +920,6 @@ class PushSkill(BaseSkill):
             pos = target_pos.copy()
         else:
             raise NotImplementedError
-
         return pos
 
     def _get_ori_ac(self):
@@ -942,7 +950,6 @@ class PushSkill(BaseSkill):
         return np.array(aff_centers, copy=True)
 
     def _get_action(self):
-        # print(self._state)
         super()._get_action()
         obs = get_obs(self._env)
         cur_pos = get_eef_pos(obs)
@@ -952,6 +959,7 @@ class PushSkill(BaseSkill):
         else:
             pos_action = pos - cur_pos
         # print("action target pos", pos)
+        # print(self._state)
         # print("cur pos", cur_pos)
         gripper_action = self._get_gripper_ac()
         if self._config['use_ori_params']:

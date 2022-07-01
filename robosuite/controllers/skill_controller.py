@@ -49,7 +49,7 @@ class SkillController:
             use_ori_params=_use_ori_params,
             global_xyz_bounds=np.array([
                 [-0.25, -0.25, 0.80],
-                [0.11, 0.25, 0.90]
+                [0.08, 0.25, 0.90]
             ]),
             delta_xyz_scale=DELTA_XYZ_SCALE,
             yaw_bounds=np.array([
@@ -58,7 +58,7 @@ class SkillController:
             ]),
             lift_height=0.95,
             lift_thres=0.02,
-            reach_thres=0.01,
+            reach_thres=0.02,
             push_thres=0.015,
             aff_thres=0.08,
             yaw_thres=0.20,
