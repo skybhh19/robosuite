@@ -654,6 +654,161 @@ class GraspSkill(BaseSkill):
                 return False
         return True
 
+class PlaceSkill(BaseSkill):
+    STATES = ['INIT', 'LIFTED', 'HOVERING', 'REACHED', 'PLACED']
+
+    def __init__(self,
+                 max_ac_calls,
+                 max_reach_steps,
+                 max_place_steps,
+                 use_ori_params,
+                 **config
+                 ):
+        super().__init__(
+            use_ori_params=use_ori_params,
+            max_ac_calls=max_ac_calls,
+            max_reach_steps=max_reach_steps,
+            max_place_steps=max_place_steps,
+            **config
+        )
+        self._num_reach_steps = None
+        self._num_place_steps = None
+
+    def get_param_dim(self):
+        if self._config['use_ori_params']:
+            return 4
+        else:
+            return 3
+
+    def _reset(self, params, norm):
+        super()._reset(params, norm)
+        self._num_reach_steps = 0
+        self._num_place_steps = 0
+
+    def _get_reach_pos(self):
+        if self._normalize_params:
+            pos = self._get_unnormalized_params(
+                self._params[:3], self._config['global_xyz_bounds']
+            )
+        else:
+            pos = self._params[:3]
+        return pos
+
+    def _update_state(self):
+        obs = get_obs(self._env)
+        cur_pos = get_eef_pos(obs)
+        goal_pos = self._get_reach_pos()
+
+        th = self._config['reach_thres']
+        lift_th = self._config['lift_thres']
+        reached_lift = (cur_pos[2] >= self._config['lift_height'] - lift_th)
+        reached_xy = (np.linalg.norm(cur_pos[0:2] - goal_pos[0:2]) < lift_th)
+        reached_xyz = (np.linalg.norm(cur_pos - goal_pos) < th)
+        reached_ori_y = self._reached_goal_ori_y()
+
+        if self._state == 'PLACED' or \
+                (self._state == 'REACHED'):
+            self._state = 'PLACED'
+            self._num_place_steps += 1
+        elif self._state == 'REACHED' or (reached_xyz and reached_ori_y):
+            self._state = 'REACHED'
+            self._num_reach_steps += 1
+        elif reached_xy and reached_ori_y:
+            self._state = 'HOVERING'
+        elif reached_lift:
+            self._state = 'LIFTED'
+        else:
+            self._state = 'INIT'
+
+        assert self._state in PlaceSkill.STATES
+
+    def _get_pos_ac(self):
+        obs = get_obs(self._env)
+        cur_pos = get_eef_pos(obs)
+        goal_pos = self._get_reach_pos()
+
+        if self._state == 'INIT':
+            pos = cur_pos.copy()
+            pos[2] = self._config['lift_height']
+        elif self._state == 'LIFTED':
+            pos = goal_pos.copy()
+            pos[2] = self._config['lift_height']
+        elif self._state == 'HOVERING':
+            pos = goal_pos.copy()
+        elif self._state == 'REACHED':
+            pos = goal_pos.copy()
+        elif self._state == 'PLACED':
+            pos = goal_pos.copy()
+        else:
+            raise NotImplementedError
+
+        return pos
+
+    def _get_ori_ac(self):
+        self._check_params_dim()
+        assert self._config['use_ori_params']
+        # if self._state == 'INIT':
+        #     return None
+        param_y = self._params[3:4].copy()
+        if self._normalize_params:
+            ori_y = self._get_unnormalized_params(param_y, self._config['yaw_bounds'])
+        else:
+            ori_y = param_y
+        return ori_y
+
+    def _get_gripper_ac(self):
+        if self._state in ['PLACED', 'REACHED']:
+            gripper_action = np.array([-1, ])
+        else:
+            gripper_action = np.array([1, ])
+        return gripper_action
+
+    def is_success(self):
+        return self._num_place_steps >= self._config['max_place_steps']
+
+    def _get_aff_centers(self):
+        info = self._get_info()
+        aff_centers = info.get('reach_pos', [])
+        if aff_centers is None:
+            return None
+        return np.array(aff_centers, copy=True)
+
+    def _get_action(self):
+        super()._get_action()
+        obs = get_obs(self._env)
+        cur_pos = get_eef_pos(obs)
+        pos = self._get_pos_ac()
+        pos_action = pos - cur_pos
+        gripper_action = self._get_gripper_ac()
+        if self._config['use_ori_params']:
+            target_y = self._get_ori_ac()
+            if target_y is None:
+                ori_action = np.array([0, 0, 0])
+            else:
+                target_euler = np.concatenate([[np.pi, 0], target_y])
+                target_quat = T.mat2quat(T.euler2mat(target_euler))
+                cur_quat = get_eef_quat(obs)
+                ori_action = get_axisangle_error(cur_quat, target_quat)
+            action = np.concatenate([pos_action, ori_action, gripper_action])
+        else:
+            action = np.concatenate([pos_action, gripper_action])
+
+        action = unscale_action(self._env, action)
+        return action
+
+    def check_interesting_interaction(self):
+        super().check_interesting_interaction()
+        for obj in self._env.grasp_objs:
+            if self._env._check_grasp(gripper=self._env.robots[0].gripper, object_geoms=obj):
+                return False
+        return True
+
+    def _test_start_state(self):
+        for obj in self._env.grasp_objs:
+            if self._env._check_grasp(gripper=self._env.robots[0].gripper, object_geoms=obj):
+                return True
+        return False
+
 class PushSkill(BaseSkill):
     """
     params: reach_pos (3) + reach ori (1) + push_delta_pos (3)

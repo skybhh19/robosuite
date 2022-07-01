@@ -9,11 +9,12 @@ from robosuite.controllers.skills import (
     GraspSkill,
     PushSkill,
     GripperSkill,
+    PlaceSkill,
 )
 
 PRIMITIVE_TO_ID = {
     'reach': 0,
-    'gripper_release': 1,
+    'place': 1,
     'grasp': 2,
     'push': 3,
     'atomic': 4
@@ -21,7 +22,7 @@ PRIMITIVE_TO_ID = {
 
 DELTA_XYZ_SCALE = np.array([0.2, 0.2, 0.02])
 
-ID_TO_PRIMITIVE = ['reach', 'gripper_release', 'grasp', 'push', 'atomic']
+ID_TO_PRIMITIVE = ['reach', 'place', 'grasp', 'push', 'atomic']
 
 class SkillController:
 
@@ -76,6 +77,13 @@ class SkillController:
             **base_config
         )
 
+        self.place = PlaceSkill(
+            max_ac_calls=80,
+            max_reach_steps=70,
+            max_place_steps=10,
+            **base_config
+        )
+
         self.reach = ReachSkill(
             max_ac_calls=70,
             use_gripper_params=reach_use_gripper,
@@ -97,6 +105,7 @@ class SkillController:
         self.name_to_skill = OrderedDict(
             atomic=self.atomic,
             gripper_release=self.gripper_release,
+            place=self.place,
             reach=self.reach,
             grasp=self.grasp,
             push=self.push
