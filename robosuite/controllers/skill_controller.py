@@ -71,11 +71,11 @@ class SkillController:
             **base_config
         )
 
-        self.gripper_release = GripperSkill(
-            max_ac_calls=10,
-            skill_type='open',
-            **base_config
-        )
+        # self.gripper_release = GripperSkill(
+        #     max_ac_calls=10,
+        #     skill_type='open',
+        #     **base_config
+        # )
 
         self.place = PlaceSkill(
             max_ac_calls=80,
@@ -104,7 +104,7 @@ class SkillController:
 
         self.name_to_skill = OrderedDict(
             atomic=self.atomic,
-            gripper_release=self.gripper_release,
+            # gripper_release=self.gripper_release,
             place=self.place,
             reach=self.reach,
             grasp=self.grasp,

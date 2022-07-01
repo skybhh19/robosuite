@@ -397,8 +397,8 @@ class ReachSkill(BaseSkill):
             )
         else:
             pos = self._params[:3]
-        if pos[0] > 0.08:
-            pos[2] = min(0.85, pos[2])
+        # if pos[0] > 0.08:
+        #     pos[2] = min(0.85, pos[2])
         return pos
 
     def _update_state(self):
@@ -539,8 +539,8 @@ class GraspSkill(BaseSkill):
             )
         else:
             pos = self._params[:3]
-        if pos[0] > 0.08:
-            pos[2] = min(0.85, pos[2])
+        # if pos[0] > 0.08:
+        #     pos[2] = min(0.85, pos[2])
         return pos
 
     def _update_state(self):
@@ -850,8 +850,8 @@ class PushSkill(BaseSkill):
         else:
             pos = self._params[:3]
 
-        if pos[0] > 0.08:
-            pos[2] = min(0.85, pos[2])
+        # if pos[0] > 0.08:
+        #     pos[2] = min(0.85, pos[2])
         return pos
 
     def _get_push_pos(self):
@@ -864,8 +864,8 @@ class PushSkill(BaseSkill):
             delta_pos *= self._config['delta_xyz_scale']
         pos += delta_pos
 
-        if pos[0] > 0.08:
-            pos[2] = min(0.85, pos[2])
+        # if pos[0] > 0.08:
+        #     pos[2] = min(0.85, pos[2])
         return pos
 
     def _update_state(self):
