@@ -355,7 +355,7 @@ class CleanUp(SingleArmEnv):
             name="ObjectSampler",
             mujoco_objects=mujoco_objects,
             x_range=[0.0, 0.05],
-            y_range=[-0.13, 0.13],
+            y_range=[-0.07, 0.13],
             rotation=None,
             ensure_object_boundary_in_range=False,
             ensure_valid_placement=True,
