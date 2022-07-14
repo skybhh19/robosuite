@@ -355,7 +355,7 @@ class CleanUp(SingleArmEnv):
             name="ObjectSampler",
             mujoco_objects=mujoco_objects,
             x_range=[0.0, 0.05],
-            y_range=[-0.07, 0.13],
+            y_range=[-0.13, 0.13],
             rotation=None,
             ensure_object_boundary_in_range=False,
             ensure_valid_placement=True,
@@ -498,9 +498,11 @@ class CleanUp(SingleArmEnv):
     def _check_success_push(self):
         for i in range(self.task_config['num_push_objs']):
             obj_pos = self.sim.data.body_xpos[self.push_obj_body_ids[i]]
-            target_pos_xy = self.table_offset[:2] + np.array([-0.15, 0.15])
-            d_push = np.linalg.norm(obj_pos[:2] - target_pos_xy)
-            if d_push > 0.09:
+            # target_pos_xy = self.table_offset[:2] + np.array([-0.15, 0.15])
+            # d_push = np.linalg.norm(obj_pos[:2] - target_pos_xy)
+            # if d_push > 0.09:
+            #     return False
+            if obj_pos[0] > -0.07:
                 return False
         return True
 

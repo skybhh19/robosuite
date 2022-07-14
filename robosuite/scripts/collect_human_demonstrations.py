@@ -25,7 +25,7 @@ import robosuite.utils.transform_utils as T
 
 import sys
 sys.path.append('..')
-from utils.env_utils import get_eef_quat, get_obs, get_target_quat, get_axisangle_error
+from utils.env_utils import get_eef_quat, get_obs, get_target_quat, get_axisangle_error, get_eef_pos
 from utils.primitive_utils import unscale_action, scale_action
 
 
@@ -91,6 +91,10 @@ def collect_human_trajectory(env, device, arm, env_configuration, only_yaw):
         obs, _, _, _ = env.step(action)
         step_cnt += 1
         euler_orn = T.mat2euler(T.quat2mat(obs['robot0_eef_quat']))
+        # eef_pos = get_eef_pos(obs)
+        # skill_info = env._get_skill_info()
+        # grasp_pos = skill_info['grasp_pos'][0]
+        # print(np.linalg.norm(eef_pos - grasp_pos))
         # for i in range(3):
         #     if euler_orn[i] > np.pi:
         #        euler_orn[i] -= 2 * np.pi
@@ -162,6 +166,7 @@ def gather_demonstrations_as_hdf5(directory, out_dir, env_info):
 
     num_eps = 0
     env_name = None  # will get populated at some point
+    demo_cnt = 0
     for ep_directory in os.listdir(directory):
 
         state_paths = os.path.join(directory, ep_directory, "state_*.npz")
@@ -182,7 +187,7 @@ def gather_demonstrations_as_hdf5(directory, out_dir, env_info):
 
         if len(states) == 0:
             continue
-
+        demo_cnt += 1
         # Delete the last state. This is because when the DataCollector wrapper
         # recorded the states and actions, the states were recorded AFTER playing that action,
         # so we end up with an extra state at the end.
@@ -217,7 +222,7 @@ def gather_demonstrations_as_hdf5(directory, out_dir, env_info):
         assert len(os.listdir(directory)) == 1 and not is_success
 
     f.close()
-
+    print("collected ndemo", demo_cnt)
 
 if __name__ == "__main__":
     # Arguments

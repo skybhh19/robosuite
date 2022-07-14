@@ -32,7 +32,7 @@ class SkillController:
                  image_obs_in_info=False,
                  aff_type='sparse',
                  render=False,
-                 reach_use_gripper=True):
+                 reach_use_gripper=False):
 
         self._env = env
         if controller_type == 'OSC_POSE':
@@ -49,7 +49,7 @@ class SkillController:
             use_ori_params=_use_ori_params,
             global_xyz_bounds=np.array([
                 [-0.25, -0.25, 0.80],
-                [0.08, 0.25, 0.90]
+                [0.10, 0.25, 0.90]
             ]),
             delta_xyz_scale=DELTA_XYZ_SCALE,
             yaw_bounds=np.array([
@@ -62,6 +62,7 @@ class SkillController:
             push_thres=0.015,
             aff_thres=0.08,
             yaw_thres=0.20,
+            grasp_thres=0.03,
             aff_tanh_scaling=10.0,
             binary_gripper=False,
         )

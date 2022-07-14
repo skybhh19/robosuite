@@ -390,6 +390,13 @@ class ReachSkill(BaseSkill):
             param_dim += 1
         return param_dim
 
+    def _reset(self, params, norm):
+        super()._reset(params, norm)
+        self.initial_grasped = False
+        for obj in self._env.grasp_objs:
+            if self._env._check_grasp(gripper=self._env.robots[0].gripper, object_geoms=obj):
+                self.initial_grasped = True
+
     def _get_reach_pos(self):
         if self._normalize_params:
             pos = self._get_unnormalized_params(
@@ -501,6 +508,16 @@ class ReachSkill(BaseSkill):
     def _test_start_state(self):
         return True
 
+    def check_interesting_interaction(self):
+        super().check_interesting_interaction()
+        end_grasped = False
+        for obj in self._env.grasp_objs:
+            if self._env._check_grasp(gripper=self._env.robots[0].gripper, object_geoms=obj):
+                end_grasped = True
+        if (self.initial_grasped and (not end_grasped)) or ((not self.initial_grasped) and end_grasped):
+            return False
+        return True
+
 class GraspSkill(BaseSkill):
     STATES = ['INIT', 'LIFTED', 'HOVERING', 'REACHED', 'GRASPED']
 
@@ -556,7 +573,7 @@ class GraspSkill(BaseSkill):
         reached_ori_y = self._reached_goal_ori_y()
 
         if self._state == 'GRASPED' or \
-                (self._state == 'REACHED'):
+                (self._state == 'REACHED') or self._num_reach_steps >= self._config['max_reach_steps']:
             self._state = 'GRASPED'
             self._num_grasp_steps += 1
         elif self._state == 'REACHED' or (reached_xyz and reached_ori_y):
@@ -564,10 +581,13 @@ class GraspSkill(BaseSkill):
             self._num_reach_steps += 1
         elif reached_xy and reached_ori_y:
             self._state = 'HOVERING'
+            self._num_reach_steps += 1
         elif reached_lift:
             self._state = 'LIFTED'
+            self._num_reach_steps += 1
         else:
             self._state = 'INIT'
+            self._num_reach_steps += 1
 
         assert self._state in GraspSkill.STATES
 
@@ -711,7 +731,7 @@ class PlaceSkill(BaseSkill):
         reached_ori_y = self._reached_goal_ori_y()
 
         if self._state == 'PLACED' or \
-                (self._state == 'REACHED'):
+                (self._state == 'REACHED') or self._num_reach_steps >= self._config['max_reach_steps']:
             self._state = 'PLACED'
             self._num_place_steps += 1
         elif self._state == 'REACHED' or (reached_xyz and reached_ori_y):
@@ -719,10 +739,13 @@ class PlaceSkill(BaseSkill):
             self._num_reach_steps += 1
         elif reached_xy and reached_ori_y:
             self._state = 'HOVERING'
+            self._num_reach_steps += 1
         elif reached_lift:
             self._state = 'LIFTED'
+            self._num_reach_steps += 1
         else:
             self._state = 'INIT'
+            self._num_reach_steps += 1
 
         assert self._state in PlaceSkill.STATES
 
@@ -864,6 +887,7 @@ class PushSkill(BaseSkill):
             delta_pos *= self._config['delta_xyz_scale']
         pos += delta_pos
 
+        pos = np.clip(pos, self._config['global_xyz_bounds'][0], self._config['global_xyz_bounds'][1] - [0.04, 0, 0])
         # if pos[0] > 0.08:
         #     pos[2] = min(0.85, pos[2])
         return pos
@@ -984,7 +1008,7 @@ class PushSkill(BaseSkill):
             initial_obj_pos = self._initial_push_obj_pos[obj_id]
             obs = get_obs(self._env)
             eef_pos = get_eef_pos(obs)
-            if np.linalg.norm(obj_pos - eef_pos) < 0.1 and np.linalg.norm(obj_pos - initial_obj_pos) > 0.03:
+            if np.linalg.norm(obj_pos - eef_pos) < 0.1 and np.linalg.norm(obj_pos - initial_obj_pos) > 0.05:
                 return True
         return False
 
