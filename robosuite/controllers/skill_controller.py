@@ -17,12 +17,18 @@ PRIMITIVE_TO_ID = {
     'place': 1,
     'grasp': 2,
     'push': 3,
-    'atomic': 4
+    # 'atomic': 4
 }
 
 DELTA_XYZ_SCALE = np.array([0.2, 0.2, 0.02])
 
-ID_TO_PRIMITIVE = ['reach', 'place', 'grasp', 'push', 'atomic']
+ID_TO_PRIMITIVE = [
+    'reach',
+    'place',
+    'grasp',
+    'push',
+   # 'atomic'
+   ]
 
 class SkillController:
 
