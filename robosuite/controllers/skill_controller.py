@@ -54,8 +54,8 @@ class SkillController:
             render=render,
             use_ori_params=_use_ori_params,
             global_xyz_bounds=np.array([
-                [-0.25, -0.25, 0.80],
-                [0.10, 0.25, 0.90]
+                [-0.35, -0.26, 0.80],
+                [0.22, 0.26, 0.90]
             ]),
             delta_xyz_scale=DELTA_XYZ_SCALE,
             yaw_bounds=np.array([
