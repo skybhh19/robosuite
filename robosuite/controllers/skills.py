@@ -356,7 +356,7 @@ class GripperSkill(BaseSkill):
         return True
         # for obj_id in range(len(self._env.grasp_objs)):
         #     obj = self._env.grasp_objs[obj_id]
-        #     obj_pos = self._env.sim.data.body_xpos[self._env.grasp_obj_body_ids[obj_id]]
+        #     obj_pos = self._env.sim.data.body_xpos[self._env.pnp_obj_body_ids[obj_id]]
         #     obs = get_obs(self._env)
         #     eef_pos = get_eef_pos(obs)
         #     if np.linalg.norm(obj_pos - eef_pos) < 0.1 and not self._env._check_grasp(gripper=self._env.robots[0].gripper, object_geoms=obj):
@@ -708,6 +708,12 @@ class PlaceSkill(BaseSkill):
         super()._reset(params, norm)
         self._num_reach_steps = 0
         self._num_place_steps = 0
+        self._initial_grasped_obj_body_id = None
+        for obj_id in range(len(self._env.grasp_objs)):
+            obj = self._env.grasp_objs[obj_id]
+            if self._env._check_grasp(gripper=self._env.robots[0].gripper, object_geoms=obj):
+                self._initial_grasped_obj_body_id = self._env.pnp_obj_body_ids[obj_id]
+                break
 
     def _get_reach_pos(self):
         if self._normalize_params:
@@ -825,9 +831,15 @@ class PlaceSkill(BaseSkill):
 
     def check_interesting_interaction(self):
         super().check_interesting_interaction()
+        end_obs = get_obs(self._env)
+        eef_pos = get_eef_pos(end_obs)
         for obj in self._env.grasp_objs:
             if self._env._check_grasp(gripper=self._env.robots[0].gripper, object_geoms=obj):
                 return False
+        if self._initial_grasped_obj_body_id is None:
+            return False
+        if np.linalg.norm(eef_pos[:2] - self._env.sim.data.body_xpos[self._initial_grasped_obj_body_id][:2]) > 0.03:
+            return False
         return True
 
     def _test_start_state(self):
@@ -864,7 +876,7 @@ class PushSkill(BaseSkill):
         super()._reset(params, norm)
         self._initial_push_obj_pos = []
         for obj_id in range(len(self._env.push_objs)):
-            self._initial_push_obj_pos.append(self._env.sim.data.body_xpos[obj_id])
+            self._initial_push_obj_pos.append(self._env.sim.data.body_xpos[self._env.push_obj_body_ids[obj_id]])
 
     def _get_reach_pos(self):
         if self._normalize_params:
