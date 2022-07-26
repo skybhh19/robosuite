@@ -87,6 +87,8 @@ def collect_human_trajectory(env, device, arm, env_configuration, only_yaw):
             # print(action[:3], action_copy[:3])
             assert np.linalg.norm(action[:3] - action_copy[:3]) < 1e-4
 
+        # TODO: limit xyz bound
+        raise NotImplementedError
         obs = get_obs(env)
         eef_pos = get_eef_pos(obs)
 
