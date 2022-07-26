@@ -30,6 +30,10 @@ ID_TO_PRIMITIVE = [
     'atomic'
    ]
 
+GLOBAL_XYZ_BOUNDS = np.array([
+                [-0.35, -0.26, 0.80],
+                [0.22, 0.26, 1.20]
+            ])
 class SkillController:
 
     def __init__(self,
@@ -53,10 +57,7 @@ class SkillController:
             image_obs_in_info=image_obs_in_info,
             render=render,
             use_ori_params=_use_ori_params,
-            global_xyz_bounds=np.array([
-                [-0.35, -0.26, 0.80],
-                [0.22, 0.26, 0.90]
-            ]),
+            global_xyz_bounds=GLOBAL_XYZ_BOUNDS,
             delta_xyz_scale=DELTA_XYZ_SCALE,
             yaw_bounds=np.array([
                 [-np.pi / 2],

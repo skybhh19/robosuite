@@ -876,7 +876,7 @@ class PushSkill(BaseSkill):
         super()._reset(params, norm)
         self._initial_push_obj_pos = []
         for obj_id in range(len(self._env.push_objs)):
-            self._initial_push_obj_pos.append(self._env.sim.data.body_xpos[self._env.push_obj_body_ids[obj_id]])
+            self._initial_push_obj_pos.append(self._env.sim.data.body_xpos[self._env.push_obj_body_ids[obj_id]].copy())
 
     def _get_reach_pos(self):
         if self._normalize_params:
@@ -1016,11 +1016,11 @@ class PushSkill(BaseSkill):
     def check_interesting_interaction(self):
         super().check_interesting_interaction()
         for obj_id in range(len(self._env.push_objs)):
-            obj_pos = self._env.sim.data.body_xpos[self._env.push_obj_body_ids[obj_id]]
+            obj_pos = self._env.sim.data.body_xpos[self._env.push_obj_body_ids[obj_id]].copy()
             initial_obj_pos = self._initial_push_obj_pos[obj_id]
             obs = get_obs(self._env)
             eef_pos = get_eef_pos(obs)
-            if np.linalg.norm(obj_pos - eef_pos) < 0.1 and np.linalg.norm(obj_pos - initial_obj_pos) > 0.05:
+            if np.linalg.norm(obj_pos - eef_pos) < 0.1 and np.linalg.norm(obj_pos - initial_obj_pos) > 0.04:
                 return True
         return False
 
