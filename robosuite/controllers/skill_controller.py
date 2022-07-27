@@ -65,7 +65,7 @@ class SkillController:
             ]),
             lift_height=0.95,
             lift_thres=0.02,
-            reach_thres=0.02,
+            reach_thres=0.01,
             push_thres=0.015,
             aff_thres=0.08,
             yaw_thres=0.20,
