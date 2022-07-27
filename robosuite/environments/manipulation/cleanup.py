@@ -161,7 +161,7 @@ class CleanUp(SingleArmEnv):
         placement_initializer=None,
         has_renderer=False,
         has_offscreen_renderer=True,
-        render_camera="frontview",
+        render_camera="agentview",
         render_collision_mesh=False,
         render_visual_mesh=True,
         render_gpu_device_id=-1,
@@ -222,7 +222,7 @@ class CleanUp(SingleArmEnv):
             renderer_config=renderer_config,
         )
 
-    def reward(self, action):
+    def reward(self, action=None):
         """
         Reward function for the task.
 
@@ -462,14 +462,14 @@ class CleanUp(SingleArmEnv):
             def obj_quat(obs_cache):
                 return np.array(self.obj_quats).flatten()
 
-            @sensor(modality=modality)
-            def obj_state(obs_cache):
-                obj_pos = np.array(self.obj_positions).flatten()
-                obj_quat = np.array(self.obj_quats).flatten()
-                return np.concatenate([obj_pos, obj_quat])
+            # @sensor(modality=modality)
+            # def obj_state(obs_cache):
+            #     obj_pos = np.array(self.obj_positions).flatten()
+            #     obj_quat = np.array(self.obj_quats).flatten()
+            #     return np.concatenate([obj_pos, obj_quat])
 
 
-            sensors = [obj_pos, obj_quat, obj_state]
+            sensors = [obj_pos, obj_quat]
             names = [s.__name__ for s in sensors]
 
             # Create observables

@@ -213,18 +213,20 @@ class BaseSkill:
             if self._config['image_obs_in_info']:
                 image_obs.append(obs['agentview_image'])
 
-            if self.skill_done():
+            if self.skill_done() or done:
+                self._env_done = done
                 break
 
         if self._config['image_obs_in_info']:
             info['image_obs'] = image_obs
         info['obs_list'] = obs_list
         info['action_list'] = action_list
+        info['env_done'] = done
         self._update_info(info)
         return dict(obs=obs, info=info)
 
     def check_interesting_interaction(self):
-        assert self.skill_done()
+        assert self.skill_done() or self._env_done
         return True
 
 class AtomicSkill(BaseSkill):
