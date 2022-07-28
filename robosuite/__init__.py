@@ -12,6 +12,7 @@ from robosuite.environments.manipulation.two_arm_peg_in_hole import TwoArmPegInH
 from robosuite.environments.manipulation.two_arm_handover import TwoArmHandover
 from robosuite.environments.manipulation.tidy import Tidy
 from robosuite.environments.manipulation.cleanup import CleanUp
+from robosuite.environments.manipulation.cleanup_pnp import CleanUpPnP
 
 from robosuite.environments import ALL_ENVIRONMENTS
 from robosuite.controllers import ALL_CONTROLLERS, load_controller_config

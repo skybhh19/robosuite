@@ -27,7 +27,7 @@ import sys
 sys.path.append('..')
 from utils.env_utils import get_eef_quat, get_obs, get_target_quat, get_axisangle_error, get_eef_pos
 from utils.primitive_utils import unscale_action, scale_action
-
+from robosuite.controllers.skill_controller import GLOBAL_XYZ_BOUNDS
 
 def collect_human_trajectory(env, device, arm, env_configuration, only_yaw):
     """
@@ -88,11 +88,15 @@ def collect_human_trajectory(env, device, arm, env_configuration, only_yaw):
             assert np.linalg.norm(action[:3] - action_copy[:3]) < 1e-4
 
         # TODO: limit xyz bound
-        raise NotImplementedError
+
         obs = get_obs(env)
         eef_pos = get_eef_pos(obs)
-
-
+        for pos_i in range(3):
+            if eef_pos[pos_i] < GLOBAL_XYZ_BOUNDS[0][pos_i] and action[pos_i] < 0:
+                action[pos_i] = 0
+            elif eef_pos[pos_i] > GLOBAL_XYZ_BOUNDS[1][pos_i] and action[pos_i] > 0:
+                action[pos_i] = 0
+        # print(action)
         # Run environment step
         obs, _, _, _ = env.step(action)
         step_cnt += 1

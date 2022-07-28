@@ -31,8 +31,8 @@ ID_TO_PRIMITIVE = [
    ]
 
 GLOBAL_XYZ_BOUNDS = np.array([
-                [-0.35, -0.26, 0.80],
-                [0.22, 0.26, 1.20]
+                [-0.32, -0.26, 0.80],
+                [0.20, 0.26, 1.0]
             ])
 class SkillController:
 

@@ -24,7 +24,7 @@ DEFAULT_CLEANUP_CONFIG = {
     'shaped_push_rew': False,
     'push_scale_fac': 5.0,
 }
-class CleanUp(SingleArmEnv):
+class CleanUpPnP(SingleArmEnv):
     """
     This class corresponds to the stacking task for a single robot arm.
 
@@ -161,7 +161,7 @@ class CleanUp(SingleArmEnv):
         placement_initializer=None,
         has_renderer=False,
         has_offscreen_renderer=True,
-        render_camera="frontview",
+        render_camera="agentview",
         render_collision_mesh=False,
         render_visual_mesh=True,
         render_gpu_device_id=-1,
@@ -515,8 +515,8 @@ class CleanUp(SingleArmEnv):
         """
         if not self._check_success_pnp():
             return False
-        if not self._check_success_push():
-            return False
+        # if not self._check_success_push():
+        #     return False
         return True
 
     def _get_skill_info(self):
