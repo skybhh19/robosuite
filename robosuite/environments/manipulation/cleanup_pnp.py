@@ -462,6 +462,22 @@ class CleanUpPnP(SingleArmEnv):
             def obj_quat(obs_cache):
                 return np.array(self.obj_quats).flatten()
 
+            @sensor(modality=modality)
+            def object_centric(obs_cache):
+                _objs_pos = np.array(self.obj_positions).copy().reshape(-1, 3)
+                nobject = _objs_pos.shape[0]
+                print(obs_cache.keys())
+                gripper_pos = obs_cache[f"{pf}eef_pos"]
+                gripper_to_objects_pos = np.stack([_obj_pos - gripper_pos for _obj_pos in _objs_pos])
+                assert len(gripper_to_objects_pos) == nobject
+                relative_objs_pos = []
+                for i in range(nobject):
+                    for j in range(i + 1, nobject):
+                        relative_objs_pos.append(_objs_pos[j] - _objs_pos[i])
+                assert len(relative_objs_pos) == (nobject - 1) * nobject / 2
+                relative_objs_pos = np.array(relative_objs_pos)
+                return np.concatenate([gripper_to_objects_pos.flatten(), relative_objs_pos.flatten()])
+
             # @sensor(modality=modality)
             # def obj_state(obs_cache):
             #     obj_pos = np.array(self.obj_positions).flatten()
@@ -469,7 +485,7 @@ class CleanUpPnP(SingleArmEnv):
             #     return np.concatenate([obj_pos, obj_quat])
 
 
-            sensors = [obj_pos, obj_quat]
+            sensors = [obj_pos, obj_quat, object_centric]
             names = [s.__name__ for s in sensors]
 
             # Create observables

@@ -462,12 +462,26 @@ class CleanUp(SingleArmEnv):
             def obj_quat(obs_cache):
                 return np.array(self.obj_quats).flatten()
 
+            @sensor(modality=modality)
+            def object_centric(obs_cache):
+                _objs_pos = np.array(self.obj_positions).copy().reshape(-1, 3)
+                nobject = obj_pos.shape[0]
+                gripper_pos = obs_cache[f"{pf}eef_pos"]
+                gripper_to_objects_pos = np.stack([_obj_pos - gripper_pos for _obj_pos in _objs_pos])
+                assert len(gripper_to_objects_pos) == nobject
+                relative_objs_pos = []
+                for i in range(nobject):
+                    for j in range(i + 1, nobject):
+                        relative_objs_pos.append(_objs_pos[j] - _objs_pos[i])
+                assert len(relative_objs_pos) == (nobject - 1) * nobject / 2
+                relative_objs_pos = np.array(relative_objs_pos)
+                return np.concatenate([gripper_to_objects_pos.flatten(), relative_objs_pos.flatten()])
+
             # @sensor(modality=modality)
             # def obj_state(obs_cache):
             #     obj_pos = np.array(self.obj_positions).flatten()
             #     obj_quat = np.array(self.obj_quats).flatten()
             #     return np.concatenate([obj_pos, obj_quat])
-
 
             sensors = [obj_pos, obj_quat]
             names = [s.__name__ for s in sensors]
@@ -481,6 +495,44 @@ class CleanUp(SingleArmEnv):
                 )
 
         return observables
+
+    def _get_observation(self):
+        """
+        Returns an OrderedDict containing observations [(name_string, np.array), ...].
+
+        Important keys:
+
+            `'robot-state'`: contains robot-centric information.
+
+            `'object-state'`: requires @self.use_object_obs to be True. Contains object-centric information.
+
+            `'image'`: requires @self.use_camera_obs to be True. Contains a rendered frame from the simulation.
+
+            `'depth'`: requires @self.use_camera_obs and @self.camera_depth to be True.
+            Contains a rendered depth map from the simulation
+
+        Returns:
+            OrderedDict: Observations from the environment
+        """
+        di = super()._get_observation()
+
+        # low-level object information
+        if self.use_object_obs:
+            # position and rotation of the first obj
+            obj_pos = np.array(self.obj_positions).flatten()
+            obj_quat = np.array(self.obj_quats).flatten()
+            di["obj_pos"] = obj_pos
+            di["obj_quat"] = obj_quat
+
+            di["object_centric"]
+            di["object-state"] = np.concatenate(
+                [
+                    obj_pos,
+                    obj_quat,
+                ]
+            )
+
+        return di
 
     def in_bin(self, obj_pos):
         bin_pos = np.array(self.sim.data.body_xpos[self.bin_body_id])
