@@ -466,9 +466,9 @@ class CleanUpPnP(SingleArmEnv):
             def object_centric(obs_cache):
                 _objs_pos = np.array(self.obj_positions).copy().reshape(-1, 3)
                 nobject = _objs_pos.shape[0]
-                print(obs_cache.keys())
-                gripper_pos = obs_cache[f"{pf}eef_pos"]
-                gripper_to_objects_pos = np.stack([_obj_pos - gripper_pos for _obj_pos in _objs_pos])
+                # print(obs_cache.keys())
+                gripper_site_pos = self.sim.data.site_xpos[self.robots[0].eef_site_id]
+                gripper_to_objects_pos = np.stack([_obj_pos - gripper_site_pos for _obj_pos in _objs_pos])
                 assert len(gripper_to_objects_pos) == nobject
                 relative_objs_pos = []
                 for i in range(nobject):
