@@ -146,12 +146,14 @@ class BaseSkill:
     #     return self._aff_success
 
     def _get_unnormalized_params(self, params, bounds):
+        params = params.copy()
         params = np.clip(params, -1, 1)
         params = (params + 1) / 2
         low, high = bounds[0], bounds[1]
         return low + (high - low) * params
 
     def _get_normalized_params(self, params, bounds):
+        params = params.copy()
         low, high = bounds[0], bounds[1]
         params = (params - low) / (high - low)
         params = params * 2 - 1
@@ -310,6 +312,9 @@ class GripperSkill(BaseSkill):
         self._skill_type = skill_type
 
     def get_param_dim(self):
+        self.pos_dim = None
+        self.orn_dim = None
+        self.gripper_dim = None
         return 0
 
     def _update_state(self):
@@ -386,9 +391,17 @@ class ReachSkill(BaseSkill):
 
     def get_param_dim(self):
         param_dim = 3
+        self.pos_dim = (0, 3)
+        self.orn_dim = None
+        self.gripper_dim = None
         if self._config['use_ori_params']:
             param_dim += 1
+            self.orn_dim = (3, 4)
         if self._config['use_gripper_params']:
+            if self.orn_dim is not None:
+                self.gripper_dim = (4, 5)
+            else:
+                self.gripper_dim = (3, 4)
             param_dim += 1
         return param_dim
 
@@ -541,7 +554,11 @@ class GraspSkill(BaseSkill):
         self._num_grasp_steps = None
 
     def get_param_dim(self):
+        self.pos_dim = (0, 3)
+        self.orn_dim = None
+        self.gripper_dim = None
         if self._config['use_ori_params']:
+            self.orn_dim = (3, 4)
             return 4
         else:
             return 3
@@ -701,7 +718,11 @@ class PlaceSkill(BaseSkill):
         self._num_place_steps = None
 
     def get_param_dim(self):
+        self.pos_dim = (0, 3)
+        self.orn_dim = None
+        self.gripper_dim = None
         if self._config['use_ori_params']:
+            self.orn_dim = (3, 4)
             return 4
         else:
             return 3
@@ -869,9 +890,15 @@ class PushSkill(BaseSkill):
 
     def get_param_dim(self):
         # no gripper dim in params
+        self.pos_dim = (0, 3)
+        self.orn_dim = None
+        self.gripper_dim = None
         if self._config['use_ori_params']:
+            self.orn_dim = (3, 4)
+            self.delta_dim = (4, 7)
             return 7
         else:
+            self.delta_dim = (3, 6)
             return 6
 
     def _reset(self, params, norm):

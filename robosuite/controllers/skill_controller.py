@@ -30,6 +30,12 @@ ID_TO_PRIMITIVE = [
     'atomic'
    ]
 
+NON_ATOMIC_PRIMITIVES = [
+    'reach',
+    'place',
+    'grasp',
+    'push'
+]
 GLOBAL_XYZ_BOUNDS = np.array([
                 [-0.32, -0.26, 0.80],
                 [0.20, 0.26, 1.0]
@@ -128,10 +134,59 @@ class SkillController:
     def execute(self, p_name, output, norm, **kwargs):
         # len(args) = maximal argument length
         skill = self.name_to_skill[p_name]
-        skill_dim = skill.get_param_dim()
-        skill_args = output[:skill_dim]
+        param_dim = skill.get_param_dim()
+        skill_args = output[:param_dim]
+        try:
+            if norm or p_name == 'atomic':
+                assert (skill_args <= 1.).all() and (skill_args >= -1.).all()
+            else:
+                norm_args = self.get_normalized_params(p_name=p_name, unnorm_params=skill_args)
+                assert (norm_args <= 1.).all and (skill_args >= -1.).all()
+        except:
+            print("p", p_name)
+            print("args", skill_args)
+            raise ValueError
         ret = skill.act(skill_args, norm=norm)
         if ret is not None:
             ret['info']['interest_interaction'] = skill.check_interesting_interaction()
         return ret
 
+    def get_normalized_params(self, p_name, unnorm_params):
+        skill = self.name_to_skill[p_name]
+        param_dim = skill.get_param_dim()
+        skill_unnorm_params = unnorm_params[:param_dim]
+        pad_len = len(unnorm_params) - param_dim
+        norm_params = []
+        if skill.pos_dim is not None:
+            norm_params.append(skill._get_normalized_params(skill_unnorm_params[skill.pos_dim[0], skill.pos_dim[1]], skill._config['global_xyz_bounds']))
+        if skill.orn_dim is not None:
+            norm_params.append(skill._get_normalized_params(skill_unnorm_params[skill.orn_dim[0], skill.orn_dim[1]], skill._config['yaw_bounds']))
+        if skill.gripper_dim is not None:
+            norm_params.append(skill_unnorm_params[skill.gripper_dim[0], skill.gripper_dim[1]])
+        if p_name == 'push':
+            assert skill.delta_dim is not None
+            unnorm_delta = skill_unnorm_params[skill.delta_dim[0], skill.delta_dim[1]]
+            norm_delta = unnorm_delta / skill._config['delta_xyz_scale']
+            norm_delta = np.clip(norm_delta, -1, 1)
+            norm_params.append(norm_delta)
+        return np.concatenate([np.concatenate(norm_params), np.zeros(pad_len)])
+
+    def get_unnormalized_params(self, p_name, norm_params):
+        skill = self.name_to_skill[p_name]
+        param_dim = skill.get_param_dim()
+        skill_norm_params = norm_params[:param_dim]
+        pad_len = len(norm_params) - param_dim
+        unnorm_params = []
+        if skill.pos_dim is not None:
+            unnorm_params.append(skill._get_unnormalized_params(skill_norm_params[skill.pos_dim[0], skill.pos_dim[1]], skill._config['global_xyz_bounds']))
+        if skill.orn_dim is not None:
+            unnorm_params.append(skill._get_unnormalized_params(skill_norm_params[skill.orn_dim[0], skill.orn_dim[1]], skill._config['yaw_bound']))
+        if skill.gripper is not None:
+            unnorm_params.append(skill_norm_params[skill.gripper_dim[0], skill.gripper_dim[1]])
+        if p_name == 'push':
+            assert skill.delta_dim is not None
+            norm_delta = skill_norm_params[skill.delta_dim[0], skill.delta_dim[1]]
+            norm_delta = np.clip(norm_delta, -1, 1)
+            unnorm_delta = norm_delta * skill._config['delta_xyz_scale']
+            unnorm_params.append(unnorm_delta)
+        return np.concatenate([np.concatenate(unnorm_params), np.zeros(pad_len)])
