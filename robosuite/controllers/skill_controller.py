@@ -48,9 +48,11 @@ class SkillController:
                  image_obs_in_info=False,
                  aff_type='sparse',
                  render=False,
-                 reach_use_gripper=False):
+                 reach_use_gripper=False,
+                 env_idx=None):
 
         self._env = env
+        self._env_idx = env_idx
         if controller_type == 'OSC_POSE':
             _use_ori_params = True
         elif controller_type == 'OSC_POSITION':
@@ -78,6 +80,7 @@ class SkillController:
             grasp_thres=0.03,
             aff_tanh_scaling=10.0,
             binary_gripper=False,
+            env_idx=env_idx,
         )
 
         self.atomic = AtomicSkill(
@@ -130,6 +133,42 @@ class SkillController:
 
     def test_start_state(self, p_name):
         return self.name_to_skill[p_name]._test_start_state()
+
+    def reset_skill(self, p_name, output, norm):
+        skill = self.name_to_skill[p_name]
+        param_dim = skill.get_param_dim()
+        skill_args = output[:param_dim]
+        try:
+            if norm or p_name == 'atomic':
+                assert (skill_args <= 1.).all() and (skill_args >= -1.).all()
+            else:
+                norm_args = self.get_normalized_params(p_name=p_name, unnorm_params=skill_args)
+                assert (norm_args <= 1.).all and (skill_args >= -1.).all()
+        except:
+            print("p", p_name)
+            print("args", skill_args)
+            raise ValueError
+        skill._reset(skill_args, norm)
+
+
+    def step_action(self, p_name):
+        skill = self.name_to_skill[p_name]
+        action = skill._get_action()
+        skill.skill_action_list.append(action)
+        return action
+
+    def skill_done(self, p_name):
+        skill = self.name_to_skill[p_name]
+        return skill.skill_done()
+
+    def skill_success(self, p_name):
+        skill = self.name_to_skill[p_name]
+        return skill.is_success()
+
+    def skill_interest(self, p_name):
+        skill = self.name_to_skill[p_name]
+        return skill.check_interesting_interaction()
+
 
     def execute(self, p_name, output, norm, **kwargs):
         # len(args) = maximal argument length
