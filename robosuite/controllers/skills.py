@@ -689,9 +689,12 @@ class GraspSkill(BaseSkill):
 
     def check_interesting_interaction(self):
         super().check_interesting_interaction()
-        for obj in self._env.grasp_objs:
+        for obj_id, obj in enumerate(self._env.grasp_objs):
             if self._env._check_grasp(gripper=self._env.robots[0].gripper, object_geoms=obj):
-                return True
+                end_obs = get_obs(self._env)
+                eef_pos = get_eef_pos(end_obs)
+                if np.linalg.norm(eef_pos - self._env.sim.data.body_xpos[self._env.pnp_obj_body_ids[obj_id]]) < 0.02:
+                    return True
         return False
 
     def _test_start_state(self):
