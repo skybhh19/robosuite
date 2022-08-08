@@ -184,7 +184,7 @@ class SkillController:
         except:
             print("p", p_name)
             print("args", skill_args)
-            raise ValueError
+            pass
         ret = skill.act(skill_args, norm=norm)
         if ret is not None:
             ret['info']['interest_interaction'] = skill.check_interesting_interaction()
