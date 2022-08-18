@@ -867,7 +867,7 @@ class PlaceSkill(BaseSkill):
                 return False
         if self._initial_grasped_obj_body_id is None:
             return False
-        if np.linalg.norm(eef_pos[:2] - self._env.sim.data.body_xpos[self._initial_grasped_obj_body_id][:2]) > 0.03:
+        if np.linalg.norm(eef_pos[:2] - self._env.sim.data.body_xpos[self._initial_grasped_obj_body_id][:2]) > 0.04:
             return False
         return True
 
