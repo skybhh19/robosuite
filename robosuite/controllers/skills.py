@@ -494,8 +494,9 @@ class ReachSkill(BaseSkill):
         return self._state == 'REACHED'
 
     def _get_aff_centers(self):
-        info = self._get_info()
-        aff_centers = info.get('reach_pos', [])
+        return None
+        # info = self._get_info()
+        # aff_centers = info.get('reach_pos', [])
         if aff_centers is None:
             return None
         return np.array(aff_centers, copy=True)
@@ -693,7 +694,7 @@ class GraspSkill(BaseSkill):
             if self._env._check_grasp(gripper=self._env.robots[0].gripper, object_geoms=obj):
                 end_obs = get_obs(self._env)
                 eef_pos = get_eef_pos(end_obs)
-                if np.linalg.norm(eef_pos - self._env.sim.data.body_xpos[self._env.pnp_obj_body_ids[obj_id]]) < 0.02:
+                if np.linalg.norm(eef_pos - self._env.sim.data.body_xpos[self._env.pnp_obj_body_ids[obj_id]]) < 0.025:
                     return True
         return False
 
@@ -829,11 +830,12 @@ class PlaceSkill(BaseSkill):
         return self._num_place_steps >= self._config['max_place_steps']
 
     def _get_aff_centers(self):
-        info = self._get_info()
-        aff_centers = info.get('reach_pos', [])
-        if aff_centers is None:
-            return None
-        return np.array(aff_centers, copy=True)
+        return None
+        # info = self._get_info()
+        # aff_centers = info.get('reach_pos', [])
+        # if aff_centers is None:
+        #     return None
+        # return np.array(aff_centers, copy=True)
 
     def _get_action(self):
         super()._get_action()
@@ -1014,8 +1016,12 @@ class PushSkill(BaseSkill):
         return self._state == 'PUSHED'
 
     def _get_aff_centers(self):
-        info = self._get_info()
-        aff_centers = info.get('push_pos', [])
+        # info = self._get_info()
+        # aff_centers = info.get('push_pos', [])
+        aff_centers = []
+        for obj_id in range(len(self._env.push_objs)):
+            obj_pos = self._env.sim.data.body_xpos[self._env.push_obj_body_ids[obj_id]].copy()
+            aff_centers.append(obj_pos)
         if aff_centers is None:
             return None
         return np.array(aff_centers, copy=True)
