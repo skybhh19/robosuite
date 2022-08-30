@@ -195,6 +195,11 @@ class CleanUp(SingleArmEnv):
         # Get config
         self.task_config = DEFAULT_CLEANUP_CONFIG.copy()
 
+        self.eef_bounds = np.array([
+                [-0.32, -0.26, 0.80],
+                [0.20, 0.26, 1.0]
+            ])
+
         super().__init__(
             robots=robots,
             env_configuration=env_configuration,

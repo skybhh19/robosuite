@@ -694,11 +694,13 @@ class GraspSkill(BaseSkill):
             if self._env._check_grasp(gripper=self._env.robots[0].gripper, object_geoms=obj):
                 end_obs = get_obs(self._env)
                 eef_pos = get_eef_pos(end_obs)
-                if np.linalg.norm(eef_pos - self._env.sim.data.body_xpos[self._env.pnp_obj_body_ids[obj_id]]) < 0.025:
-                    return True
+                # if np.linalg.norm(eef_pos - self._env.sim.data.body_xpos[self._env.pnp_obj_body_ids[obj_id]]) < 0.025:
+                return True
         return False
 
     def _test_start_state(self):
+        if len(self._env.grasp_objs) == 0:
+            return False
         for obj in self._env.grasp_objs:
             if self._env._check_grasp(gripper=self._env.robots[0].gripper, object_geoms=obj):
                 return False
@@ -869,8 +871,8 @@ class PlaceSkill(BaseSkill):
                 return False
         if self._initial_grasped_obj_body_id is None:
             return False
-        if np.linalg.norm(eef_pos[:2] - self._env.sim.data.body_xpos[self._initial_grasped_obj_body_id][:2]) > 0.04:
-            return False
+        # if np.linalg.norm(eef_pos[:2] - self._env.sim.data.body_xpos[self._initial_grasped_obj_body_id][:2]) > 0.04:
+        #     return False
         return True
 
     def _test_start_state(self):
@@ -1061,11 +1063,13 @@ class PushSkill(BaseSkill):
             initial_obj_pos = self._initial_push_obj_pos[obj_id]
             obs = get_obs(self._env)
             eef_pos = get_eef_pos(obs)
-            if np.linalg.norm(obj_pos - eef_pos) < 0.1 and np.linalg.norm(obj_pos - initial_obj_pos) > 0.04:
+            if np.linalg.norm(obj_pos - initial_obj_pos) > 0.05:
                 return True
         return False
 
     def _test_start_state(self):
+        if len(self._env.push_objs) == 0:
+            return False
         for obj in self._env.grasp_objs:
             if self._env._check_grasp(gripper=self._env.robots[0].gripper, object_geoms=obj):
                 return False

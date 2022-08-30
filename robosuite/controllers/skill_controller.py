@@ -36,10 +36,12 @@ NON_ATOMIC_PRIMITIVES = [
     'grasp',
     'push'
 ]
-GLOBAL_XYZ_BOUNDS = np.array([
-                [-0.32, -0.26, 0.80],
-                [0.20, 0.26, 1.0]
-            ])
+# GLOBAL_XYZ_BOUNDS = np.array([
+#                 [-0.32, -0.26, 0.80],
+#                 [0.20, 0.26, 1.0]
+#             ])
+
+
 class SkillController:
 
     def __init__(self,
@@ -65,7 +67,7 @@ class SkillController:
             image_obs_in_info=image_obs_in_info,
             render=render,
             use_ori_params=_use_ori_params,
-            global_xyz_bounds=GLOBAL_XYZ_BOUNDS,
+            global_xyz_bounds=self._env.eef_bounds,
             delta_xyz_scale=DELTA_XYZ_SCALE,
             yaw_bounds=np.array([
                 [-np.pi / 2],
