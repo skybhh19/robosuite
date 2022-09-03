@@ -938,7 +938,7 @@ class PushSkill(BaseSkill):
             delta_pos *= self._config['delta_xyz_scale']
         pos += delta_pos
 
-        pos = np.clip(pos, self._config['global_xyz_bounds'][0], self._config['global_xyz_bounds'][1] - [0.04, 0, 0])
+        # pos = np.clip(pos, self._config['global_xyz_bounds'][0], self._config['global_xyz_bounds'][1] - [0.04, 0, 0])
         # if pos[0] > 0.08:
         #     pos[2] = min(0.85, pos[2])
         return pos

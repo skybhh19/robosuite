@@ -73,7 +73,7 @@ class SkillController:
                 [-np.pi / 2],
                 [np.pi / 2]
             ]),
-            lift_height=0.95,
+            lift_height=env.table_offset[2] + 0.15,
             lift_thres=0.02,
             reach_thres=0.01,
             push_thres=0.015,
