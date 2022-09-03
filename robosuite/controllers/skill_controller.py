@@ -20,7 +20,7 @@ PRIMITIVE_TO_ID = {
     'atomic': 4
 }
 
-DELTA_XYZ_SCALE = np.array([0.2, 0.2, 0.02])
+DELTA_XYZ_SCALE = np.array([0.2, 0.2, 0.])
 
 ID_TO_PRIMITIVE = [
     'reach',
@@ -151,7 +151,6 @@ class SkillController:
             print("args", skill_args)
             raise ValueError
         skill._reset(skill_args, norm)
-
 
     def step_action(self, p_name):
         skill = self.name_to_skill[p_name]
