@@ -20,7 +20,7 @@ PRIMITIVE_TO_ID = {
     'atomic': 4
 }
 
-DELTA_XYZ_SCALE = np.array([0.2, 0.2, 0.])
+DELTA_XYZ_SCALE = np.array([0.4, 0.4, 0.])
 
 ID_TO_PRIMITIVE = [
     'reach',

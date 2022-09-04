@@ -194,13 +194,13 @@ class TidyReal(SingleArmEnv):
         self.right_mat_obj_ids = right_mat_obj_ids
 
         self.eef_bounds = np.array([
-                [-0.29, -0.32, 0.90],
-                [0.17, 0.32, 1.05]
+                [-0.28, -0.32, 0.90],
+                [0.16, 0.32, 1.05]
             ])
 
         self.data_eef_bounds = np.array([
-            [-0.27, -0.31, 0.90],
-            [0.16, 0.31, 1.04]
+            [-0.26, -0.31, 0.90],
+            [0.15, 0.31, 1.04]
         ])
 
         super().__init__(
