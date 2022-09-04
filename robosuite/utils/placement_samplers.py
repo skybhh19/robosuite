@@ -135,11 +135,13 @@ class UniformRandomSampler(ObjectPositionSampler):
         ensure_valid_placement=True,
         reference_pos=(0, 0, 0),
         z_offset=0.0,
+        conditioned_x_range=None,
     ):
         self.x_range = x_range
         self.y_range = y_range
         self.rotation = rotation
         self.rotation_axis = rotation_axis
+        self.conditioned_x_range = conditioned_x_range
 
         super().__init__(
             name=name,
@@ -258,46 +260,64 @@ class UniformRandomSampler(ObjectPositionSampler):
             ), "Invalid reference received. Should be (x,y,z) 3-tuple, but got: {}".format(base_offset)
 
         # Sample pos and quat for all objects assigned to this sampler
-        for obj in self.mujoco_objects:
-            # First make sure the currently sampled object hasn't already been sampled
-            assert obj.name not in placed_objects, "Object '{}' has already been sampled!".format(obj.name)
+        for sample_idx in range(10):
+            resample_flag = False
+            for obj in self.mujoco_objects:
+                # First make sure the currently sampled object hasn't already been sampled
+                assert obj.name not in placed_objects, "Object '{}' has already been sampled!".format(obj.name)
 
-            horizontal_radius = obj.horizontal_radius
-            bottom_offset = obj.bottom_offset
-            success = False
-            for i in range(5000):  # 5000 retries
-                object_x = self._sample_x(horizontal_radius) + base_offset[0]
-                object_y = self._sample_y(horizontal_radius) + base_offset[1]
-                object_z = self.z_offset + base_offset[2]
-                if on_top:
-                    object_z -= bottom_offset[-1]
+                horizontal_radius = obj.horizontal_radius
+                bottom_offset = obj.bottom_offset
+                success = False
+                for i in range(10000):  # 10000 retries
+                    object_y = self._sample_y(horizontal_radius) + base_offset[1]
+                    if self.conditioned_x_range is not None:
+                        for seg in self.conditioned_x_range:
+                            if self.ensure_valid_placement:
+                                if object_y - horizontal_radius > seg[0][0] and object_y + horizontal_radius < seg[0][1]:
+                                    self.x_range = seg[1]
+                                    break
+                            else:
+                                if seg[0][0] < object_y < seg[0][1]:
+                                    self.x_range = seg[1]
 
-                # objects cannot overlap
-                location_valid = True
-                if self.ensure_valid_placement:
-                    for (x, y, z), _, other_obj in placed_objects.values():
-                        if (
-                            np.linalg.norm((object_x - x, object_y - y))
-                            <= other_obj.horizontal_radius + horizontal_radius
-                        ) and (object_z - z <= other_obj.top_offset[-1] - bottom_offset[-1]):
-                            location_valid = False
-                            break
+                    object_x = self._sample_x(horizontal_radius) + base_offset[0]
 
-                if location_valid:
-                    # random rotation
-                    quat = self._sample_quat()
+                    object_z = self.z_offset + base_offset[2]
+                    if on_top:
+                        object_z -= bottom_offset[-1]
 
-                    # multiply this quat by the object's initial rotation if it has the attribute specified
-                    if hasattr(obj, "init_quat"):
-                        quat = quat_multiply(quat, obj.init_quat)
+                    # objects cannot overlap
+                    location_valid = True
+                    if self.ensure_valid_placement:
+                        for (x, y, z), _, other_obj in placed_objects.values():
+                            if (
+                                np.linalg.norm((object_x - x, object_y - y))
+                                <= other_obj.horizontal_radius + horizontal_radius
+                            ) and (object_z - z <= other_obj.top_offset[-1] - bottom_offset[-1]):
+                                location_valid = False
+                                break
 
-                    # location is valid, put the object down
-                    pos = (object_x, object_y, object_z)
-                    placed_objects[obj.name] = (pos, quat, obj)
-                    success = True
+                    if location_valid:
+                        # random rotation
+                        quat = self._sample_quat()
+
+                        # multiply this quat by the object's initial rotation if it has the attribute specified
+                        if hasattr(obj, "init_quat"):
+                            quat = quat_multiply(quat, obj.init_quat)
+
+                        # location is valid, put the object down
+                        pos = (object_x, object_y, object_z)
+                        placed_objects[obj.name] = (pos, quat, obj)
+                        success = True
+                        break
+
+                if not success:
+                    resample_flag = True
                     break
-
-            if not success:
+            if not resample_flag:
+                break
+            if sample_idx == 9:
                 raise RandomizationError("Cannot place all objects ):")
 
         return placed_objects

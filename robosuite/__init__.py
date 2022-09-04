@@ -12,7 +12,7 @@ from robosuite.environments.manipulation.two_arm_peg_in_hole import TwoArmPegInH
 from robosuite.environments.manipulation.two_arm_handover import TwoArmHandover
 from robosuite.environments.manipulation.tidy import Tidy
 from robosuite.environments.manipulation.cleanup import CleanUp
-from robosuite.environments.manipulation.tidy_real import TidyReal1, TidyReal2, TidyReal3
+from robosuite.environments.manipulation.tidy_real import TidyReal1, TidyReal2, TidyReal3, TidyRealExploreSmall, TidyRealExploreLarge
 from robosuite.environments.manipulation.cleanup_pnp import CleanUpPnP
 
 from robosuite.environments import ALL_ENVIRONMENTS
