@@ -93,6 +93,7 @@ def collect_human_trajectory(env, device, arm, env_configuration, only_yaw):
 
         obs = get_obs(env)
         eef_pos = get_eef_pos(obs)
+        print(eef_pos[2])
         for pos_i in range(3):
             if eef_pos[pos_i] < env.data_eef_bounds[0][pos_i] and action[pos_i] < 0:
                 action[pos_i] = 0

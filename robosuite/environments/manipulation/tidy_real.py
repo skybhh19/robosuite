@@ -195,12 +195,12 @@ class TidyReal(SingleArmEnv):
 
         self.eef_bounds = np.array([
                 [-0.28, -0.32, 0.90],
-                [0.16, 0.32, 1.05]
+                [0.15, 0.32, 1.05]
             ])
 
         self.data_eef_bounds = np.array([
             [-0.26, -0.31, 0.90],
-            [0.15, 0.31, 1.04]
+            [0.14, 0.31, 1.04]
         ])
 
         super().__init__(
@@ -297,6 +297,8 @@ class TidyReal(SingleArmEnv):
                 size_max=obj_size,
                 rgba=[color, 0, 0, 1],
                 material=obj_material_list[i],
+                solimp=[0.998, 0.998, 0.001],
+                solref=[0.02, 1]
             )
             self.objs.append(obj)
 
@@ -484,26 +486,27 @@ class TidyReal(SingleArmEnv):
         return True
 
     def _get_skill_info(self):
-        pos_info = dict(
-            grasp=[],
-            push=[],
-            reach=[],
-        )
-
-        obj_positions = self.obj_positions
-
-        pos_info['obj_pos'] += obj_positions
-
-        info = {}
-        for k in pos_info:
-            info[k + '_pos'] = pos_info[k]
-
-        return info
+        return None
+        # pos_info = dict(
+        #     grasp=[],
+        #     push=[],
+        #     reach=[],
+        # )
+        #
+        # obj_positions = self.obj_positions
+        #
+        # # pos_info['obj_pos'] += obj_positions
+        #
+        # info = {}
+        # for k in pos_info:
+        #     info[k + '_pos'] = pos_info[k]
+        #
+        # return info
 
     def _get_env_info(self, action):
         env_info = {}
-        env_info['success_pnp'] = self._check_success_pnp()
-        env_info['success_push'] = self._check_success_push()
+        # env_info['success_pnp'] = self._check_success_pnp()
+        # env_info['success_push'] = self._check_success_push()
         env_info['success'] = self._check_success()
 
         return env_info

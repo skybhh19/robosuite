@@ -20,7 +20,7 @@ PRIMITIVE_TO_ID = {
     'atomic': 4
 }
 
-DELTA_XYZ_SCALE = np.array([0.4, 0.4, 0.])
+DELTA_XYZ_SCALE = np.array([0.4, 0.4, 0.01])
 
 ID_TO_PRIMITIVE = [
     'reach',
@@ -83,6 +83,7 @@ class SkillController:
             aff_tanh_scaling=10.0,
             binary_gripper=False,
             env_idx=env_idx,
+            push_height_thres=0.03
         )
 
         self.atomic = AtomicSkill(
@@ -118,6 +119,8 @@ class SkillController:
 
         self.push = PushSkill(
             max_ac_calls=120,
+            max_reach_steps=70,
+            max_push_steps=50,
             **base_config
         )
 
@@ -189,6 +192,7 @@ class SkillController:
         ret = skill.act(skill_args, norm=norm)
         if ret is not None:
             ret['info']['interest_interaction'] = skill.check_interesting_interaction()
+            ret['info']['done_interaction'] = skill.is_success()
         return ret
 
     def get_normalized_params(self, p_name, unnorm_params):
