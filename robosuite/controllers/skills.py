@@ -788,6 +788,9 @@ class PlaceSkill(BaseSkill):
             if (self._state != 'REACHED' or not (reached_xyz and reached_ori_y)) \
                     and self._num_reach_steps >= self._config['max_reach_steps']:
                 self._skill_is_success = False
+            self._state = 'REACHED'
+            self._num_place_steps += 1
+        elif reached_xy and reached_ori_y:
             grasped_flag = False
             for obj_id in range(len(self._env.objs)):
                 obj = self._env.objs[obj_id]
@@ -796,9 +799,6 @@ class PlaceSkill(BaseSkill):
                     break
             if not grasped_flag:
                 self._skill_is_interesting = False
-            self._state = 'REACHED'
-            self._num_place_steps += 1
-        elif reached_xy and reached_ori_y:
             self._state = 'HOVERING'
             self._num_reach_steps += 1
         elif reached_lift:
