@@ -260,7 +260,7 @@ class UniformRandomSampler(ObjectPositionSampler):
             ), "Invalid reference received. Should be (x,y,z) 3-tuple, but got: {}".format(base_offset)
 
         # Sample pos and quat for all objects assigned to this sampler
-        for sample_idx in range(100):
+        for sample_idx in range(1000):
             resample_flag = False
             for obj in self.mujoco_objects:
                 # First make sure the currently sampled object hasn't already been sampled
