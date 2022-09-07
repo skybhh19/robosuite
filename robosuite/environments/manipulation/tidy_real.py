@@ -528,6 +528,10 @@ class TidyReal(SingleArmEnv):
         # if vis_settings["grippers"]:
         #     self._visualize_gripper_to_target(gripper=self.robots[0].gripper, target=self.cubeA)
 
+    @property
+    def _has_gripper_contact(self):
+        return np.linalg.norm(self.robots[0].ee_force) > 20
+
 class TidyReal1(TidyReal):
 
     def __init__(self, **kwargs):
@@ -671,6 +675,3 @@ class TidyRealExploreLarge(TidyReal):
     def _check_success(self):
         return False
 
-    @property
-    def _has_gripper_contact(self):
-        return np.linalg.norm(self.robots[0].ee_force) > 20
