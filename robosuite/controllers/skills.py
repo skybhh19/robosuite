@@ -955,7 +955,8 @@ class PushSkill(BaseSkill):
     def _get_reach_pos(self):
         if self._normalize_params:
             push_reach_bounds = np.array(self._config['global_xyz_bounds']).copy()
-            push_reach_bounds[1][2] = push_reach_bounds[0][2] + self._config['push_height_thres']
+            if self._config['push_height_thres'] is not None:
+                push_reach_bounds[1][2] = push_reach_bounds[0][2] + self._config['push_height_thres']
             pos = self._get_unnormalized_params(
                 self._params[:3], push_reach_bounds)
         else:
@@ -1010,6 +1011,8 @@ class PushSkill(BaseSkill):
                 if reached_src_xy and reached_ori_y:
                     self._state = 'HOVERING'
                     self._num_reach_steps += 1
+                    if self._env._has_gripper_contact:
+                        self._skill_is_success = False
                 else:
                     if reached_lift:
                         self._state = 'LIFTED'

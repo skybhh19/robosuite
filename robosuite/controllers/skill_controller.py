@@ -83,7 +83,7 @@ class SkillController:
             aff_tanh_scaling=10.0,
             binary_gripper=False,
             env_idx=env_idx,
-            push_height_thres=0.03
+            push_height_thres=None
         )
 
         self.atomic = AtomicSkill(

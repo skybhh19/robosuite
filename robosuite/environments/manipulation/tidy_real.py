@@ -670,3 +670,7 @@ class TidyRealExploreLarge(TidyReal):
 
     def _check_success(self):
         return False
+
+    @property
+    def _has_gripper_contact(self):
+        return np.linalg.norm(self.robots[0].ee_force) > 20
