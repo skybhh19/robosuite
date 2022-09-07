@@ -348,6 +348,8 @@ class CleanUp(SingleArmEnv):
 
         mujoco_objects = self.pnp_objs + self.push_objs
 
+        self.objs = mujoco_objects
+
         # Create placement initializer
         # if self.placement_initializer is not None:
         #     self.placement_initializer.reset()
@@ -397,6 +399,13 @@ class CleanUp(SingleArmEnv):
             obj = self.push_objs[i]
             id = self.sim.model.body_name2id(obj.root_body)
             self.push_obj_body_ids.append(id)
+
+        self.obj_body_ids = []
+        for i in range(self.task_config['num_pnp_objs']+self.task_config['num_push_objs']):
+            obj = self.objs[i]
+            id = self.sim.model.body_name2id(obj.root_body)
+            self.obj_body_ids.append(id)
+
 
         self.bin_body_id = self.sim.model.body_name2id("bin")
 
