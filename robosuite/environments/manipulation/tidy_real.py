@@ -171,6 +171,7 @@ class TidyReal(SingleArmEnv):
         right_bin_obj_ids=None,
         left_mat_obj_ids=None,
         right_mat_obj_ids=None,
+        num_objs=4,
     ):
         # settings for table top
         self.table_full_size = table_full_size
@@ -187,7 +188,7 @@ class TidyReal(SingleArmEnv):
         # object placement initializer
         self.placement_initializer = placement_initializer
 
-        self.num_objs = 4
+        self.num_objs = num_objs
         self.left_bin_obj_ids = left_bin_obj_ids
         self.right_bin_obj_ids = right_bin_obj_ids
         self.left_mat_obj_ids = left_mat_obj_ids
@@ -467,14 +468,14 @@ class TidyReal(SingleArmEnv):
             obj_pos = self.sim.data.body_xpos[self.obj_body_ids[i]]
             target_pos_xy = np.array([-0.29, -0.105])
             d_push = np.linalg.norm(obj_pos[:2] - target_pos_xy)
-            if d_push > 0.05:
+            if d_push > 0.1:
                 return False
 
         for i in self.right_mat_obj_ids:
             obj_pos = self.sim.data.body_xpos[self.obj_body_ids[i]]
             target_pos_xy = np.array([-0.29, 0.105])
             d_push = np.linalg.norm(obj_pos[:2] - target_pos_xy)
-            if d_push > 0.05:
+            if d_push > 0.1:
                 return False
         return True
 
@@ -560,6 +561,17 @@ class TidyReal3(TidyReal):
                          right_bin_obj_ids=[2],
                          left_mat_obj_ids=[0],
                          right_mat_obj_ids=[3],
+                         **kwargs)
+
+class TidyReal4(TidyReal):
+
+    def __init__(self, **kwargs):
+        assert "single_object_mode" not in kwargs, "invalid set of arguments"
+        super().__init__(left_bin_obj_ids=[1],
+                         right_bin_obj_ids=[2],
+                         left_mat_obj_ids=[0],
+                         right_mat_obj_ids=[],
+                         num_objs=3,
                          **kwargs)
 
 class TidyRealExploreSmall(TidyReal):
