@@ -319,7 +319,7 @@ class TidyReal(SingleArmEnv):
             name="ObjectSampler",
             mujoco_objects=mujoco_objects,
             x_range=[-0.20, 0.10],
-            y_range=[-0.18, 0.18],
+            y_range=[-0.15, 0.15],
             rotation=None,
             ensure_object_boundary_in_range=True,
             ensure_valid_placement=True,
