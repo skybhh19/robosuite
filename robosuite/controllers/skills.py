@@ -1112,7 +1112,7 @@ class PushSkill(BaseSkill):
             initial_obj_pos = self._initial_obj_pos[obj_id]
             obs = get_obs(self._env)
             eef_pos = get_eef_pos(obs)
-            if np.linalg.norm(obj_pos - initial_obj_pos) > 0.08:
+            if np.linalg.norm(obj_pos[:2] - initial_obj_pos[:2]) > 0.07:
                 return True
         return False
 
