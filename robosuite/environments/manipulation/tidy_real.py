@@ -13,7 +13,6 @@ from robosuite.utils.placement_samplers import UniformRandomSampler,SequentialCo
 from robosuite.utils.transform_utils import convert_quat
 
 from robosuite.utils.mjcf_utils import CustomMaterial, array_to_string, add_material
-from robosuite_task_zoo.models.kitchen import PotObject, StoveObject, ButtonObject, ServingRegionObject
 
 class TidyReal(SingleArmEnv):
     """
@@ -171,7 +170,7 @@ class TidyReal(SingleArmEnv):
         right_bin_obj_ids=None,
         left_mat_obj_ids=None,
         right_mat_obj_ids=None,
-        num_objs=4,
+	num_objs=4,
     ):
         # settings for table top
         self.table_full_size = table_full_size
@@ -189,6 +188,15 @@ class TidyReal(SingleArmEnv):
         self.placement_initializer = placement_initializer
 
         self.num_objs = num_objs
+        self.objs_idx = sorted(left_bin_obj_ids + right_bin_obj_ids + left_mat_obj_ids + right_mat_obj_ids)
+        assert len(self.objs_idx) == self.num_objs
+        left_bin_obj_map_ids, right_bin_obj_map_ids, left_mat_obj_map_ids, right_mat_obj_map_ids = [], [], [], []
+        for _obj_ids_list in [left_bin_obj_ids, right_bin_obj_ids, left_mat_obj_ids, right_mat_obj_ids]:
+            for _id in range(len(_obj_ids_list)):
+                for _obj_id in range(len(self.objs_idx)):
+                    if self.objs_idx[_obj_id] == _obj_ids_list[_id]:
+                        _obj_ids_list[_id] = _obj_id
+                        break
         self.left_bin_obj_ids = left_bin_obj_ids
         self.right_bin_obj_ids = right_bin_obj_ids
         self.left_mat_obj_ids = left_mat_obj_ids
@@ -269,7 +277,7 @@ class TidyReal(SingleArmEnv):
 
         obj_texture_lst = ["Jello", "Spam", "Cereal", "Cheese"]
         obj_material_list = []
-        for i in range(self.num_objs):
+        for i in range(len(obj_texture_lst)):
             obj_material_list.append(
                 CustomMaterial(
                 texture=obj_texture_lst[i],
@@ -286,7 +294,7 @@ class TidyReal(SingleArmEnv):
             np.array([8.2, 4.8, 2.6]) * 0.01 / 2
         ]
         self.objs = []
-        for i in range(self.num_objs):
+        for i in self.objs_idx:
             if self.num_objs > 1:
                 color = 0.25 + 0.75 * i / (self.num_objs - 1)
             else:
@@ -468,14 +476,14 @@ class TidyReal(SingleArmEnv):
             obj_pos = self.sim.data.body_xpos[self.obj_body_ids[i]]
             target_pos_xy = np.array([-0.29, -0.105])
             d_push = np.linalg.norm(obj_pos[:2] - target_pos_xy)
-            if d_push > 0.1:
+            if d_push > 0.05:
                 return False
 
         for i in self.right_mat_obj_ids:
             obj_pos = self.sim.data.body_xpos[self.obj_body_ids[i]]
             target_pos_xy = np.array([-0.29, 0.105])
             d_push = np.linalg.norm(obj_pos[:2] - target_pos_xy)
-            if d_push > 0.1:
+            if d_push > 0.05:
                 return False
         return True
 
@@ -571,8 +579,32 @@ class TidyReal4(TidyReal):
                          right_bin_obj_ids=[2],
                          left_mat_obj_ids=[0],
                          right_mat_obj_ids=[],
-                         num_objs=3,
+			 num_objs=3,
                          **kwargs)
+
+
+class TidyReal5(TidyReal):
+
+    def __init__(self, **kwargs):
+        assert "single_object_mode" not in kwargs, "invalid set of arguments"
+        super().__init__(left_bin_obj_ids=[1],
+                         right_bin_obj_ids=[2, 3],
+                         left_mat_obj_ids=[],
+                         right_mat_obj_ids=[],
+			 num_objs=3,
+                         **kwargs)
+
+class TidyReal6(TidyReal):
+
+    def __init__(self, **kwargs):
+        assert "single_object_mode" not in kwargs, "invalid set of arguments"
+        super().__init__(left_bin_obj_ids=[],
+                         right_bin_obj_ids=[1],
+                         left_mat_obj_ids=[0],
+                         right_mat_obj_ids=[],
+			 num_objs=2,
+                         **kwargs)
+
 
 class TidyRealExploreSmall(TidyReal):
 
