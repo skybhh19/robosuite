@@ -751,13 +751,13 @@ class PlaceSkill(BaseSkill):
         super()._reset(params, norm)
         self._num_reach_steps = 0
         self._num_place_steps = 0
-        # self._initial_grasped_obj_body_id = None
+        self._initial_grasped_obj_body_id = None
         self._skill_is_success = True
         self._skill_is_interesting = True
-        # for obj_id in range(len(self._env.grasp_objs)):
-        #     obj = self._env.grasp_objs[obj_id]
+        # for obj_id in range(len(self._env.objs)):
+        #     obj = self._env.objs[obj_id]
         #     if self._env._check_grasp(gripper=self._env.robots[0].gripper, object_geoms=obj):
-        #         self._initial_grasped_obj_body_id = self._env.pnp_obj_body_ids[obj_id]
+        #         self._initial_grasped_obj_body_id = self._env.obj_body_ids[obj_id]
         #         break
 
     def _get_reach_pos(self):
@@ -897,7 +897,8 @@ class PlaceSkill(BaseSkill):
                 return False
         if not self._skill_is_interesting:
             return False
-        # if np.linalg.norm(eef_pos[:2] - self._env.sim.data.body_xpos[self._initial_grasped_obj_body_id][:2]) > 0.04:
+        # if np.linalg.norm(eef_pos[:2] - self._env.sim.data.body_xpos[self._initial_grasped_obj_body_id][:2]) > 0.05:
+        #     print()
         #     return False
         return True
 

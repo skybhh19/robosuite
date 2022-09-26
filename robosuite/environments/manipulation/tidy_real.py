@@ -170,7 +170,7 @@ class TidyReal(SingleArmEnv):
         right_bin_obj_ids=None,
         left_mat_obj_ids=None,
         right_mat_obj_ids=None,
-	num_objs=4,
+	    num_objs=4,
     ):
         # settings for table top
         self.table_full_size = table_full_size
@@ -188,15 +188,16 @@ class TidyReal(SingleArmEnv):
         self.placement_initializer = placement_initializer
 
         self.num_objs = num_objs
-        self.objs_idx = sorted(left_bin_obj_ids + right_bin_obj_ids + left_mat_obj_ids + right_mat_obj_ids)
-        assert len(self.objs_idx) == self.num_objs
-        left_bin_obj_map_ids, right_bin_obj_map_ids, left_mat_obj_map_ids, right_mat_obj_map_ids = [], [], [], []
-        for _obj_ids_list in [left_bin_obj_ids, right_bin_obj_ids, left_mat_obj_ids, right_mat_obj_ids]:
-            for _id in range(len(_obj_ids_list)):
-                for _obj_id in range(len(self.objs_idx)):
-                    if self.objs_idx[_obj_id] == _obj_ids_list[_id]:
-                        _obj_ids_list[_id] = _obj_id
-                        break
+        self.objs_idx = [o for o in range(self.num_objs)]
+        if left_bin_obj_ids is not None:
+            self.objs_idx = sorted(left_bin_obj_ids + right_bin_obj_ids + left_mat_obj_ids + right_mat_obj_ids)
+            assert len(self.objs_idx) == self.num_objs
+            for _obj_ids_list in [left_bin_obj_ids, right_bin_obj_ids, left_mat_obj_ids, right_mat_obj_ids]:
+                for _id in range(len(_obj_ids_list)):
+                    for _obj_id in range(len(self.objs_idx)):
+                        if self.objs_idx[_obj_id] == _obj_ids_list[_id]:
+                            _obj_ids_list[_id] = _obj_id
+                            break
         self.left_bin_obj_ids = left_bin_obj_ids
         self.right_bin_obj_ids = right_bin_obj_ids
         self.left_mat_obj_ids = left_mat_obj_ids
@@ -694,19 +695,27 @@ class TidyRealExploreLarge(TidyReal):
             UniformRandomSampler(
             name="ObjectSampler",
             mujoco_objects=mujoco_objects,
-            x_range=[-0.39, 0.11],
-            y_range=[-0.39, 0.39],
+            x_range=[-0.35, 0.11],
+            y_range=[-0.38, 0.38],
+            # x_range=[-0.39, 0.11],
+            # y_range=[-0.39, 0.39],
             rotation=None,
             ensure_object_boundary_in_range=True,
             ensure_valid_placement=True,
             reference_pos=self.table_offset,
             z_offset=0.01,
             conditioned_x_range=[
-                np.array([[-0.39, -0.22], [-0.17, 0.13]]),
-                np.array([[0.22, 0.39], [-0.17, 0.13]]),
-                np.array([[-0.21, 0.21], [-0.39, 0.11]]),
-                np.array([[-np.inf, np.inf], [-0.39, -0.18]])
+                np.array([[-0.38, -0.22], [-0.17, 0.13]]),
+                np.array([[0.22, 0.38], [-0.17, 0.13]]),
+                np.array([[-0.21, 0.21], [-0.28, 0.11]]),
+                np.array([[-np.inf, np.inf], [-0.28, -0.18]])
             ] # (y, x)
+            # conditioned_x_range=[
+            #     np.array([[-0.39, -0.22], [-0.17, 0.13]]),
+            #     np.array([[0.22, 0.39], [-0.17, 0.13]]),
+            #     np.array([[-0.21, 0.21], [-0.39, 0.11]]),
+            #     np.array([[-np.inf, np.inf], [-0.39, -0.18]])
+            # ] # (y, x)
         ))
 
         # task includes arena, robot, and objects of interest
