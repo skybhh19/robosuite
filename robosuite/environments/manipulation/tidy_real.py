@@ -580,7 +580,7 @@ class TidyReal4(TidyReal):
                          right_bin_obj_ids=[2],
                          left_mat_obj_ids=[0],
                          right_mat_obj_ids=[],
-			 num_objs=3,
+			             num_objs=3,
                          **kwargs)
 
 

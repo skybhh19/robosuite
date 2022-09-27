@@ -802,9 +802,25 @@ class PlaceSkill(BaseSkill):
             self._state = 'HOVERING'
             self._num_reach_steps += 1
         elif reached_lift:
+            grasped_flag = False
+            for obj_id in range(len(self._env.objs)):
+                obj = self._env.objs[obj_id]
+                if self._env._check_grasp(gripper=self._env.robots[0].gripper, object_geoms=obj):
+                    grasped_flag = True
+                    break
+            if not grasped_flag:
+                self._skill_is_interesting = False
             self._state = 'LIFTED'
             self._num_reach_steps += 1
         else:
+            grasped_flag = False
+            for obj_id in range(len(self._env.objs)):
+                obj = self._env.objs[obj_id]
+                if self._env._check_grasp(gripper=self._env.robots[0].gripper, object_geoms=obj):
+                    grasped_flag = True
+                    break
+            if not grasped_flag:
+                self._skill_is_interesting = False
             self._state = 'INIT'
             self._num_reach_steps += 1
 
