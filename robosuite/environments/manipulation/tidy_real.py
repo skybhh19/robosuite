@@ -14,6 +14,7 @@ from robosuite.utils.transform_utils import convert_quat
 
 from robosuite.utils.mjcf_utils import CustomMaterial, array_to_string, add_material
 
+MAX_OBJ_NUMS = 4
 class TidyReal(SingleArmEnv):
     """
     This class corresponds to the stacking task for a single robot arm.
@@ -294,6 +295,7 @@ class TidyReal(SingleArmEnv):
             np.array([10.3, 5.2, 2.2]) * 0.01 / 2,
             np.array([8.2, 4.8, 2.6]) * 0.01 / 2
         ]
+        assert len(obj_texture_lst) == len(obj_size_list) == len(obj_material_list) == MAX_OBJ_NUMS
         self.objs = []
         for i in self.objs_idx:
             if self.num_objs > 1:
@@ -417,6 +419,14 @@ class TidyReal(SingleArmEnv):
             @sensor(modality=modality)
             def obj_quat(obs_cache):
                 return np.array(self.obj_quats).flatten()
+
+            @sensor(modality=modality)
+            def obj_ind(obs_cache):
+                assert self.num_objs <= MAX_OBJ_NUMS
+                objs_ind = np.zeros(self.num_objs, MAX_OBJ_NUMS)
+                for i in range(self.num_objs):
+                    objs_ind[i][self.objs_idx[i]] = 1
+                return objs_ind
 
             @sensor(modality=modality)
             def object_centric(obs_cache):
