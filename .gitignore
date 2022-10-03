@@ -113,3 +113,5 @@ mjkey.txt
 
 .pytest_cache/
 robosuite/models/assets/demonstrations/
+
+robosuite/environments/manipulation/tidy_real_backup.py
