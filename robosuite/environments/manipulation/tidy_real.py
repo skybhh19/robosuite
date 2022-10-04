@@ -423,10 +423,10 @@ class TidyReal(SingleArmEnv):
             @sensor(modality=modality)
             def obj_ind(obs_cache):
                 assert self.num_objs <= MAX_OBJ_NUMS
-                objs_ind = np.zeros(self.num_objs, MAX_OBJ_NUMS)
+                objs_ind = np.zeros((self.num_objs, MAX_OBJ_NUMS))
                 for i in range(self.num_objs):
                     objs_ind[i][self.objs_idx[i]] = 1
-                return objs_ind
+                return objs_ind.flatten()
 
             @sensor(modality=modality)
             def object_centric(obs_cache):
@@ -449,7 +449,7 @@ class TidyReal(SingleArmEnv):
             #     obj_quat = np.array(self.obj_quats).flatten()
             #     return np.concatenate([obj_pos, obj_quat])
 
-            sensors = [obj_pos, obj_quat, object_centric]
+            sensors = [obj_pos, obj_quat, object_centric, obj_ind]
             names = [s.__name__ for s in sensors]
 
             # Create observables
