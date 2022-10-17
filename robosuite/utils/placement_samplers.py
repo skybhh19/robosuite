@@ -436,7 +436,7 @@ class SequentialCompositeSampler(ObjectPositionSampler):
         Raises:
             RandomizationError: [Cannot place all objects]
         """
-        for sample_idx in range(10):
+        for sample_idx in range(100):
             resample_flag = False
             # Standardize inputs
             placed_objects = {} if fixtures is None else copy(fixtures)

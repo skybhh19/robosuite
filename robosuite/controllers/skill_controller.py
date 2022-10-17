@@ -46,7 +46,7 @@ class SkillController:
 
     def __init__(self,
                  env,
-                 controller_type,
+                 controller_type='OSC_POSE',
                  image_obs_in_info=False,
                  aff_type='sparse',
                  render=False,
@@ -145,7 +145,10 @@ class SkillController:
         skill_args = output[:param_dim]
         try:
             if norm or p_name == 'atomic':
-                assert (skill_args <= 1.).all() and (skill_args >= -1.).all()
+                try:
+                    assert (skill_args <= 1.).all() and (skill_args >= -1.).all()
+                except:
+                    print("out of bounds:", skill_args)
             else:
                 norm_args = self.get_normalized_params(p_name=p_name, unnorm_params=skill_args)
                 assert (norm_args <= 1.).all and (skill_args >= -1.).all()
@@ -173,6 +176,9 @@ class SkillController:
         skill = self.name_to_skill[p_name]
         return skill.check_interesting_interaction()
 
+    def get_skill_param_dim(self, p_name):
+        skill = self.name_to_skill[p_name]
+        return skill.get_param_dim()
 
     def execute(self, p_name, output, norm, **kwargs):
         # len(args) = maximal argument length
