@@ -51,10 +51,12 @@ class SkillController:
                  aff_type='sparse',
                  render=False,
                  reach_use_gripper=False,
-                 env_idx=None):
+                 env_idx=None,
+                 output_mode=None):
 
         self._env = env
         self._env_idx = env_idx
+        self.output_mode = output_mode
         if controller_type == 'OSC_POSE':
             _use_ori_params = True
         elif controller_type == 'OSC_POSITION':
@@ -67,7 +69,7 @@ class SkillController:
             image_obs_in_info=image_obs_in_info,
             render=render,
             use_ori_params=_use_ori_params,
-            global_xyz_bounds=self._env.eef_bounds,
+            global_xyz_bounds=self._env.eef_bounds if self._env is not None else None,
             delta_xyz_scale=DELTA_XYZ_SCALE,
             yaw_bounds=np.array([
                 [-np.pi / 2],
@@ -133,16 +135,37 @@ class SkillController:
             push=self.push
         )
 
+        self.output_dim = 0
+        self.primitive_dim_info = {}
+        if self.output_mode == 'concat':
+            start_idx = 0
+            for _p_name in PRIMITIVE_TO_ID:
+                _param_dim = self.name_to_skill[_p_name].get_param_dim()
+                self.primitive_dim_info[_p_name] = dict(
+                    start_idx=start_idx,
+                    param_dim=_param_dim,
+                )
+                self.output_dim += _param_dim
+                start_idx += _param_dim
+        elif self.output_mode == 'max':
+            for _p_name in PRIMITIVE_TO_ID:
+                _param_dim = self.name_to_skill[_p_name].get_param_dim()
+                self.primitive_dim_info[_p_name] = dict(
+                    start_idx=0,
+                    param_dim=_param_dim
+                )
+                self.output_dim = max(self.output_dim, _param_dim)
+
     def get_skill(self, p_name):
         return self.name_to_skill[p_name]
 
     def test_start_state(self, p_name):
         return self.name_to_skill[p_name]._test_start_state()
 
-    def reset_skill(self, p_name, output, norm):
+    def reset_skill(self, p_name, skill_args, norm):
         skill = self.name_to_skill[p_name]
         param_dim = skill.get_param_dim()
-        skill_args = output[:param_dim]
+        assert len(skill_args) == param_dim
         try:
             if norm or p_name == 'atomic':
                 try:
@@ -161,7 +184,6 @@ class SkillController:
     def step_action(self, p_name):
         skill = self.name_to_skill[p_name]
         action = skill._get_action()
-        skill.skill_action_list.append(action)
         return action
 
     def skill_done(self, p_name):
@@ -176,15 +198,35 @@ class SkillController:
         skill = self.name_to_skill[p_name]
         return skill.check_interesting_interaction()
 
-    def get_skill_param_dim(self, p_name):
-        skill = self.name_to_skill[p_name]
-        return skill.get_param_dim()
+    def output_to_args(self, p_name, output):
+        start_idx, param_dim, total_dim = self.get_skill_param_dim(p_name)
+        assert len(output) == total_dim
+        return output[start_idx: start_idx + param_dim]
 
-    def execute(self, p_name, output, norm, **kwargs):
+    def args_to_output(self, p_name, skill_args):
+        start_idx, param_dim, total_dim = self.get_skill_param_dim(p_name)
+        assert len(skill_args) == param_dim
+        output = np.zeros(total_dim)
+        output[start_idx: start_idx + param_dim] = skill_args
+        return output
+
+    def get_skill_param_dim(self, p_name):
+        mask = np.zeros(self.output_dim)
+        mask[self.primitive_dim_info[p_name]['start_idx']: \
+             self.primitive_dim_info[p_name]['start_idx'] + self.primitive_dim_info[p_name]['param_dim']] = \
+            np.ones(len(self.primitive_dim_info[p_name]['param_dim']))
+        return dict(
+            start_idx=self.primitive_dim_info[p_name]['start_idx'],
+            param_dim=self.primitive_dim_info[p_name]['param_dim'],
+            output_dim=self.output_dim,
+            mask=mask
+        )
+
+    def execute(self, p_name, skill_args, norm, **kwargs):
         # len(args) = maximal argument length
         skill = self.name_to_skill[p_name]
         param_dim = skill.get_param_dim()
-        skill_args = output[:param_dim]
+        assert len(skill_args) == param_dim
         try:
             if norm or p_name == 'atomic':
                 assert (skill_args <= 1.).all() and (skill_args >= -1.).all()

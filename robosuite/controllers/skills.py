@@ -29,7 +29,6 @@ class BaseSkill:
         self._state = None
         self._normalize_params = None
         self.skill_obs_list = []
-        self.skill_action_list = []
         self.skill_image_obs_list = []
         # self._aff_reward = None
         # self._aff_success = None
