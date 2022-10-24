@@ -75,7 +75,7 @@ class SkillController:
                 [-np.pi / 2],
                 [np.pi / 2]
             ]),
-            lift_height=env.table_offset[2] + 0.15,
+            lift_height=env.table_offset[2] + 0.15  if self._env is not None else None,
             lift_thres=0.02,
             reach_thres=0.01,
             push_thres=0.015,
@@ -199,22 +199,22 @@ class SkillController:
         return skill.check_interesting_interaction()
 
     def output_to_args(self, p_name, output):
-        start_idx, param_dim, total_dim = self.get_skill_param_dim(p_name)
-        assert len(output) == total_dim
-        return output[start_idx: start_idx + param_dim]
+        param_dim_info = self.get_skill_param_dim(p_name)
+        assert len(output) == self.output_dim
+        return output[param_dim_info['start_idx']: param_dim_info['start_idx'] + param_dim_info['param_dim']]
 
     def args_to_output(self, p_name, skill_args):
-        start_idx, param_dim, total_dim = self.get_skill_param_dim(p_name)
-        assert len(skill_args) == param_dim
-        output = np.zeros(total_dim)
-        output[start_idx: start_idx + param_dim] = skill_args
+        param_dim_info = self.get_skill_param_dim(p_name)
+        assert len(skill_args) == param_dim_info['param_dim']
+        output = np.zeros(self.output_dim)
+        output[param_dim_info['start_idx']: param_dim_info['start_idx'] + param_dim_info['param_dim']] = skill_args
         return output
 
     def get_skill_param_dim(self, p_name):
         mask = np.zeros(self.output_dim)
         mask[self.primitive_dim_info[p_name]['start_idx']: \
              self.primitive_dim_info[p_name]['start_idx'] + self.primitive_dim_info[p_name]['param_dim']] = \
-            np.ones(len(self.primitive_dim_info[p_name]['param_dim']))
+            np.ones(self.primitive_dim_info[p_name]['param_dim'])
         return dict(
             start_idx=self.primitive_dim_info[p_name]['start_idx'],
             param_dim=self.primitive_dim_info[p_name]['param_dim'],

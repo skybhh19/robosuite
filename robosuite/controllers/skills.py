@@ -51,9 +51,10 @@ class BaseSkill:
             **config,
         )
 
-        for k in ['global_xyz_bounds', 'delta_xyz_scale']:
-            assert self._config[k] is not None
-            self._config[k] = np.array(self._config[k])
+        if env is not None:
+            for k in ['global_xyz_bounds', 'delta_xyz_scale']:
+                assert self._config[k] is not None
+                self._config[k] = np.array(self._config[k])
 
         assert self._config['aff_type'] in [None, 'sparse', 'dense']
 
