@@ -13,7 +13,7 @@ from robosuite.utils.placement_samplers import UniformRandomSampler,SequentialCo
 from robosuite.utils.transform_utils import convert_quat
 
 from robosuite.utils.mjcf_utils import CustomMaterial, array_to_string, add_material
-from robosuite_task_zoo.models.kitchen import PotObject, StoveObject, ButtonObject, ServingRegionObject
+from robosuite.models.objects import PotObject, StoveObject, ButtonObject, ServingRegionObject
 
 
 class Tidy(SingleArmEnv):

@@ -17,9 +17,13 @@ from robosuite.models.objects import (
     BreadObject,
     MilkObject,
     FishObject,
+    CarrotObject,
+    PotObject,
+    StoveObject,
+    ButtonObject,
+    CabinetObject,
+    ServingRegionObject
 )
-from robosuite_task_zoo.models.kitchen import PotObject, StoveObject, ButtonObject, ServingRegionObject
-
 
 class Kitchen(SingleArmEnv):
     """
@@ -53,7 +57,7 @@ class Kitchen(SingleArmEnv):
             camera_heights=256,
             camera_widths=256,
             camera_depths=False,
-            contact_threshold=2.0
+            contact_threshold=2.0,
     ):
         # settings for table top (hardcoded since it's not an essential part of the environment)
         self.table_full_size = (1.0, 0.8, 0.05)
@@ -87,10 +91,20 @@ class Kitchen(SingleArmEnv):
         self.num_stoves = 0
         self.has_stove_turned_on = False
 
-        self.food_items_to_id = {"milk": 0, "bread": 1, "fish": 2}
-        self.food_items_names = ["Milk", "Bread", "Fish"]
+        self.food_items_to_id = {"milk": 0, "bread": 1, "fish": 2, "carrot": 3}
+        self.food_items_names = ["Milk", "Bread", "Fish", "Carrot"]
 
         self.objects = []
+
+        self.eef_bounds = np.array([
+            [-0.28, -0.32, 0.90],
+            [0.15, 0.32, 1.16]
+        ])
+
+        self.data_eef_bounds = np.array([
+            [-0.26, -0.31, 0.90],
+            [0.14, 0.31, 1.15]
+        ])
 
         super().__init__(
             robots=robots,
@@ -239,45 +253,63 @@ class Kitchen(SingleArmEnv):
         bluewood = CustomMaterial(
             texture="WoodBlue",
             tex_name="bluewood",
-            mat_name="handle1_mat",
+            mat_name="MatBlueWood",
+            # tex_attrib=tex_attrib,
+            # mat_attrib=mat_attrib,
             tex_attrib={"type": "cube"},
             mat_attrib={"texrepeat": "1 1", "specular": "0.4", "shininess": "0.1"},
+        )
+
+        ceramic = CustomMaterial(
+            texture="Ceramic",
+            tex_name="ceramic",
+            mat_name="MatCeramic",
+            tex_attrib={"type": "cube"},
+            mat_attrib={"specular": "1", "shininess": "0.3", "rgba": "0.9 0.9 0.9 1"}
         )
 
         self.stove_object_1 = StoveObject(
             name="Stove1",
             joints=None,
         )
-        stove_body = self.stove_object_1.get_obj();
-        stove_body.set("pos", array_to_string((0.23, 0.095, 0.02)));
+        stove_body = self.stove_object_1.get_obj()
+        stove_body.set("pos", array_to_string((0.23, 0.18, 0.02)))
         mujoco_arena.table_body.append(stove_body)
 
         self.button_object_1 = ButtonObject(
             name="Button1",
         )
 
-        button_body = self.button_object_1.get_obj();
-        button_body.set("quat", array_to_string((0., 0., 0., 1.)));
-        button_body.set("pos", array_to_string((0.06, 0.10, 0.02)));
+        button_body = self.button_object_1.get_obj()
+        button_body.set("quat", array_to_string((0., 0., 0., 1.)))
+        button_body.set("pos", array_to_string((0.06, 0.20, 0.02)))
         mujoco_arena.table_body.append(button_body)
 
         self.serving_region = ServingRegionObject(
             name="ServingRegionRed"
         )
-        serving_region_object = self.serving_region.get_obj();
-        serving_region_object.set("pos", array_to_string((0.345, -0.15, 0.003)));
+        serving_region_object = self.serving_region.get_obj()
+        serving_region_object.set("pos", array_to_string((0.35, -0.02, 0.003)))
         mujoco_arena.table_body.append(serving_region_object)
 
         self.pot_object = PotObject(
             name="PotObject",
         )
 
+        self.cabinet_object = CabinetObject(
+            name="CabinetObject")
+        cabinet_object = self.cabinet_object.get_obj()
+        cabinet_object.set("quat", array_to_string((0., 0., 0., 1.)))
+        cabinet_object.set("pos", array_to_string((0.15, -0.35, 0.03)))
+        mujoco_arena.table_body.append(cabinet_object)
+
         for obj_body in [
             self.button_object_1,
             self.stove_object_1,
             self.serving_region,
+            self.cabinet_object,
         ]:
-            for material in [darkwood, metal, redwood]:
+            for material in [darkwood, metal, redwood, ceramic]:
                 tex_element, mat_element, _, used = add_material(root=obj_body.worldbody,
                                                                  naming_prefix=obj_body.naming_prefix,
                                                                  custom_material=deepcopy(material))
@@ -298,7 +330,7 @@ class Kitchen(SingleArmEnv):
         self.food_item_objects = []
 
         for obj_cls, obj_name in zip(
-            (MilkObject, BreadObject, FishObject),
+            (MilkObject, BreadObject, FishObject, CarrotObject),
             self.food_items_names,
         ):
             obj = obj_cls(name=obj_name)
@@ -329,41 +361,39 @@ class Kitchen(SingleArmEnv):
         self.objects = [
             *(mujoco_objects),
             self.stove_object_1,
-            self.serving_region
+            self.serving_region,
+            self.cabinet_object,
         ]
-
         self.model.merge_assets(self.button_object_1)
         self.model.merge_assets(self.stove_object_1)
         self.model.merge_assets(self.serving_region)
-
-
+        self.model.merge_assets(self.cabinet_object)
 
 
     def _get_placement_initializer(self):
         self.placement_initializer = SequentialCompositeSampler(name="ObjectSampler")
 
-        # Create placement initializer
-
         self.placement_initializer.append_sampler(
             sampler=UniformRandomSampler(
                 name="ObjectSampler-food",
                 mujoco_objects=self.food_item_objects,
-                x_range=[0., 0.1],
-                y_range=[-0.18, 0.],
-                rotation=(-np.pi / 2., -np.pi / 2.),
+                x_range=[-0.15, 0.12],
+                y_range=[-0.18, 0.12],
+                rotation=(-np.pi / 6., np.pi / 6.),
                 rotation_axis='z',
                 ensure_object_boundary_in_range=True,
                 ensure_valid_placement=True,
                 reference_pos=self.table_offset,
-                z_offset=0.01,
+                z_offset=0.02,
             ))
 
+        # Create placement initializer
         self.placement_initializer.append_sampler(
             sampler=UniformRandomSampler(
                 name="ObjectSampler-pot",
                 mujoco_objects=self.pot_object,
-                x_range=[0.18, 0.2],
-                y_range=[-0.15, -0.13],
+                x_range=[0.18, 0.22],
+                y_range=[-0.02, -0.02],
                 rotation=(-0.1, 0.1),
                 rotation_axis='z',
                 ensure_object_boundary_in_range=False,
@@ -371,6 +401,7 @@ class Kitchen(SingleArmEnv):
                 reference_pos=self.table_offset,
                 z_offset=-0.1,
             ))
+
 
     def _setup_references(self):
         """
@@ -390,6 +421,8 @@ class Kitchen(SingleArmEnv):
         # self.button_qpos_addrs.update({2: self.sim.model.get_joint_qpos_addr(self.button_object_2.joints[0])})
 
         self.serving_region_id = self.sim.model.body_name2id(self.serving_region.root_body)
+
+        self.cabinet_qpos_addrs = self.sim.model.get_joint_qpos_addr(self.cabinet_object.joints[0])
 
         self.sim.data.set_joint_qpos(self.button_object_1.joints[0], np.array([-0.4]))
 

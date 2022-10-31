@@ -17,9 +17,14 @@ from .xml_objects import (
     CanVisualObject,
     PlateWithHoleObject,
     DoorObject,
+    StoveObject,
+    ServingRegionObject,
+    ButtonObject,
+    CabinetObject,
 )
 from .mjcf_objects import (
-    FishObject
+    FishObject,
+    CarrotObject
 )
 from .primitive import *
 from .composite import *

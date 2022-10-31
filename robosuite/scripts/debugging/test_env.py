@@ -26,9 +26,11 @@ env = suite.make(**options,
                  control_freq=20,
                  use_object_obs=True,)
 obs = env.reset()
-# for i in range(1000):
+# for i in range(10):
 #     env.reset()
-#     print(i)
+#     obs, _, _, _ = env.step([0, 0, 0, 0])
+#     env.render()
+#     input()
 for _ in range(1000):
     env.render()
     obs, _, _, _ = env.step([0, 0, 0, 0])
