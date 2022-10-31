@@ -1,15 +1,18 @@
-import copy
-import os
-from collections import OrderedDict
-
 import numpy as np
 
+from collections import OrderedDict
+
 import robosuite.utils.transform_utils as T
-from robosuite.controllers import controller_factory, load_controller_config
+
 from robosuite.models.grippers import gripper_factory
+from robosuite.controllers import controller_factory, load_controller_config
+
 from robosuite.robots.manipulator import Manipulator
 from robosuite.utils.buffers import DeltaBuffer, RingBuffer
 from robosuite.utils.observables import Observable, sensor
+
+import os
+import copy
 
 
 class SingleArm(Manipulator):
@@ -61,7 +64,7 @@ class SingleArm(Manipulator):
         initialization_noise=None,
         mount_type="default",
         gripper_type="default",
-        control_freq=20,
+        control_freq=20
     ):
 
         self.controller = None
@@ -69,21 +72,21 @@ class SingleArm(Manipulator):
         self.gripper_type = gripper_type
         self.has_gripper = self.gripper_type is not None
 
-        self.gripper = None  # Gripper class
-        self.gripper_joints = None  # xml joint names for gripper
-        self._ref_gripper_joint_pos_indexes = None  # xml gripper joint position indexes in mjsim
-        self._ref_gripper_joint_vel_indexes = None  # xml gripper joint velocity indexes in mjsim
-        self._ref_joint_gripper_actuator_indexes = None  # xml gripper (pos) actuator indexes for robot in mjsim
-        self.eef_rot_offset = None  # rotation offsets from final arm link to gripper (quat)
-        self.eef_site_id = None  # xml element id for eef in mjsim
-        self.eef_cylinder_id = None  # xml element id for eef cylinder in mjsim
-        self.torques = None  # Current torques being applied
+        self.gripper = None                                 # Gripper class
+        self.gripper_joints = None                          # xml joint names for gripper
+        self._ref_gripper_joint_pos_indexes = None          # xml gripper joint position indexes in mjsim
+        self._ref_gripper_joint_vel_indexes = None          # xml gripper joint velocity indexes in mjsim
+        self._ref_joint_gripper_actuator_indexes = None     # xml gripper (pos) actuator indexes for robot in mjsim
+        self.eef_rot_offset = None                          # rotation offsets from final arm link to gripper (quat)
+        self.eef_site_id = None                             # xml element id for eef in mjsim
+        self.eef_cylinder_id = None                         # xml element id for eef cylinder in mjsim
+        self.torques = None                                 # Current torques being applied
 
-        self.recent_ee_forcetorques = None  # Current and last forces / torques sensed at eef
-        self.recent_ee_pose = None  # Current and last eef pose (pos + ori (quat))
-        self.recent_ee_vel = None  # Current and last eef velocity
-        self.recent_ee_vel_buffer = None  # RingBuffer holding prior 10 values of velocity values
-        self.recent_ee_acc = None  # Current and last eef acceleration
+        self.recent_ee_forcetorques = None                  # Current and last forces / torques sensed at eef
+        self.recent_ee_pose = None                          # Current and last eef pose (pos + ori (quat))
+        self.recent_ee_vel = None                           # Current and last eef velocity
+        self.recent_ee_vel_buffer = None                    # RingBuffer holding prior 10 values of velocity values
+        self.recent_ee_acc = None                           # Current and last eef acceleration
 
         super().__init__(
             robot_type=robot_type,
@@ -101,19 +104,16 @@ class SingleArm(Manipulator):
         # First, load the default controller if none is specified
         if not self.controller_config:
             # Need to update default for a single agent
-            controller_path = os.path.join(
-                os.path.dirname(__file__),
-                "..",
-                "controllers/config/{}.json".format(self.robot_model.default_controller_config),
-            )
+            controller_path = os.path.join(os.path.dirname(__file__), '..',
+                                           'controllers/config/{}.json'.format(
+                                               self.robot_model.default_controller_config))
             self.controller_config = load_controller_config(custom_fpath=controller_path)
 
         # Assert that the controller config is a dict file:
         #             NOTE: "type" must be one of: {JOINT_POSITION, JOINT_TORQUE, JOINT_VELOCITY,
         #                                           OSC_POSITION, OSC_POSE, IK_POSE}
-        assert (
-            type(self.controller_config) == dict
-        ), "Inputted controller config must be a dict! Instead, got type: {}".format(type(self.controller_config))
+        assert type(self.controller_config) == dict, \
+            "Inputted controller config must be a dict! Instead, got type: {}".format(type(self.controller_config))
 
         # Add to the controller dict additional relevant params:
         #   the robot name, mujoco sim, eef_name, joint_indexes, timestep (model) freq,
@@ -125,8 +125,8 @@ class SingleArm(Manipulator):
         self.controller_config["joint_indexes"] = {
             "joints": self.joint_indexes,
             "qpos": self._ref_joint_pos_indexes,
-            "qvel": self._ref_joint_vel_indexes,
-        }
+            "qvel": self._ref_joint_vel_indexes
+                                              }
         self.controller_config["actuator_range"] = self.torque_limits
         self.controller_config["policy_freq"] = self.control_freq
         self.controller_config["ndim"] = len(self.robot_joints)
@@ -143,14 +143,13 @@ class SingleArm(Manipulator):
 
         # Verify that the loaded model is of the correct type for this robot
         if self.robot_model.arm_type != "single":
-            raise TypeError(
-                "Error loading robot model: Incompatible arm type specified for this robot. "
-                "Requested model arm type: {}, robot arm type: {}".format(self.robot_model.arm_type, type(self))
-            )
+            raise TypeError("Error loading robot model: Incompatible arm type specified for this robot. "
+                            "Requested model arm type: {}, robot arm type: {}"
+                            .format(self.robot_model.arm_type, type(self)))
 
         # Now, load the gripper if necessary
         if self.has_gripper:
-            if self.gripper_type == "default":
+            if self.gripper_type == 'default':
                 # Load the default gripper from the robot file
                 self.gripper = gripper_factory(self.robot_model.default_gripper, idn=self.idn)
             else:
@@ -178,7 +177,9 @@ class SingleArm(Manipulator):
         if not deterministic:
             # Now, reset the gripper if necessary
             if self.has_gripper:
-                self.sim.data.qpos[self._ref_gripper_joint_pos_indexes] = self.gripper.init_qpos
+                self.sim.data.qpos[
+                    self._ref_gripper_joint_pos_indexes
+                ] = self.gripper.init_qpos
 
         # Update base pos / ori references in controller
         self.controller.update_base_pose(self.base_pos, self.base_ori)
@@ -203,10 +204,15 @@ class SingleArm(Manipulator):
         # indices for grippers in qpos, qvel
         if self.has_gripper:
             self.gripper_joints = list(self.gripper.joints)
-            self._ref_gripper_joint_pos_indexes = [self.sim.model.get_joint_qpos_addr(x) for x in self.gripper_joints]
-            self._ref_gripper_joint_vel_indexes = [self.sim.model.get_joint_qvel_addr(x) for x in self.gripper_joints]
+            self._ref_gripper_joint_pos_indexes = [
+                self.sim.model.get_joint_qpos_addr(x) for x in self.gripper_joints
+            ]
+            self._ref_gripper_joint_vel_indexes = [
+                self.sim.model.get_joint_qvel_addr(x) for x in self.gripper_joints
+            ]
             self._ref_joint_gripper_actuator_indexes = [
-                self.sim.model.actuator_name2id(actuator) for actuator in self.gripper.actuators
+                self.sim.model.actuator_name2id(actuator)
+                for actuator in self.gripper.actuators
             ]
 
         # IDs of sites for eef visualization
@@ -229,14 +235,14 @@ class SingleArm(Manipulator):
         """
 
         # clip actions into valid range
-        assert len(action) == self.action_dim, "environment got invalid action dimension -- expected {}, got {}".format(
-            self.action_dim, len(action)
-        )
+        assert len(action) == self.action_dim, \
+            "environment got invalid action dimension -- expected {}, got {}".format(
+                self.action_dim, len(action))
 
         gripper_action = None
         if self.has_gripper:
-            gripper_action = action[self.controller.control_dim :]  # all indexes past controller dimension indexes
-            arm_action = action[: self.controller.control_dim]
+            gripper_action = action[self.controller.control_dim:]  # all indexes past controller dimension indexes
+            arm_action = action[:self.controller.control_dim]
         else:
             arm_action = action
 
@@ -270,10 +276,9 @@ class SingleArm(Manipulator):
 
             # Estimation of eef acceleration (averaged derivative of recent velocities)
             self.recent_ee_vel_buffer.push(np.concatenate((self.controller.ee_pos_vel, self.controller.ee_ori_vel)))
-            diffs = np.vstack(
-                [self.recent_ee_acc.current, self.control_freq * np.diff(self.recent_ee_vel_buffer.buf, axis=0)]
-            )
-            ee_acc = np.array([np.convolve(col, np.ones(10) / 10.0, mode="valid")[0] for col in diffs.transpose()])
+            diffs = np.vstack([self.recent_ee_acc.current,
+                               self.control_freq * np.diff(self.recent_ee_vel_buffer.buf, axis=0)])
+            ee_acc = np.array([np.convolve(col, np.ones(10) / 10., mode='valid')[0] for col in diffs.transpose()])
             self.recent_ee_acc.push(ee_acc)
 
     def _visualize_grippers(self, visible):
@@ -308,12 +313,21 @@ class SingleArm(Manipulator):
         def eef_quat(obs_cache):
             return T.convert_quat(self.sim.data.get_body_xquat(self.robot_model.eef_name), to="xyzw")
 
-        sensors = [eef_pos, eef_quat]
-        names = [f"{pf}eef_pos", f"{pf}eef_quat"]
+        @sensor(modality=modality)
+        def eef_vel_lin(obs_cache):
+            return np.array(self.sim.data.get_body_xvelp(self.robot_model.eef_name))
+
+        @sensor(modality=modality)
+        def eef_vel_ang(obs_cache):
+            return np.array(self.sim.data.get_body_xvelr(self.robot_model.eef_name))
+
+        sensors = [eef_pos, eef_quat, eef_vel_lin, eef_vel_ang]
+        names = [f"{pf}eef_pos", f"{pf}eef_quat", f"{pf}eef_vel_lin", f"{pf}eef_vel_ang"]
+        # Exclude eef vel by default
+        actives = [True, True, False, False]
 
         # add in gripper sensors if this robot has a gripper
         if self.has_gripper:
-
             @sensor(modality=modality)
             def gripper_qpos(obs_cache):
                 return np.array([self.sim.data.qpos[x] for x in self._ref_gripper_joint_pos_indexes])
@@ -324,13 +338,15 @@ class SingleArm(Manipulator):
 
             sensors += [gripper_qpos, gripper_qvel]
             names += [f"{pf}gripper_qpos", f"{pf}gripper_qvel"]
+            actives += [True, True]
 
         # Create observables for this robot
-        for name, s in zip(names, sensors):
+        for name, s, active in zip(names, sensors, actives):
             observables[name] = Observable(
                 name=name,
                 sensor=s,
                 sampling_rate=self.control_freq,
+                active=active,
             )
 
         return observables

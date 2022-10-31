@@ -1,13 +1,12 @@
 # utility functions for manipulating MJCF XML models
 
-import os
 import xml.etree.ElementTree as ET
-from collections.abc import Iterable
-from copy import deepcopy
-from pathlib import Path
-
+import os
 import numpy as np
+from collections.abc import Iterable
 from PIL import Image
+from pathlib import Path
+from copy import deepcopy
 
 import robosuite
 
@@ -59,35 +58,11 @@ SENSOR_TYPES = {
 }
 
 MUJOCO_NAMED_ATTRIBUTES = {
-    "class",
-    "childclass",
-    "name",
-    "objname",
-    "material",
-    "texture",
-    "joint",
-    "joint1",
-    "joint2",
-    "jointinparent",
-    "geom",
-    "geom1",
-    "geom2",
-    "mesh",
-    "fixed",
-    "actuator",
-    "objname",
-    "tendon",
-    "tendon1",
-    "tendon2",
-    "slidesite",
-    "cranksite",
-    "body",
-    "body1",
-    "body2",
-    "hfield",
-    "target",
-    "prefix",
-    "site",
+    "class", "childclass", "name", "objname", "material", "texture",
+    "joint", "joint1", "joint2", "jointinparent", "geom", "geom1", "geom2",
+    "mesh", "fixed", "actuator", "objname", "tendon", "tendon1", "tendon2",
+    "slidesite", "cranksite", "body", "body1", "body2", "hfield", "target",
+    "prefix", "site",
 }
 
 IMAGE_CONVENTION_MAPPING = {
@@ -95,7 +70,7 @@ IMAGE_CONVENTION_MAPPING = {
     "opencv": -1,
 }
 
-TEXTURE_FILES = {
+TEXTURES = {
     "WoodRed": "red-wood.png",
     "WoodGreen": "green-wood.png",
     "WoodBlue": "blue-wood.png",
@@ -123,10 +98,6 @@ TEXTURE_FILES = {
     "Glass": "glass.png",
     "FeltGray": "gray-felt.png",
     "Lemon": "lemon.png",
-}
-
-TEXTURES = {
-    texture_name: os.path.join("textures", texture_file) for (texture_name, texture_file) in TEXTURE_FILES.items()
 }
 
 ALL_TEXTURES = TEXTURES.keys()
@@ -165,29 +136,26 @@ class CustomMaterial(object):
     """
 
     def __init__(
-        self,
-        texture,
-        tex_name,
-        mat_name,
-        tex_attrib=None,
-        mat_attrib=None,
-        shared=False,
+            self,
+            texture,
+            tex_name,
+            mat_name,
+            tex_attrib=None,
+            mat_attrib=None,
+            shared=False,
     ):
         # Check if the desired texture is an rgba value
         if type(texture) is str:
             default = False
             # Verify that requested texture is valid
             assert texture in ALL_TEXTURES, "Error: Requested invalid texture. Got {}. Valid options are:\n{}".format(
-                texture, ALL_TEXTURES
-            )
+                texture, ALL_TEXTURES)
         else:
             default = True
             # If specified, this is an rgba value and a default texture is desired; make sure length of rgba array is 4
             if texture is not None:
-                assert len(texture) == 4, (
-                    "Error: Requested default texture. Got array of length {}."
-                    "Expected rgba array of length 4.".format(len(texture))
-                )
+                assert len(texture) == 4, "Error: Requested default texture. Got array of length {}." \
+                                          "Expected rgba array of length 4.".format(len(texture))
 
         # Setup the texture and material attributes
         self.tex_attrib = {} if tex_attrib is None else tex_attrib.copy()
@@ -212,11 +180,11 @@ class CustomMaterial(object):
         # Handle default and non-default cases separately for linking texture patch file locations
         if not default:
             # Add in the filepath to texture patch
-            self.tex_attrib["file"] = xml_path_completion(TEXTURES[texture])
+            self.tex_attrib["file"] = xml_path_completion("textures/" + TEXTURES[texture])
         else:
             if texture is not None:
                 # Create a texture patch
-                tex = Image.new("RGBA", (100, 100), tuple((np.array(texture) * 255).astype("int")))
+                tex = Image.new('RGBA', (100, 100), tuple((np.array(texture)*255).astype('int')))
                 # Create temp directory if it does not exist
                 save_dir = "/tmp/robosuite_temp_tex"
                 Path(save_dir).mkdir(parents=True, exist_ok=True)
@@ -385,7 +353,7 @@ def new_site(name, rgba=RED, pos=(0, 0, 0), size=(0.005,), **kwargs):
         name (str): Name for this site
         rgba (4-array): (r,g,b,a) color and transparency. Defaults to solid red.
         pos (3-array): (x,y,z) 3d position of the site.
-        size (array of float): site size (sites are spherical by default).
+        size (n-array of float): site size (sites are spherical by default).
         **kwargs: Any additional specified attributes for the new site
 
     Returns:
@@ -458,7 +426,11 @@ def new_inertial(pos=(0, 0, 0), mass=None, **kwargs):
     return new_element(tag="inertial", name=None, **kwargs)
 
 
-def get_size(size, size_max, size_min, default_max, default_min):
+def get_size(size,
+             size_max,
+             size_min,
+             default_max,
+             default_min):
     """
     Helper method for providing a size, or a range to randomize from
 
@@ -476,19 +448,20 @@ def get_size(size, size_max, size_min, default_max, default_min):
         ValueError: [Inconsistent array sizes]
     """
     if len(default_max) != len(default_min):
-        raise ValueError(
-            "default_max = {} and default_min = {}".format(str(default_max), str(default_min))
-            + " have different lengths"
-        )
+        raise ValueError('default_max = {} and default_min = {}'
+                         .format(str(default_max), str(default_min)) +
+                         ' have different lengths')
     if size is not None:
         if (size_max is not None) or (size_min is not None):
-            raise ValueError("size = {} overrides size_max = {}, size_min = {}".format(size, size_max, size_min))
+            raise ValueError('size = {} overrides size_max = {}, size_min = {}'
+                             .format(size, size_max, size_min))
     else:
         if size_max is None:
             size_max = default_max
         if size_min is None:
             size_min = default_min
-        size = np.array([np.random.uniform(size_min[i], size_max[i]) for i in range(len(default_max))])
+        size = np.array([np.random.uniform(size_min[i], size_max[i])
+                         for i in range(len(default_max))])
     return np.array(size)
 
 
@@ -520,7 +493,9 @@ def postprocess_model_xml(xml_str):
         if old_path is None:
             continue
         old_path_split = old_path.split("/")
-        ind = max(loc for loc, val in enumerate(old_path_split) if val == "robosuite")  # last occurrence index
+        ind = max(
+            loc for loc, val in enumerate(old_path_split) if val == "robosuite"
+        )  # last occurrence index
         new_path_split = path_split + old_path_split[ind + 1 :]
         new_path = "/".join(new_path_split)
         elem.set("file", new_path)
@@ -558,11 +533,11 @@ def add_to_dict(dic, fill_in_defaults=True, default_value=None, **kwargs):
 
 
 def add_prefix(
-    root,
-    prefix,
-    tags="default",
-    attribs="default",
-    exclude=None,
+        root,
+        prefix,
+        tags="default",
+        attribs="default",
+        exclude=None,
 ):
     """
     Find all element(s) matching the requested @tag, and appends @prefix to all @attributes if they exist.
@@ -757,7 +732,10 @@ def sort_elements(root, parent=None, element_filter=None, _elements_dict=None):
     # Loop through all possible subtrees for this XML recurisvely
     for r in root:
         _elements_dict = sort_elements(
-            root=r, parent=root, element_filter=element_filter, _elements_dict=_elements_dict
+            root=r,
+            parent=root,
+            element_filter=element_filter,
+            _elements_dict=_elements_dict
         )
 
     return _elements_dict
@@ -835,57 +813,3 @@ def find_elements(root, tags, attribs=None, return_first=True):
                 elements += found_elements if type(found_elements) is list else [found_elements]
 
     return elements if elements else None
-
-
-def save_sim_model(sim, fname):
-    """
-    Saves the current model xml from @sim at file location @fname.
-
-    Args:
-        sim (MjSim): XML file to save, in string form
-        fname (str): Absolute filepath to the location to save the file
-    """
-    with open(fname, "w") as f:
-        sim.save(file=f, format="xml")
-
-
-def get_ids(sim, elements, element_type="geom", inplace=False):
-    """
-    Grabs the mujoco IDs for each element in @elements, corresponding to the specified @element_type.
-
-    Args:
-        sim (MjSim): Active mujoco simulation object
-        elements (str or list or dict): Element(s) to convert into IDs. Note that the return type corresponds to
-            @elements type, where each element name is replaced with the ID
-        element_type (str): The type of element to grab ID for. Options are {geom, body, site}
-        inplace (bool): If False, will create a copy of @elements to prevent overwriting the original data structure
-
-    Returns:
-        str or list or dict: IDs corresponding to @elements.
-    """
-    if not inplace:
-        # Copy elements first so we don't write to the underlying object
-        elements = deepcopy(elements)
-    # Choose what to do based on elements type
-    if isinstance(elements, str):
-        # We simply return the value of this single element
-        assert element_type in {
-            "geom",
-            "body",
-            "site",
-        }, f"element_type must be either geom, body, or site. Got: {element_type}"
-        if element_type == "geom":
-            elements = sim.model.geom_name2id(elements)
-        elif element_type == "body":
-            elements = sim.model.body_name2id(elements)
-        else:  # site
-            elements = sim.model.site_name2id(elements)
-    elif isinstance(elements, dict):
-        # Iterate over each element in dict and recursively repeat
-        for name, ele in elements:
-            elements[name] = get_ids(sim=sim, elements=ele, element_type=element_type, inplace=True)
-    else:  # We assume this is an iterable array
-        assert isinstance(elements, Iterable), "Elements must be iterable for get_id!"
-        elements = [get_ids(sim=sim, elements=ele, element_type=element_type, inplace=True) for ele in elements]
-
-    return elements

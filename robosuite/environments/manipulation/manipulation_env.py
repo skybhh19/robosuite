@@ -1,9 +1,9 @@
 import numpy as np
 
 from robosuite.environments.robot_env import RobotEnv
-from robosuite.models.base import MujocoModel
 from robosuite.models.grippers import GripperModel
-from robosuite.robots import ROBOT_CLASS_MAPPING, Manipulator
+from robosuite.models.base import MujocoModel
+from robosuite.robots import Manipulator, ROBOT_CLASS_MAPPING
 
 
 class ManipulationEnv(RobotEnv):
@@ -99,18 +99,6 @@ class ManipulationEnv(RobotEnv):
             bool if same depth setting is to be used for all cameras or else it should be a list of the same length as
             "camera names" param.
 
-        camera_segmentations (None or str or list of str or list of list of str): Camera segmentation(s) to use
-            for each camera. Valid options are:
-
-                `None`: no segmentation sensor used
-                `'instance'`: segmentation at the class-instance level
-                `'class'`: segmentation at the class level
-                `'element'`: segmentation at the per-geom level
-
-            If not None, multiple types of segmentations can be specified. A [list of str / str or None] specifies
-            [multiple / a single] segmentation(s) to use for all cameras. A list of list of str specifies per-camera
-            segmentation setting(s) to use.
-
     Raises:
         ValueError: [Camera obs require offscreen renderer]
         ValueError: [Camera name must be specified to use camera obs]
@@ -139,9 +127,6 @@ class ManipulationEnv(RobotEnv):
         camera_heights=256,
         camera_widths=256,
         camera_depths=False,
-        camera_segmentations=None,
-        renderer="mujoco",
-        renderer_config=None,
     ):
         # Robot info
         robots = list(robots) if type(robots) is list or type(robots) is tuple else [robots]
@@ -180,10 +165,7 @@ class ManipulationEnv(RobotEnv):
             camera_heights=camera_heights,
             camera_widths=camera_widths,
             camera_depths=camera_depths,
-            camera_segmentations=camera_segmentations,
             robot_configs=robot_configs,
-            renderer=renderer,
-            renderer_config=renderer_config,
         )
 
     @property
@@ -297,7 +279,7 @@ class ManipulationEnv(RobotEnv):
         # color the gripper site appropriately based on (squared) distance to target
         dist = np.sum(np.square((target_pos - gripper_pos)))
         max_dist = 0.1
-        scaled = (1.0 - min(dist / max_dist, 1.0)) ** 15
+        scaled = (1.0 - min(dist / max_dist, 1.)) ** 15
         rgba = np.zeros(3)
         rgba[0] = 1 - scaled
         rgba[1] = scaled
@@ -315,6 +297,5 @@ class ManipulationEnv(RobotEnv):
         if type(robots) is str:
             robots = [robots]
         for robot in robots:
-            assert issubclass(
-                ROBOT_CLASS_MAPPING[robot], Manipulator
-            ), "Only manipulator robots supported for manipulation environment!"
+            assert issubclass(ROBOT_CLASS_MAPPING[robot], Manipulator),\
+                "Only manipulator robots supported for manipulation environment!"

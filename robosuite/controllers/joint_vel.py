@@ -1,7 +1,6 @@
-import numpy as np
-
 from robosuite.controllers.base_controller import Controller
 from robosuite.utils.buffers import RingBuffer
+import numpy as np
 
 
 class JointVelocityController(Controller):
@@ -57,22 +56,21 @@ class JointVelocityController(Controller):
             via an argument dict that has additional extraneous arguments won't raise an error
     """
 
-    def __init__(
-        self,
-        sim,
-        eef_name,
-        joint_indexes,
-        actuator_range,
-        input_max=1,
-        input_min=-1,
-        output_max=1,
-        output_min=-1,
-        kp=0.25,
-        policy_freq=20,
-        velocity_limits=None,
-        interpolator=None,
-        **kwargs,  # does nothing; used so no error raised when dict is passed with extra terms used previously
-    ):
+    def __init__(self,
+                 sim,
+                 eef_name,
+                 joint_indexes,
+                 actuator_range,
+                 input_max=1,
+                 input_min=-1,
+                 output_max=1,
+                 output_min=-1,
+                 kp=0.25,
+                 policy_freq=20,
+                 velocity_limits=None,
+                 interpolator=None,
+                 **kwargs  # does nothing; used so no error raised when dict is passed with extra terms used previously
+                 ):
 
         super().__init__(
             sim,
@@ -115,9 +113,9 @@ class JointVelocityController(Controller):
         self.interpolator = interpolator
 
         # initialize torques and goal velocity
-        self.goal_vel = None  # Goal velocity desired, pre-compensation
-        self.current_vel = np.zeros(self.joint_dim)  # Current velocity setpoint, pre-compensation
-        self.torques = None  # Torques returned every time run_controller is called
+        self.goal_vel = None                            # Goal velocity desired, pre-compensation
+        self.current_vel = np.zeros(self.joint_dim)     # Current velocity setpoint, pre-compensation
+        self.torques = None                             # Torques returned every time run_controller is called
 
     def set_goal(self, velocities):
         """
@@ -133,11 +131,10 @@ class JointVelocityController(Controller):
         self.update()
 
         # Otherwise, check to make sure velocities is size self.joint_dim
-        assert (
-            len(velocities) == self.joint_dim
-        ), "Goal action must be equal to the robot's joint dimension space! Expected {}, got {}".format(
-            self.joint_dim, len(velocities)
-        )
+        assert len(velocities) == self.joint_dim, \
+            "Goal action must be equal to the robot's joint dimension space! Expected {}, got {}".format(
+                self.joint_dim, len(velocities)
+            )
 
         self.goal_vel = self.scale_action(velocities)
         if self.velocity_limits is not None:
@@ -171,8 +168,11 @@ class JointVelocityController(Controller):
         else:
             self.current_vel = np.array(self.goal_vel)
 
+        # We clip the current joint velocity to be within a reasonable range for stability
+        joint_vel = np.clip(self.joint_vel, self.output_min, self.output_max)
+
         # Compute necessary error terms for PID velocity controller
-        err = self.current_vel - self.joint_vel
+        err = self.current_vel - joint_vel
         derr = err - self.last_err
         self.last_err = err
         self.derr_buf.push(derr)
@@ -182,7 +182,10 @@ class JointVelocityController(Controller):
             self.summed_err += err
 
         # Compute command torques via PID velocity controller plus gravity compensation torques
-        torques = self.kp * err + self.ki * self.summed_err + self.kd * self.derr_buf.average + self.torque_compensation
+        torques = self.kp * err + \
+            self.ki * self.summed_err + \
+            self.kd * self.derr_buf.average + \
+            self.torque_compensation
 
         # Clip torques
         self.torques = self.clip_torques(torques)
@@ -208,4 +211,4 @@ class JointVelocityController(Controller):
 
     @property
     def name(self):
-        return "JOINT_VELOCITY"
+        return 'JOINT_VELOCITY'

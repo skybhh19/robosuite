@@ -5,10 +5,9 @@ Example:
     $ python demo_collect_and_playback_data.py --environment Lift
 """
 
-import argparse
 import os
+import argparse
 from glob import glob
-
 import numpy as np
 
 import robosuite as suite

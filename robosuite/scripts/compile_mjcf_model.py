@@ -10,7 +10,6 @@ Example:
 import os
 import sys
 from shutil import copyfile
-
 from mujoco_py import load_model_from_path
 
 

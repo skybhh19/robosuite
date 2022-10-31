@@ -7,7 +7,6 @@ Example:
 """
 
 import argparse
-
 import imageio
 import numpy as np
 

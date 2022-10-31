@@ -5,7 +5,9 @@ def test_robotiq():
     robotiq_tester(False)
 
 
-def robotiq_tester(render, total_iters=1, test_y=True):
+def robotiq_tester(render,
+                   total_iters=1,
+                   test_y=True):
     gripper = Robotiq85Gripper()
     tester = GripperTester(
         gripper=gripper,
@@ -17,8 +19,8 @@ def robotiq_tester(render, total_iters=1, test_y=True):
         render=render,
     )
     tester.start_simulation()
-    tester.loop(total_iters=total_iters, test_y=test_y)
-    tester.close()
+    tester.loop(total_iters=total_iters,
+                test_y=test_y)
 
 
 if __name__ == "__main__":

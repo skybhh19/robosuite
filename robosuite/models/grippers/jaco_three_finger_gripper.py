@@ -2,9 +2,8 @@
 Gripper for Kinova's Jaco robot arm (has three fingers).
 """
 import numpy as np
-
-from robosuite.models.grippers.gripper_model import GripperModel
 from robosuite.utils.mjcf_utils import xml_path_completion
+from robosuite.models.grippers.gripper_model import GripperModel
 
 
 class JacoThreeFingerGripperBase(GripperModel):
@@ -28,24 +27,13 @@ class JacoThreeFingerGripperBase(GripperModel):
     @property
     def _important_geoms(self):
         return {
-            "left_finger": [
-                "index_proximal_collision",
-                "index_distal_collision",
-                "index_tip_collision",
-                "pinky_proximal_collision",
-                "pinky_distal_collision",
-                "pinky_tip_collision",
-                "index_tip_collision",
-                "pinky_pad_collision",
-            ],
-            "right_finger": [
-                "thumb_proximal_collision",
-                "thumb_distal_collision",
-                "thumb_tip_collision",
-                "thumb_pad_collision",
-            ],
+            "left_finger": ["index_proximal_collision", "index_distal_collision", "index_tip_collision",
+                            "pinky_proximal_collision", "pinky_distal_collision", "pinky_tip_collision",
+                            "index_tip_collision", "pinky_pad_collision"],
+            "right_finger": ["thumb_proximal_collision", "thumb_distal_collision", "thumb_tip_collision",
+                             "thumb_pad_collision"],
             "left_fingerpad": ["index_pad_collision", "pinky_pad_collision"],
-            "right_fingerpad": ["thumb_pad_collision"],
+            "right_fingerpad": ["thumb_pad_collision"]
         }
 
 
@@ -82,7 +70,6 @@ class JacoThreeFingerDexterousGripper(JacoThreeFingerGripperBase):
     """
     Dexterous variation of the Jaco gripper in which all finger are actuated independently
     """
-
     def format_action(self, action):
         """
         Maps continuous action into binary output

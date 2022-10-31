@@ -2,11 +2,12 @@ import numpy as np
 
 import robosuite.utils.transform_utils as T
 from robosuite.environments.manipulation.two_arm_env import TwoArmEnv
-from robosuite.models.arenas import EmptyArena
-from robosuite.models.objects import CylinderObject, PlateWithHoleObject
-from robosuite.models.tasks import ManipulationTask
 from robosuite.utils.mjcf_utils import CustomMaterial, array_to_string, find_elements
 from robosuite.utils.observables import Observable, sensor
+
+from robosuite.models.objects import CylinderObject, PlateWithHoleObject
+from robosuite.models.arenas import EmptyArena
+from robosuite.models.tasks import ManipulationTask
 
 
 class TwoArmPegInHole(TwoArmEnv):
@@ -119,18 +120,6 @@ class TwoArmPegInHole(TwoArmEnv):
             bool if same depth setting is to be used for all cameras or else it should be a list of the same length as
             "camera names" param.
 
-        camera_segmentations (None or str or list of str or list of list of str): Camera segmentation(s) to use
-            for each camera. Valid options are:
-
-                `None`: no segmentation sensor used
-                `'instance'`: segmentation at the class-instance level
-                `'class'`: segmentation at the class level
-                `'element'`: segmentation at the per-geom level
-
-            If not None, multiple types of segmentations can be specified. A [list of str / str or None] specifies
-            [multiple / a single] segmentation(s) to use for all cameras. A list of list of str specifies per-camera
-            segmentation setting(s) to use.
-
     Raises:
         AssertionError: [Gripper specified]
         ValueError: [Invalid number of robots specified]
@@ -165,9 +154,6 @@ class TwoArmPegInHole(TwoArmEnv):
         camera_heights=256,
         camera_widths=256,
         camera_depths=False,
-        camera_segmentations=None,  # {None, instance, class, element}
-        renderer="mujoco",
-        renderer_config=None,
     ):
         # Assert that the gripper type is None
         assert gripper_types is None, "Tried to specify gripper other than None in TwoArmPegInHole environment!"
@@ -205,9 +191,6 @@ class TwoArmPegInHole(TwoArmEnv):
             camera_heights=camera_heights,
             camera_widths=camera_widths,
             camera_depths=camera_depths,
-            camera_segmentations=camera_segmentations,
-            renderer=renderer,
-            renderer_config=renderer_config,
         )
 
     def reward(self, action=None):
@@ -298,7 +281,7 @@ class TwoArmPegInHole(TwoArmEnv):
         mujoco_arena.set_camera(
             camera_name="agentview",
             pos=[1.0666432116509934, 1.4903257668114777e-08, 2.0563394967349096],
-            quat=[0.6530979871749878, 0.27104058861732483, 0.27104055881500244, 0.6530978679656982],
+            quat=[0.6530979871749878, 0.27104058861732483, 0.27104055881500244, 0.6530978679656982]
         )
 
         # initialize objects of interest
@@ -402,11 +385,8 @@ class TwoArmPegInHole(TwoArmEnv):
 
             @sensor(modality=modality)
             def peg_to_hole(obs_cache):
-                return (
-                    obs_cache["hole_pos"] - np.array(self.sim.data.body_xpos[self.peg_body_id])
-                    if "hole_pos" in obs_cache
-                    else np.zeros(3)
-                )
+                return obs_cache["hole_pos"] - np.array(self.sim.data.body_xpos[self.peg_body_id]) if \
+                    "hole_pos" in obs_cache else np.zeros(3)
 
             @sensor(modality=modality)
             def peg_quat(obs_cache):
@@ -514,5 +494,7 @@ class TwoArmPegInHole(TwoArmEnv):
 
         world_pose_in_hole = T.pose_inv(hole_pose_in_world)
 
-        peg_pose_in_hole = T.pose_in_A_to_pose_in_B(peg_pose_in_world, world_pose_in_hole)
+        peg_pose_in_hole = T.pose_in_A_to_pose_in_B(
+            peg_pose_in_world, world_pose_in_hole
+        )
         return peg_pose_in_hole

@@ -1,7 +1,6 @@
 import numpy as np
-
 from robosuite.models.objects import MujocoXMLObject
-from robosuite.utils.mjcf_utils import array_to_string, find_elements, xml_path_completion
+from robosuite.utils.mjcf_utils import xml_path_completion, array_to_string, find_elements
 
 
 class BottleObject(MujocoXMLObject):
@@ -10,13 +9,9 @@ class BottleObject(MujocoXMLObject):
     """
 
     def __init__(self, name):
-        super().__init__(
-            xml_path_completion("objects/bottle.xml"),
-            name=name,
-            joints=[dict(type="free", damping="0.0005")],
-            obj_type="all",
-            duplicate_collision_geoms=True,
-        )
+        super().__init__(xml_path_completion("objects/bottle.xml"),
+                         name=name, joints=[dict(type="free", damping="0.0005")],
+                         obj_type="all", duplicate_collision_geoms=True)
 
 
 class CanObject(MujocoXMLObject):
@@ -25,13 +20,9 @@ class CanObject(MujocoXMLObject):
     """
 
     def __init__(self, name):
-        super().__init__(
-            xml_path_completion("objects/can.xml"),
-            name=name,
-            joints=[dict(type="free", damping="0.0005")],
-            obj_type="all",
-            duplicate_collision_geoms=True,
-        )
+        super().__init__(xml_path_completion("objects/can.xml"),
+                         name=name, joints=[dict(type="free", damping="0.0005")],
+                         obj_type="all", duplicate_collision_geoms=True)
 
 
 class LemonObject(MujocoXMLObject):
@@ -40,9 +31,8 @@ class LemonObject(MujocoXMLObject):
     """
 
     def __init__(self, name):
-        super().__init__(
-            xml_path_completion("objects/lemon.xml"), name=name, obj_type="all", duplicate_collision_geoms=True
-        )
+        super().__init__(xml_path_completion("objects/lemon.xml"),
+                         name=name, obj_type="all", duplicate_collision_geoms=True)
 
 
 class MilkObject(MujocoXMLObject):
@@ -51,13 +41,9 @@ class MilkObject(MujocoXMLObject):
     """
 
     def __init__(self, name):
-        super().__init__(
-            xml_path_completion("objects/milk.xml"),
-            name=name,
-            joints=[dict(type="free", damping="0.0005")],
-            obj_type="all",
-            duplicate_collision_geoms=True,
-        )
+        super().__init__(xml_path_completion("objects/milk.xml"),
+                         name=name, joints=[dict(type="free", damping="0.0005")],
+                         obj_type="all", duplicate_collision_geoms=True)
 
 
 class BreadObject(MujocoXMLObject):
@@ -66,13 +52,9 @@ class BreadObject(MujocoXMLObject):
     """
 
     def __init__(self, name):
-        super().__init__(
-            xml_path_completion("objects/bread.xml"),
-            name=name,
-            joints=[dict(type="free", damping="0.0005")],
-            obj_type="all",
-            duplicate_collision_geoms=True,
-        )
+        super().__init__(xml_path_completion("objects/bread.xml"),
+                         name=name, joints=[dict(type="free", damping="0.0005")],
+                         obj_type="all", duplicate_collision_geoms=True)
 
 
 class CerealObject(MujocoXMLObject):
@@ -81,13 +63,9 @@ class CerealObject(MujocoXMLObject):
     """
 
     def __init__(self, name):
-        super().__init__(
-            xml_path_completion("objects/cereal.xml"),
-            name=name,
-            joints=[dict(type="free", damping="0.0005")],
-            obj_type="all",
-            duplicate_collision_geoms=True,
-        )
+        super().__init__(xml_path_completion("objects/cereal.xml"),
+                         name=name, joints=[dict(type="free", damping="0.0005")],
+                         obj_type="all", duplicate_collision_geoms=True)
 
 
 class SquareNutObject(MujocoXMLObject):
@@ -96,13 +74,9 @@ class SquareNutObject(MujocoXMLObject):
     """
 
     def __init__(self, name):
-        super().__init__(
-            xml_path_completion("objects/square-nut.xml"),
-            name=name,
-            joints=[dict(type="free", damping="0.0005")],
-            obj_type="all",
-            duplicate_collision_geoms=True,
-        )
+        super().__init__(xml_path_completion("objects/square-nut.xml"),
+                         name=name, joints=[dict(type="free", damping="0.0005")],
+                         obj_type="all", duplicate_collision_geoms=True)
 
     @property
     def important_sites(self):
@@ -114,7 +88,9 @@ class SquareNutObject(MujocoXMLObject):
         """
         # Get dict from super call and add to it
         dic = super().important_sites
-        dic.update({"handle": self.naming_prefix + "handle_site"})
+        dic.update({
+            "handle": self.naming_prefix + "handle_site"
+        })
         return dic
 
 
@@ -124,13 +100,9 @@ class RoundNutObject(MujocoXMLObject):
     """
 
     def __init__(self, name):
-        super().__init__(
-            xml_path_completion("objects/round-nut.xml"),
-            name=name,
-            joints=[dict(type="free", damping="0.0005")],
-            obj_type="all",
-            duplicate_collision_geoms=True,
-        )
+        super().__init__(xml_path_completion("objects/round-nut.xml"),
+                         name=name, joints=[dict(type="free", damping="0.0005")],
+                         obj_type="all", duplicate_collision_geoms=True)
 
     @property
     def important_sites(self):
@@ -142,7 +114,9 @@ class RoundNutObject(MujocoXMLObject):
         """
         # Get dict from super call and add to it
         dic = super().important_sites
-        dic.update({"handle": self.naming_prefix + "handle_site"})
+        dic.update({
+            "handle": self.naming_prefix + "handle_site"
+        })
         return dic
 
 
@@ -155,13 +129,8 @@ class MilkVisualObject(MujocoXMLObject):
     """
 
     def __init__(self, name):
-        super().__init__(
-            xml_path_completion("objects/milk-visual.xml"),
-            name=name,
-            joints=None,
-            obj_type="visual",
-            duplicate_collision_geoms=True,
-        )
+        super().__init__(xml_path_completion("objects/milk-visual.xml"),
+                         name=name, joints=None, obj_type="visual", duplicate_collision_geoms=True)
 
 
 class BreadVisualObject(MujocoXMLObject):
@@ -173,13 +142,8 @@ class BreadVisualObject(MujocoXMLObject):
     """
 
     def __init__(self, name):
-        super().__init__(
-            xml_path_completion("objects/bread-visual.xml"),
-            name=name,
-            joints=None,
-            obj_type="visual",
-            duplicate_collision_geoms=True,
-        )
+        super().__init__(xml_path_completion("objects/bread-visual.xml"),
+                         name=name, joints=None, obj_type="visual", duplicate_collision_geoms=True)
 
 
 class CerealVisualObject(MujocoXMLObject):
@@ -191,13 +155,8 @@ class CerealVisualObject(MujocoXMLObject):
     """
 
     def __init__(self, name):
-        super().__init__(
-            xml_path_completion("objects/cereal-visual.xml"),
-            name=name,
-            joints=None,
-            obj_type="visual",
-            duplicate_collision_geoms=True,
-        )
+        super().__init__(xml_path_completion("objects/cereal-visual.xml"),
+                         name=name, joints=None, obj_type="visual", duplicate_collision_geoms=True)
 
 
 class CanVisualObject(MujocoXMLObject):
@@ -209,13 +168,8 @@ class CanVisualObject(MujocoXMLObject):
     """
 
     def __init__(self, name):
-        super().__init__(
-            xml_path_completion("objects/can-visual.xml"),
-            name=name,
-            joints=None,
-            obj_type="visual",
-            duplicate_collision_geoms=True,
-        )
+        super().__init__(xml_path_completion("objects/can-visual.xml"),
+                         name=name, joints=None, obj_type="visual", duplicate_collision_geoms=True)
 
 
 class PlateWithHoleObject(MujocoXMLObject):
@@ -224,13 +178,8 @@ class PlateWithHoleObject(MujocoXMLObject):
     """
 
     def __init__(self, name):
-        super().__init__(
-            xml_path_completion("objects/plate-with-hole.xml"),
-            name=name,
-            joints=None,
-            obj_type="all",
-            duplicate_collision_geoms=True,
-        )
+        super().__init__(xml_path_completion("objects/plate-with-hole.xml"),
+                         name=name, joints=None, obj_type="all", duplicate_collision_geoms=True)
 
 
 class DoorObject(MujocoXMLObject):
@@ -242,14 +191,12 @@ class DoorObject(MujocoXMLObject):
         damping (float): damping parameter to override the ones specified in the XML
         lock (bool): Whether to use the locked door variation object or not
     """
-
     def __init__(self, name, friction=None, damping=None, lock=False):
         xml_path = "objects/door.xml"
         if lock:
             xml_path = "objects/door_lock.xml"
-        super().__init__(
-            xml_path_completion(xml_path), name=name, joints=None, obj_type="all", duplicate_collision_geoms=True
-        )
+        super().__init__(xml_path_completion(xml_path),
+                         name=name, joints=None, obj_type="all", duplicate_collision_geoms=True)
 
         # Set relevant body names
         self.door_body = self.naming_prefix + "door"
@@ -295,5 +242,7 @@ class DoorObject(MujocoXMLObject):
         """
         # Get dict from super call and add to it
         dic = super().important_sites
-        dic.update({"handle": self.naming_prefix + "handle"})
+        dic.update({
+            "handle": self.naming_prefix + "handle"
+        })
         return dic

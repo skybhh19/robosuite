@@ -5,10 +5,8 @@ This data collection wrapper is useful for collecting demonstrations.
 
 import os
 import time
-
 import numpy as np
 
-from robosuite.utils.mjcf_utils import save_sim_model
 from robosuite.wrappers import Wrapper
 
 
@@ -75,6 +73,7 @@ class DataCollectionWrapper(Wrapper):
         self.env.sim.reset()
         self.env.sim.set_state_from_flattened(self._current_task_instance_state)
         self.env.sim.forward()
+
 
     def _on_first_interaction(self):
         """

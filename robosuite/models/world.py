@@ -1,6 +1,6 @@
-import robosuite.utils.macros as macros
 from robosuite.models.base import MujocoXML
-from robosuite.utils.mjcf_utils import convert_to_string, find_elements, xml_path_completion
+from robosuite.utils.mjcf_utils import xml_path_completion, convert_to_string, find_elements
+import robosuite.utils.macros as macros
 
 
 class MujocoWorldBase(MujocoXML):

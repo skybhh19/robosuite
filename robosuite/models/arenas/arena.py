@@ -1,17 +1,8 @@
 import numpy as np
 
 from robosuite.models.base import MujocoXML
-from robosuite.utils.mjcf_utils import (
-    ENVIRONMENT_COLLISION_COLOR,
-    array_to_string,
-    find_elements,
-    new_body,
-    new_element,
-    new_geom,
-    new_joint,
-    recolor_collision_geoms,
-    string_to_array,
-)
+from robosuite.utils.mjcf_utils import array_to_string, string_to_array, \
+    new_geom, new_body, new_joint, ENVIRONMENT_COLLISION_COLOR, recolor_collision_geoms, find_elements, new_element
 
 
 class Arena(MujocoXML):
@@ -23,12 +14,12 @@ class Arena(MujocoXML):
         self.bottom_pos = np.zeros(3)
         self.floor = self.worldbody.find("./geom[@name='floor']")
 
+        # Run any necessary post-processing on the model
+        self._postprocess_arena()
+
         # Recolor all geoms
-        recolor_collision_geoms(
-            root=self.worldbody,
-            rgba=ENVIRONMENT_COLLISION_COLOR,
-            exclude=lambda e: True if e.get("name", None) == "floor" else False,
-        )
+        recolor_collision_geoms(root=self.worldbody, rgba=ENVIRONMENT_COLLISION_COLOR,
+                                exclude=lambda e: True if e.get("name", None) == "floor" else False)
 
     def set_origin(self, offset):
         """
@@ -70,3 +61,9 @@ class Arena(MujocoXML):
             # Otherwise, we edit all specified attributes in that camera
             for attrib, value in camera_attribs.items():
                 camera.set(attrib, value)
+
+    def _postprocess_arena(self):
+        """
+        Runs any necessary post-processing on the imported Arena model
+        """
+        pass

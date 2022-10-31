@@ -1,5 +1,4 @@
 import numpy as np
-
 from robosuite.models.robots.manipulators.manipulator_model import ManipulatorModel
 from robosuite.utils.mjcf_utils import xml_path_completion
 
@@ -29,14 +28,14 @@ class Jaco(ManipulatorModel):
 
     @property
     def init_qpos(self):
-        return np.array([3.192, 3.680, -0.000, 1.170, 0.050, 3.760, 3.142])
+        return np.array([3.192, 3.680, -0.000, 1.170, 0.050, 3.760, -1.510])
 
     @property
     def base_xpos_offset(self):
         return {
             "bins": (-0.5, -0.1, 0),
             "empty": (-0.6, 0, 0),
-            "table": lambda table_length: (-0.16 - table_length / 2, 0, 0),
+            "table": lambda table_length: (-0.16 - table_length/2, 0, 0)
         }
 
     @property

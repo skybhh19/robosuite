@@ -98,7 +98,7 @@ The `demo_device_control.py` scripts shows how to teleoperate robot with [contro
     solver from Bullet physics.
 
     **Note:**
-        To run this script with macOS, you must run it with root access.
+        To run this script with Mac OS X, you must run it with root access.
 
 * **SpaceMouse**
     We use the SpaceMouse 3D mouse from [3Dconnexion](https://www.3dconnexion.com/spacemouse_wireless/en/) to control the end-effector of the robot. The mouse provides 6-DoF control commands.
@@ -114,11 +114,11 @@ The `demo_device_control.py` scripts shows how to teleoperate robot with [contro
     ```
 
     **Note:**
-        This current implementation only supports macOS (Linux support can be added).
+        This current implementation only supports Mac OS X (Linux support can be added).
         Download and install the [driver](https://www.3dconnexion.com/service/drivers.html) before running the script.
 
 Additionally, `--pos_sensitivity` and `--rot_sensitivity` provide relative gains for increasing / decreasing the user input
-device sensitivity. The `--controller` argument determines the choice of using either inverse kinematics controller (`ik`) or operational space controller (`osc`). The main difference is that user inputs with `ik`'s rotations are always taken relative to eef coordinate frame, whereas user inputs with `osc`'s rotations are taken relative to global frame (i.e., static / camera frame of reference). `osc` also tends to be more computationally efficient since `ik` relies on the backend [pybullet](https://github.com/StanfordVL/bullet3) IK solver.
+device sensitivity. The `--controller` argument determines the choice of using either inverse kinematics controller (`ik`) or operational space controller (`osc`). The main difference is that user inputs with `ik`'s rotations are always taken relative to eef coordinate frame, whereas user inputs with `osc`'s rotations are taken relative to global frame (i.e., static / camera frame of reference). `osc` also tends to be more computationally efficient since `ik` relies on the backend [pybullet](https://github.com/bulletphysics/bullet3) IK solver.
 
 
 Furthermore, please choose environment specifics with the following arguments:
@@ -182,20 +182,3 @@ The `demo_video_recording.py` script shows how to record a video of robot roll-o
 ```sh
 $ python demo_video_recording.py --environment Lift --robots Panda
 ```
-
-### Rendering Options
-The `demo_renderers.py` script shows how to use different renderers with the simulation environments. Our current version supports three rendering options: MuJoCo (default), NVISII, and iGibson renderers. More information about these renderers can be found in the [Renderer](modules/renderers) module. Example:
-```sh
-$ python demo_renderers.py --renderer igibson
-```
-The `--renderer` flag can be set to `mujoco` (default), `nvisii` and `igibson`.
-
-### Vision Modalities
-The `demo_igibson_modalities.py` and `demo_nvisii_modalities.py` scripts illustrate how to obtain vision modalities from the iGibson renderer and NVISII renderer respectively. This script uses the flags specified and renders that particular vision modality. Example:
-```sh
-$ python demo_igibson_modalities.py --vision-modality segmentation --segmentation-level instance
-
-$ python demo_nvisii_modalities.py --vision-modality depth
-```
-The `--vision-modality` flag can be set to `depth`, `normal`, `segmentation` or `rgb` (default).
-The `-segmentation-level` flag can be set only when `--vision-modality` is set to `segmentation`. It can set to `instance`, `class`, or `element`.

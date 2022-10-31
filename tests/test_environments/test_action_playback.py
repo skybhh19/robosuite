@@ -2,17 +2,15 @@
 Test script for recording a sequence of random actions and playing them back
 """
 
-import argparse
-import json
 import os
-import random
-
 import h5py
+import argparse
+import random
 import numpy as np
+import json
 
 import robosuite
 from robosuite.controllers import load_controller_config
-
 
 def test_playback():
     # set seeds
@@ -45,7 +43,7 @@ def test_playback():
 
     # random actions to play
     n_actions = 100
-    actions = 0.1 * np.random.uniform(low=-1.0, high=1.0, size=(n_actions, env.action_spec[0].shape[0]))
+    actions = 0.1 * np.random.uniform(low=-1., high=1., size=(n_actions, env.action_spec[0].shape[0]))
 
     # play actions
     print("playing random actions...")
@@ -65,12 +63,12 @@ def test_playback():
     for i in range(n_actions):
         env.step(actions[i])
         state_playback = env.sim.get_state().flatten()
-        assert np.all(np.equal(states[i + 1], state_playback))
+        assert(np.all(np.equal(states[i + 1], state_playback)))
 
-    env.close()
     print("test passed!")
 
 
 if __name__ == "__main__":
 
     test_playback()
+

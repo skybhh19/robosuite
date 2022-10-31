@@ -1,14 +1,19 @@
 """
 Tests panda gripper on grabbing task
 """
-from robosuite.models.grippers import GripperTester, PandaGripper
+from robosuite.models.grippers import (
+    PandaGripper,
+    GripperTester,
+)
 
 
 def test_panda_gripper():
     panda_gripper_tester(False)
 
 
-def panda_gripper_tester(render, total_iters=1, test_y=True):
+def panda_gripper_tester(render,
+                      total_iters=1,
+                      test_y=True):
     gripper = PandaGripper()
     tester = GripperTester(
         gripper=gripper,
@@ -19,8 +24,8 @@ def panda_gripper_tester(render, total_iters=1, test_y=True):
         render=render,
     )
     tester.start_simulation()
-    tester.loop(total_iters=total_iters, test_y=test_y)
-    tester.close()
+    tester.loop(total_iters=total_iters,
+                test_y=test_y)
 
 
 if __name__ == "__main__":

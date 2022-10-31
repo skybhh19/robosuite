@@ -9,9 +9,11 @@ Example:
 import argparse
 import os
 
-from mujoco_py import MjSim, MjViewer, load_model_from_path
+from mujoco_py import load_model_from_path
+from mujoco_py import MjSim, MjViewer
 
 import robosuite as suite
+
 
 if __name__ == "__main__":
 

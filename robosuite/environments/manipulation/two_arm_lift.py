@@ -1,14 +1,15 @@
 from collections import OrderedDict
-
 import numpy as np
 
-import robosuite.utils.transform_utils as T
 from robosuite.environments.manipulation.two_arm_env import TwoArmEnv
+
 from robosuite.models.arenas import TableArena
 from robosuite.models.objects import PotWithHandlesObject
 from robosuite.models.tasks import ManipulationTask
-from robosuite.utils.observables import Observable, sensor
 from robosuite.utils.placement_samplers import UniformRandomSampler
+from robosuite.utils.observables import Observable, sensor
+
+import robosuite.utils.transform_utils as T
 
 
 class TwoArmLift(TwoArmEnv):
@@ -125,18 +126,6 @@ class TwoArmLift(TwoArmEnv):
             bool if same depth setting is to be used for all cameras or else it should be a list of the same length as
             "camera names" param.
 
-        camera_segmentations (None or str or list of str or list of list of str): Camera segmentation(s) to use
-            for each camera. Valid options are:
-
-                `None`: no segmentation sensor used
-                `'instance'`: segmentation at the class-instance level
-                `'class'`: segmentation at the class level
-                `'element'`: segmentation at the per-geom level
-
-            If not None, multiple types of segmentations can be specified. A [list of str / str or None] specifies
-            [multiple / a single] segmentation(s) to use for all cameras. A list of list of str specifies per-camera
-            segmentation setting(s) to use.
-
     Raises:
         ValueError: [Invalid number of robots specified]
         ValueError: [Invalid env configuration]
@@ -151,7 +140,7 @@ class TwoArmLift(TwoArmEnv):
         gripper_types="default",
         initialization_noise="default",
         table_full_size=(0.8, 0.8, 0.05),
-        table_friction=(1.0, 5e-3, 1e-4),
+        table_friction=(1., 5e-3, 1e-4),
         use_camera_obs=True,
         use_object_obs=True,
         reward_scale=1.0,
@@ -171,9 +160,6 @@ class TwoArmLift(TwoArmEnv):
         camera_heights=256,
         camera_widths=256,
         camera_depths=False,
-        camera_segmentations=None,  # {None, instance, class, element}
-        renderer="mujoco",
-        renderer_config=None,
     ):
         # settings for table top
         self.table_full_size = table_full_size
@@ -212,9 +198,6 @@ class TwoArmLift(TwoArmEnv):
             camera_heights=camera_heights,
             camera_widths=camera_widths,
             camera_depths=camera_depths,
-            camera_segmentations=camera_segmentations,
-            renderer=renderer,
-            renderer_config=renderer_config,
         )
 
     def reward(self, action=None):
@@ -263,7 +246,7 @@ class TwoArmLift(TwoArmEnv):
             table_height = self.sim.data.site_xpos[self.table_top_id][2]
             elevation = pot_bottom_height - table_height
             r_lift = min(max(elevation - 0.05, 0), 0.15)
-            reward += 10.0 * direction_coef * r_lift
+            reward += 10. * direction_coef * r_lift
 
             _gripper0_to_handle0 = self._gripper0_to_handle0
             _gripper1_to_handle1 = self._gripper1_to_handle1
@@ -272,11 +255,8 @@ class TwoArmLift(TwoArmEnv):
             # When grippers are far away, tell them to be closer
 
             # Get contacts
-            (g0, g1) = (
-                (self.robots[0].gripper["right"], self.robots[0].gripper["left"])
-                if self.env_configuration == "bimanual"
-                else (self.robots[0].gripper, self.robots[1].gripper)
-            )
+            (g0, g1) = (self.robots[0].gripper["right"], self.robots[0].gripper["left"]) if \
+                self.env_configuration == "bimanual" else (self.robots[0].gripper, self.robots[1].gripper)
 
             _g0h_dist = np.linalg.norm(_gripper0_to_handle0)
             _g1h_dist = np.linalg.norm(_gripper1_to_handle1)
@@ -311,13 +291,13 @@ class TwoArmLift(TwoArmEnv):
         else:
             if self.env_configuration == "single-arm-opposed":
                 # Set up robots facing towards each other by rotating them from their default position
-                for robot, rotation in zip(self.robots, (np.pi / 2, -np.pi / 2)):
+                for robot, rotation in zip(self.robots, (np.pi/2, -np.pi/2)):
                     xpos = robot.robot_model.base_xpos_offset["table"](self.table_full_size[0])
                     rot = np.array((0, 0, rotation))
                     xpos = T.euler2mat(rot) @ np.array(xpos)
                     robot.robot_model.set_base_xpos(xpos)
                     robot.robot_model.set_base_ori(rot)
-            else:  # "single-arm-parallel" configuration setting
+            else:   # "single-arm-parallel" configuration setting
                 # Set up robots parallel to each other but offset from the center
                 for robot, offset in zip(self.robots, (-0.25, 0.25)):
                     xpos = robot.robot_model.base_xpos_offset["table"](self.table_full_size[0])
@@ -356,7 +336,7 @@ class TwoArmLift(TwoArmEnv):
         # task includes arena, robot, and objects of interest
         self.model = ManipulationTask(
             mujoco_arena=mujoco_arena,
-            mujoco_robots=[robot.robot_model for robot in self.robots],
+            mujoco_robots=[robot.robot_model for robot in self.robots], 
             mujoco_objects=self.pot,
         )
 
@@ -415,19 +395,13 @@ class TwoArmLift(TwoArmEnv):
 
             @sensor(modality=modality)
             def gripper0_to_handle0(obs_cache):
-                return (
-                    obs_cache["handle0_xpos"] - obs_cache[f"{pf0}eef_pos"]
-                    if "handle0_xpos" in obs_cache and f"{pf0}eef_pos" in obs_cache
-                    else np.zeros(3)
-                )
+                return obs_cache["handle0_xpos"] - obs_cache[f"{pf0}eef_pos"] if \
+                    "handle0_xpos" in obs_cache and f"{pf0}eef_pos" in obs_cache else np.zeros(3)
 
             @sensor(modality=modality)
             def gripper1_to_handle1(obs_cache):
-                return (
-                    obs_cache["handle1_xpos"] - obs_cache[f"{pf1}eef_pos"]
-                    if "handle1_xpos" in obs_cache and f"{pf1}eef_pos" in obs_cache
-                    else np.zeros(3)
-                )
+                return obs_cache["handle1_xpos"] - obs_cache[f"{pf1}eef_pos"] if \
+                    "handle1_xpos" in obs_cache and f"{pf1}eef_pos" in obs_cache else np.zeros(3)
 
             sensors = [pot_pos, pot_quat, handle0_xpos, handle1_xpos, gripper0_to_handle0, gripper1_to_handle1]
             names = [s.__name__ for s in sensors]
@@ -473,11 +447,8 @@ class TwoArmLift(TwoArmEnv):
         # Color the gripper visualization site according to its distance to each handle
         if vis_settings["grippers"]:
             handles = [self.pot.important_sites[f"handle{i}"] for i in range(2)]
-            grippers = (
-                [self.robots[0].gripper[arm] for arm in self.robots[0].arms]
-                if self.env_configuration == "bimanual"
-                else [robot.gripper for robot in self.robots]
-            )
+            grippers = [self.robots[0].gripper[arm] for arm in self.robots[0].arms] if \
+                self.env_configuration == "bimanual" else [robot.gripper for robot in self.robots]
             for gripper, handle in zip(grippers, handles):
                 self._visualize_gripper_to_target(gripper=gripper, target=handle, target_type="site")
 

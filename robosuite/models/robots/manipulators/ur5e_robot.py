@@ -1,5 +1,4 @@
 import numpy as np
-
 from robosuite.models.robots.manipulators.manipulator_model import ManipulatorModel
 from robosuite.utils.mjcf_utils import xml_path_completion
 
@@ -29,14 +28,14 @@ class UR5e(ManipulatorModel):
 
     @property
     def init_qpos(self):
-        return np.array([-0.470, -1.735, 2.480, -2.275, -1.590, -1.991])
+        return np.array([-0.470, -1.735, 2.480, -2.275, -1.590, -0.420])
 
     @property
     def base_xpos_offset(self):
         return {
             "bins": (-0.5, -0.1, 0),
             "empty": (-0.6, 0, 0),
-            "table": lambda table_length: (-0.16 - table_length / 2, 0, 0),
+            "table": lambda table_length: (-0.16 - table_length/2, 0, 0)
         }
 
     @property

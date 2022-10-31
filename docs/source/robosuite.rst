@@ -11,7 +11,6 @@ Subpackages
    robosuite.devices
    robosuite.environments
    robosuite.models
-   robosuite.renderers
    robosuite.robots
    robosuite.utils
    robosuite.wrappers

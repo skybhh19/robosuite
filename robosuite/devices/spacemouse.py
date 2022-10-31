@@ -1,6 +1,6 @@
 """Driver class for SpaceMouse controller.
 
-This class provides a driver support to SpaceMouse on macOS.
+This class provides a driver support to SpaceMouse on Mac OS X.
 In particular, we assume you are using a SpaceMouse Wireless by default.
 
 To set up a new SpaceMouse controller:
@@ -16,23 +16,19 @@ For Linux support, you can find open-source Linux drivers and SDKs online.
 
 """
 
-import threading
 import time
+import threading
 from collections import namedtuple
-
 import numpy as np
-
 try:
     import hid
 except ModuleNotFoundError as exc:
-    raise ImportError(
-        "Unable to load module hid, required to interface with SpaceMouse. "
-        "Only macOS is officially supported. Install the additional "
-        "requirements with `pip install -r requirements-extra.txt`"
-    ) from exc
+    raise ImportError("Unable to load module hid, required to interface with SpaceMouse. "
+                      "Only Mac OS X is officially supported. Install the additional "
+                      "requirements with `pip install -r requirements-extra.txt`") from exc
 
-from robosuite.devices import Device
 from robosuite.utils.transform_utils import rotation_matrix
+from robosuite.devices import Device
 
 AxisSpec = namedtuple("AxisSpec", ["channel", "byte1", "byte2", "scale"])
 
@@ -63,7 +59,7 @@ def to_int16(y1, y2):
     return x
 
 
-def scale_to_control(x, axis_scale=350.0, min_v=-1.0, max_v=1.0):
+def scale_to_control(x, axis_scale=350., min_v=-1.0, max_v=1.0):
     """
     Normalize raw HID readings to target range.
 
@@ -110,7 +106,12 @@ class SpaceMouse(Device):
         rot_sensitivity (float): Magnitude of scale input rotation commands scaling
     """
 
-    def __init__(self, vendor_id=9583, product_id=50735, pos_sensitivity=1.0, rot_sensitivity=1.0):
+    def __init__(self,
+                 vendor_id=9583,
+                 product_id=50735,
+                 pos_sensitivity=1.0,
+                 rot_sensitivity=1.0
+                 ):
 
         print("Opening SpaceMouse device")
         self.device = hid.device()
@@ -130,9 +131,9 @@ class SpaceMouse(Device):
 
         self.single_click_and_hold = False
 
-        self._control = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        self._control = [0., 0., 0., 0., 0., 0.]
         self._reset_state = 0
-        self.rotation = np.array([[-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]])
+        self.rotation = np.array([[-1., 0., 0.], [0., 1., 0.], [0., 0., -1.]])
         self._enabled = False
 
         # launch a new listener thread to listen to SpaceMouse
@@ -156,7 +157,9 @@ class SpaceMouse(Device):
         print_command("Left button (hold)", "close gripper")
         print_command("Move mouse laterally", "move arm horizontally in x-y plane")
         print_command("Move mouse vertically", "move arm vertically")
-        print_command("Twist mouse about an axis", "rotate arm about a corresponding axis")
+        print_command(
+            "Twist mouse about an axis", "rotate arm about a corresponding axis"
+        )
         print_command("ESC", "quit")
         print("")
 
@@ -164,7 +167,7 @@ class SpaceMouse(Device):
         """
         Resets internal state of controller, except for the reset signal.
         """
-        self.rotation = np.array([[-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]])
+        self.rotation = np.array([[-1., 0., 0.], [0., 1., 0.], [0., 0., -1.]])
         # Reset 6-DOF variables
         self.x, self.y, self.z = 0, 0, 0
         self.roll, self.pitch, self.yaw = 0, 0, 0
@@ -193,9 +196,9 @@ class SpaceMouse(Device):
         roll, pitch, yaw = self.control[3:] * 0.005 * self.rot_sensitivity
 
         # convert RPY to an absolute orientation
-        drot1 = rotation_matrix(angle=-pitch, direction=[1.0, 0, 0], point=None)[:3, :3]
-        drot2 = rotation_matrix(angle=roll, direction=[0, 1.0, 0], point=None)[:3, :3]
-        drot3 = rotation_matrix(angle=yaw, direction=[0, 0, 1.0], point=None)[:3, :3]
+        drot1 = rotation_matrix(angle=-pitch, direction=[1., 0, 0], point=None)[:3, :3]
+        drot2 = rotation_matrix(angle=roll, direction=[0, 1., 0], point=None)[:3, :3]
+        drot3 = rotation_matrix(angle=yaw, direction=[0, 0, 1.], point=None)[:3, :3]
 
         self.rotation = self.rotation.dot(drot1.dot(drot2.dot(drot3)))
 
@@ -204,7 +207,7 @@ class SpaceMouse(Device):
             rotation=self.rotation,
             raw_drotation=np.array([roll, pitch, yaw]),
             grasp=self.control_gripper,
-            reset=self._reset_state,
+            reset=self._reset_state
         )
 
     def run(self):

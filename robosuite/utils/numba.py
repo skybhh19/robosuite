@@ -2,7 +2,6 @@
 Numba utils.
 """
 import numba
-
 import robosuite.utils.macros as macros
 
 

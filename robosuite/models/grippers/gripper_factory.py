@@ -20,10 +20,5 @@ def gripper_factory(name, idn=0):
         XMLError: [invalid XML]
     """
     # Import GRIPPER_MAPPING at runtime so we avoid circular imports
-    from robosuite.models.grippers import ALL_GRIPPERS, GRIPPER_MAPPING
-
-    # Make sure gripper is valid
-    assert name in GRIPPER_MAPPING, f"Unknown gripper name: {name}. Valid options are: {ALL_GRIPPERS}"
-
-    # Generate gripper
-    return GRIPPER_MAPPING[name](idn=idn)
+    from robosuite.models.grippers import GRIPPER_MAPPING
+    return GRIPPER_MAPPING.get(name, "Unknown gripper name: {}".format(name))(idn=idn)

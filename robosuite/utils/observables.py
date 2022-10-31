@@ -36,7 +36,6 @@ def sensor(modality):
         func.__modality__ = modality
         # Return function
         return func
-
     return decorator
 
 
@@ -52,11 +51,9 @@ def create_deterministic_corrupter(corruption, low=-np.inf, high=np.inf):
     Returns:
         function: corrupter
     """
-
     def corrupter(inp):
         inp = np.array(inp)
         return np.clip(inp + corruption, low, high)
-
     return corrupter
 
 
@@ -73,12 +70,10 @@ def create_uniform_noise_corrupter(min_noise, max_noise, low=-np.inf, high=np.in
     Returns:
         function: corrupter
     """
-
     def corrupter(inp):
         inp = np.array(inp)
         noise = (max_noise - min_noise) * np.random.random_sample(inp.shape) + min_noise
         return np.clip(inp + noise, low, high)
-
     return corrupter
 
 
@@ -95,12 +90,10 @@ def create_gaussian_noise_corrupter(mean, std, low=-np.inf, high=np.inf):
     Returns:
         function: corrupter
     """
-
     def corrupter(inp):
         inp = np.array(inp)
         noise = mean + std * np.random.randn(*inp.shape)
         return np.clip(inp + noise, low, high)
-
     return corrupter
 
 
@@ -178,17 +171,16 @@ class Observable:
         active (bool): Whether this sensor is active or not. If active, this observable's current
             observed value is returned from self.obs, otherwise self.obs returns None.
     """
-
     def __init__(
-        self,
-        name,
-        sensor,
-        corrupter=None,
-        filter=None,
-        delayer=None,
-        sampling_rate=20,
-        enabled=True,
-        active=True,
+            self,
+            name,
+            sensor,
+            corrupter=None,
+            filter=None,
+            delayer=None,
+            sampling_rate=20,
+            enabled=True,
+            active=True,
     ):
         # Set all internal variables and methods
         self.name = name
@@ -196,18 +188,18 @@ class Observable:
         self._corrupter = corrupter if corrupter is not None else NO_CORRUPTION
         self._filter = filter if filter is not None else NO_FILTER
         self._delayer = delayer if delayer is not None else NO_DELAY
-        self._sampling_timestep = 1.0 / sampling_rate
+        self._sampling_timestep = 1. / sampling_rate
         self._enabled = enabled
         self._active = active
-        self._is_number = False  # filled in during sensor check call
-        self._data_shape = (1,)  # filled in during sensor check call
+        self._is_number = False                                     # filled in during sensor check call
+        self._data_shape = (1,)                                     # filled in during sensor check call
 
         # Make sure sensor is working
         self._check_sensor_validity()
 
         # These values will be modified during update() call
-        self._time_since_last_sample = 0.0  # seconds
-        self._current_delay = self._delayer()  # seconds
+        self._time_since_last_sample = 0.0                          # seconds
+        self._current_delay = self._delayer()                       # seconds
         self._current_observed_value = 0 if self._is_number else np.zeros(self._data_shape)
         self._sampled = False
 
@@ -227,9 +219,8 @@ class Observable:
 
             # If the delayed sampling time has been passed and we haven't sampled yet for this sampling period,
             # we should grab a new measurement
-            if (
-                not self._sampled and self._sampling_timestep - self._current_delay >= self._time_since_last_sample
-            ) or force:
+            if (not self._sampled and self._sampling_timestep - self._current_delay >= self._time_since_last_sample) or\
+                    force:
                 # Get newest raw value, corrupt it, filter it, and set it as our current observed value
                 obs = np.array(self._filter(self._corrupter(self._sensor(obs_cache))))
                 self._current_observed_value = obs[0] if len(obs.shape) == 1 and obs.shape[0] == 1 else obs
@@ -244,10 +235,8 @@ class Observable:
             if self._time_since_last_sample >= self._sampling_timestep:
                 if not self._sampled:
                     # If we still haven't sampled yet, sample immediately and warn user that sampling rate is too low
-                    print(
-                        f"Warning: sampling rate for observable {self.name} is either too low or delay is too high. "
-                        f"Please adjust one (or both)"
-                    )
+                    print(f"Warning: sampling rate for observable {self.name} is either too low or delay is too high. "
+                          f"Please adjust one (or both)")
                     # Get newest raw value, corrupt it, filter it, and set it as our current observed value
                     obs = np.array(self._filter(self._corrupter(self._sensor(obs_cache))))
                     self._current_observed_value = obs[0] if len(obs.shape) == 1 and obs.shape[0] == 1 else obs
@@ -362,7 +351,7 @@ class Observable:
         Args:
             rate (int): New sampling rate for this observable (Hz)
         """
-        self._sampling_timestep = 1.0 / rate
+        self._sampling_timestep = 1. / rate
 
     def _check_sensor_validity(self):
         """
@@ -376,7 +365,8 @@ class Observable:
             _ = self.modality
             self._data_shape = np.array(self._sensor({})).shape
             self._is_number = len(self._data_shape) == 1 and self._data_shape[0] == 1
-        except:
+        except Exception as e:
+            print(f"Error: {e}")
             raise ValueError("Current sensor for observable {} is invalid.".format(self.name))
 
     @property
