@@ -18,6 +18,9 @@ from .xml_objects import (
     PlateWithHoleObject,
     DoorObject,
 )
+from .mjcf_objects import (
+    FishObject
+)
 from .primitive import *
 from .composite import *
 from .composite_body import *

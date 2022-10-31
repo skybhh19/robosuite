@@ -12,6 +12,12 @@ from robosuite.environments.manipulation.two_arm_lift import TwoArmLift
 from robosuite.environments.manipulation.two_arm_peg_in_hole import TwoArmPegInHole
 from robosuite.environments.manipulation.two_arm_handover import TwoArmHandover
 from robosuite.environments.manipulation.two_arm_transport import TwoArmTransport
+from robosuite.environments.manipulation.tidy import Tidy
+from robosuite.environments.manipulation.cleanup import CleanUp
+from robosuite.environments.manipulation.tidy_real import TidyReal1, TidyReal2, TidyReal3, TidyReal4, TidyReal5, TidyReal6, TidyRealExploreSmall, TidyRealExploreLarge
+from robosuite.environments.manipulation.cleanup_pnp import CleanUpPnP
+from robosuite.environments.manipulation.kitchen import Kitchen
+
 
 from robosuite.environments import ALL_ENVIRONMENTS
 from robosuite.controllers import ALL_CONTROLLERS, load_controller_config

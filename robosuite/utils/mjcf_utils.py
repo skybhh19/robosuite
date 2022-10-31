@@ -92,12 +92,18 @@ TEXTURES = {
     "Bread": "bread.png",
     "Can": "can.png",
     "Ceramic": "ceramic.png",
-    "Cereal": "cereal.png",
+    "Cereal": "cereal_square.png",
+    "Soda": "soda_square.png",
     "Clay": "clay.png",
     "Dirt": "dirt.png",
     "Glass": "glass.png",
     "FeltGray": "gray-felt.png",
     "Lemon": "lemon.png",
+
+    "Cheese": "cheese.png",
+
+    "Jello": "jello.png",
+    "Spam": "spam.png",
 }
 
 ALL_TEXTURES = TEXTURES.keys()

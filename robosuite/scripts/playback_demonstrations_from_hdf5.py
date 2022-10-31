@@ -23,6 +23,11 @@ import json
 import robosuite
 from robosuite.utils.mjcf_utils import postprocess_model_xml
 
+import imageio
+
+import robosuite.utils.macros as macros
+macros.IMAGE_CONVENTION = "opencv"
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -35,6 +40,11 @@ if __name__ == "__main__":
         "--use-actions", 
         action='store_true',
     )
+
+    parser.add_argument(
+        "--write-video",
+        action="store_true",
+    )
     args = parser.parse_args()
 
     demo_path = args.folder
@@ -45,22 +55,25 @@ if __name__ == "__main__":
 
     env = robosuite.make(
         **env_info,
-        has_renderer=True,
-        has_offscreen_renderer=False,
+        has_renderer=not args.write_video,
+        has_offscreen_renderer=args.write_video,
         ignore_done=True,
-        use_camera_obs=False,
+        use_camera_obs=args.write_video,
         reward_shaping=True,
         control_freq=20,
+        camera_heights=128,  # set camera height
+        camera_widths=128,
     )
 
     # list of all demonstrations episodes
     demos = list(f["data"].keys())
 
-    while True:
-        print("Playing back random episode... (press ESC to quit)")
+    video_images = []
+    for ep in demos:
+        # print("Playing back random episode... (press ESC to quit)")
 
         # # select an episode randomly
-        ep = random.choice(demos)
+        # ep = random.choice(demos)
 
         # read the model xml, using the metadata stored in the attribute for this episode
         model_xml = f["data/{}".format(ep)].attrs["model_file"]
@@ -69,7 +82,8 @@ if __name__ == "__main__":
         xml = postprocess_model_xml(model_xml)
         env.reset_from_xml_string(xml)
         env.sim.reset()
-        env.viewer.set_camera(0)
+        if not args.write_video:
+            env.viewer.set_camera(0)
 
         # load the flattened mujoco states
         states = f["data/{}/states".format(ep)][()]
@@ -85,8 +99,11 @@ if __name__ == "__main__":
             num_actions = actions.shape[0]
 
             for j, action in enumerate(actions):
-                env.step(action)
-                env.render()
+                obs, _, _, _ = env.step(action)
+                if not args.write_video:
+                    env.render()
+                else:
+                    video_images.append(obs['agentview_image'])
 
                 if j < num_actions - 1:
                     # ensure that the actions deterministically lead to the same recorded states
@@ -101,6 +118,15 @@ if __name__ == "__main__":
             for state in states:
                 env.sim.set_state_from_flattened(state)
                 env.sim.forward()
-                env.render()
+                if not args.write_video:
+                    env.render()
+
+    if args.write_video:
+        output_path = '../vis/tidyreal3.mp4'
+        video_writer = imageio.get_writer(output_path, fps=5)
+        for i_img in range(len(video_images)):
+            if i_img % 3 == 0:
+                video_writer.append_data(video_images[i_img])
+        video_writer.close()
 
     f.close()
