@@ -142,7 +142,7 @@ def collect_human_trajectory(env, device, arm, env_configuration, only_yaw):
     env.close()
 
 
-def gather_demonstrations_as_hdf5(directory, out_dir, env_info):
+def gather_demonstrations_as_hdf5(directory, out_dir, env_info, only_success):
     """
     Gathers the demonstrations saved in @directory into a
     single hdf5 file.
@@ -196,7 +196,7 @@ def gather_demonstrations_as_hdf5(directory, out_dir, env_info):
             states.extend(dic["states"])
             for ai in dic["action_infos"]:
                 actions.append(ai["actions"])
-        if not is_success:
+        if not is_success and only_success:
             continue
 
         if len(states) == 0:
@@ -233,7 +233,7 @@ def gather_demonstrations_as_hdf5(directory, out_dir, env_info):
         grp.attrs["env"] = env_name
         grp.attrs["env_info"] = env_info
     except:
-        assert len(os.listdir(directory)) == 1 and not is_success
+        assert len(os.listdir(directory)) == 1 and (not is_success and is_success)
 
     f.close()
     print("collected ndemo", demo_cnt)
@@ -322,4 +322,4 @@ if __name__ == "__main__":
     # collect demonstrations
     while True:
         collect_human_trajectory(env, device, args.arm, args.config, args.only_yaw)
-        gather_demonstrations_as_hdf5(tmp_directory, new_dir, env_info)
+        gather_demonstrations_as_hdf5(tmp_directory, new_dir, env_info, args.only_success)

@@ -123,7 +123,7 @@ if __name__ == "__main__":
                     env.render()
 
     if args.write_video:
-        output_path = '../vis/tidyreal3.mp4'
+        output_path = '../vis/kitchen.mp4'
         video_writer = imageio.get_writer(output_path, fps=5)
         for i_img in range(len(video_images)):
             if i_img % 3 == 0:
