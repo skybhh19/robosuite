@@ -177,7 +177,7 @@ class BaseSkill:
     def _reached_goal_ori_y(self):
         if not self._config['use_ori_params']:
             return True
-        obs = get_obs(self._env)
+        obs = self._env.get_observation()
         cur_quat = get_eef_quat(obs)
         cur_y = T.mat2euler(T.quat2mat(cur_quat), axes='rxyz')[-1:]
         target_y = self._get_ori_ac()
@@ -203,14 +203,18 @@ class BaseSkill:
         image_obs = []
         reward_sum = 0
         obs_list = []
+        state_list = []
         action_list = []
-        obs = get_obs(self._env)
+        obs = self._env.get_observation()
+        state = self._env.get_state()
         obs_list.append(obs)
+        state_list.append(state)
         while True:
             action = self._get_action()
             action_list.append(action)
             obs, reward, done, info = self._env.step(action)
             obs_list.append(obs)
+            state_list.append(self._env.get_state())
             info['last_gripper_ac'] = action[-1:]
             if self._config['render']:
                 self._env.render()
@@ -225,6 +229,7 @@ class BaseSkill:
         if self._config['image_obs_in_info']:
             info['image_obs'] = image_obs
         info['obs_list'] = obs_list
+        info['state_list'] = state_list
         info['action_list'] = action_list
         info['env_done'] = done
         self._update_info(info)
@@ -330,7 +335,7 @@ class GripperSkill(BaseSkill):
         return None
 
     def _get_reach_pos(self):
-        obs = get_obs(self._env)
+        obs = self._env.get_observation()
         eef_pos = get_eef_pos(obs)
         return eef_pos
 
@@ -428,7 +433,7 @@ class ReachSkill(BaseSkill):
         return pos
 
     def _update_state(self):
-        obs = get_obs(self._env)
+        obs = self._env.get_observation()
         cur_pos = get_eef_pos(obs)
         goal_pos = self._get_reach_pos()
 
@@ -453,7 +458,7 @@ class ReachSkill(BaseSkill):
 
     def _get_pos_ac(self):
         self._check_params_dim()
-        obs = get_obs(self._env)
+        obs = self._env.get_observation()
         cur_pos = get_eef_pos(obs)
         goal_pos = self._get_reach_pos()
 
@@ -504,7 +509,7 @@ class ReachSkill(BaseSkill):
 
     def _get_action(self):
         super()._get_action()
-        obs = get_obs(self._env)
+        obs = self._env.get_observation()
         cur_pos = get_eef_pos(obs)
         pos = self._get_pos_ac()
         pos_action = pos - cur_pos
@@ -586,7 +591,7 @@ class GraspSkill(BaseSkill):
         return pos
 
     def _update_state(self):
-        obs = get_obs(self._env)
+        obs = self._env.get_observation()
         cur_pos = get_eef_pos(obs)
         goal_pos = self._get_reach_pos()
 
@@ -619,7 +624,7 @@ class GraspSkill(BaseSkill):
         assert self._state in GraspSkill.STATES
 
     def _get_pos_ac(self):
-        obs = get_obs(self._env)
+        obs = self._env.get_observation()
         cur_pos = get_eef_pos(obs)
         goal_pos = self._get_reach_pos()
 
@@ -678,7 +683,7 @@ class GraspSkill(BaseSkill):
 
     def _get_action(self):
         super()._get_action()
-        obs = get_obs(self._env)
+        obs = self._env.get_observation()
         cur_pos = get_eef_pos(obs)
         pos = self._get_pos_ac()
         pos_action = pos - cur_pos
@@ -703,7 +708,7 @@ class GraspSkill(BaseSkill):
         super().check_interesting_interaction()
         for obj_id, obj in enumerate(self._env.objs):
             if self._env._check_grasp(gripper=self._env.robots[0].gripper, object_geoms=obj):
-                end_obs = get_obs(self._env)
+                end_obs = self._env.get_observation()
                 eef_pos = get_eef_pos(end_obs)
                 # if np.linalg.norm(eef_pos - self._env.sim.data.body_xpos[self._env.pnp_obj_body_ids[obj_id]]) < 0.025:
                 return True
@@ -770,7 +775,7 @@ class PlaceSkill(BaseSkill):
         return pos
 
     def _update_state(self):
-        obs = get_obs(self._env)
+        obs = self._env.get_observation()
         cur_pos = get_eef_pos(obs)
         goal_pos = self._get_reach_pos()
 
@@ -827,7 +832,7 @@ class PlaceSkill(BaseSkill):
         assert self._state in PlaceSkill.STATES
 
     def _get_pos_ac(self):
-        obs = get_obs(self._env)
+        obs = self._env.get_observation()
         cur_pos = get_eef_pos(obs)
         goal_pos = self._get_reach_pos()
 
@@ -883,7 +888,7 @@ class PlaceSkill(BaseSkill):
 
     def _get_action(self):
         super()._get_action()
-        obs = get_obs(self._env)
+        obs = self._env.get_observation()
         cur_pos = get_eef_pos(obs)
         pos = self._get_pos_ac()
         pos_action = pos - cur_pos
@@ -906,7 +911,7 @@ class PlaceSkill(BaseSkill):
 
     def check_interesting_interaction(self):
         super().check_interesting_interaction()
-        end_obs = get_obs(self._env)
+        end_obs = self._env.get_observation()
         eef_pos = get_eef_pos(end_obs)
         for obj in self._env.objs:
             if self._env._check_grasp(gripper=self._env.robots[0].gripper, object_geoms=obj):
@@ -999,7 +1004,7 @@ class PushSkill(BaseSkill):
         return pos
 
     def _update_state(self):
-        obs = get_obs(self._env)
+        obs = self._env.get_observation()
         cur_pos = get_eef_pos(obs)
         src_pos = self._get_reach_pos()
         target_pos = self._get_push_pos()
@@ -1042,7 +1047,7 @@ class PushSkill(BaseSkill):
 
     def _get_pos_ac(self):
         self._check_params_dim()
-        obs = get_obs(self._env)
+        obs = self._env.get_observation()
         cur_pos = get_eef_pos(obs)
         src_pos = self._get_reach_pos()
         target_pos = self._get_push_pos()
@@ -1096,7 +1101,7 @@ class PushSkill(BaseSkill):
 
     def _get_action(self):
         super()._get_action()
-        obs = get_obs(self._env)
+        obs = self._env.get_observation()
         cur_pos = get_eef_pos(obs)
         pos = self._get_pos_ac()
         if self._state == 'REACHED':
@@ -1127,7 +1132,7 @@ class PushSkill(BaseSkill):
         for obj_id in range(len(self._env.objs)):
             obj_pos = self._env.sim.data.body_xpos[self._env.obj_body_ids[obj_id]].copy()
             initial_obj_pos = self._initial_obj_pos[obj_id]
-            obs = get_obs(self._env)
+            obs = self._env.get_observation()
             eef_pos = get_eef_pos(obs)
             if np.linalg.norm(obj_pos[:2] - initial_obj_pos[:2]) > 0.07:
                 return True
