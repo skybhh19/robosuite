@@ -69,13 +69,13 @@ class SkillController:
             image_obs_in_info=image_obs_in_info,
             render=render,
             use_ori_params=_use_ori_params,
-            global_xyz_bounds=self._env.eef_bounds if self._env is not None else None,
+            global_xyz_bounds=self._env.env.eef_bounds if self._env is not None else None,
             delta_xyz_scale=DELTA_XYZ_SCALE,
             yaw_bounds=np.array([
                 [-np.pi / 2],
                 [np.pi / 2]
             ]),
-            lift_height=env.table_offset[2] + 0.15  if self._env is not None else None,
+            lift_height=env.env.table_offset[2] + 0.15  if self._env is not None else None,
             lift_thres=0.02,
             reach_thres=0.01,
             push_thres=0.015,
