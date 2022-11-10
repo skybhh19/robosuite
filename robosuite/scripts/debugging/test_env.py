@@ -1,7 +1,7 @@
 import robosuite as suite
 
 import robosuite.utils.macros as macros
-macros.IMAGE_CONVENTION = "opencv"
+# macros.IMAGE_CONVENTION = "opencv"
 
 from robosuite.environments.base import REGISTERED_ENVS, MujocoEnv
 

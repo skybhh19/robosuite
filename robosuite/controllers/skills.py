@@ -208,13 +208,13 @@ class BaseSkill:
         obs = self._env.get_observation()
         state = self._env.get_state()
         obs_list.append(obs)
-        state_list.append(state)
+        state_list.append(state["states"])
         while True:
             action = self._get_action()
             action_list.append(action)
             obs, reward, done, info = self._env.step(action)
             obs_list.append(obs)
-            state_list.append(self._env.get_state())
+            state_list.append(self._env.get_state()["states"])
             info['last_gripper_ac'] = action[-1:]
             if self._config['render']:
                 self._env.render()
