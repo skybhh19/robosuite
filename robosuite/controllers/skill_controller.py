@@ -75,7 +75,7 @@ class SkillController:
                 [-np.pi / 2],
                 [np.pi / 2]
             ]),
-            lift_height=env.env.table_offset[2] + 0.15  if self._env is not None else None,
+            lift_height=env.env.table_offset[2] + 0.15 if self._env is not None else None,
             lift_thres=0.02,
             reach_thres=0.01,
             push_thres=0.015,
