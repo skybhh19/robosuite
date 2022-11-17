@@ -13,19 +13,22 @@ options["robots"] = ["Panda"]
 
 options["controller_configs"] = suite.load_controller_config(default_controller="OSC_POSITION")
 
-options["env_name"] = "Kitchen"
+options["env_name"] = "CleanUpMediumSmallInit"
 
 
 env = suite.make(**options,
                  has_renderer=True,
-                 render_camera="agentview",
+                 render_camera="robot0_eye_in_hand",
                  has_offscreen_renderer=False,
                  ignore_done=True,
                  use_camera_obs=False,
                  horizon=1000,
                  control_freq=20,
                  use_object_obs=True,)
-obs = env.reset()
+for _ in range(100):
+    obs = env.reset()
+    env.render()
+    input()
 # for i in range(1000):
 #     env.reset()
 #     print(i)

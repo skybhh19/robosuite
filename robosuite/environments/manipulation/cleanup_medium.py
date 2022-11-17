@@ -4,7 +4,7 @@ import numpy as np
 from copy import deepcopy
 
 from robosuite.environments.manipulation.single_arm_env import SingleArmEnv
-from robosuite.models.arenas import TableArenaBin
+from robosuite.models.arenas import TableArenaReal
 from robosuite.models.objects import BoxObject
 from robosuite.models.tasks import ManipulationTask
 from robosuite.utils.mjcf_utils import CustomMaterial
@@ -14,16 +14,8 @@ from robosuite.utils.transform_utils import convert_quat
 
 from robosuite.utils.mjcf_utils import CustomMaterial, array_to_string, add_material
 
-DEFAULT_CLEANUP_CONFIG = {
-    'use_pnp_rew': True,
-    'use_push_rew': True,
-    'rew_type': 'sum',
-    'num_pnp_objs': 1,
-    'num_push_objs': 1,
-    'shaped_push_rew': False,
-    'push_scale_fac': 5.0,
-}
-class CleanUp(SingleArmEnv):
+MAX_OBJ_NUMS = 3
+class CleanUpMedium(SingleArmEnv):
     """
     This class corresponds to the stacking task for a single robot arm.
 
@@ -152,7 +144,7 @@ class CleanUp(SingleArmEnv):
         gripper_types="default",
         initialization_noise="default",
         table_full_size=(0.8, 0.8, 0.05),
-        table_friction=(0.6, 5e-3, 1e-4),
+        table_friction=(1., 5e-3, 1e-4),
         use_camera_obs=True,
         use_object_obs=True,
         reward_scale=1.0,
@@ -175,12 +167,16 @@ class CleanUp(SingleArmEnv):
         camera_segmentations=None,  # {None, instance, class, element}
         renderer="mujoco",
         renderer_config=None,
+        left_bin_obj_ids=None,
+        right_bin_obj_ids=None,
+        left_mat_obj_ids=None,
+        right_mat_obj_ids=None,
+	    num_objs=3,
     ):
         # settings for table top
         self.table_full_size = table_full_size
         self.table_friction = table_friction
         self.table_offset = np.array((0, 0, 0.8))
-        self.table_height = 0.8
 
         # reward configuration
         self.reward_scale = reward_scale
@@ -192,13 +188,31 @@ class CleanUp(SingleArmEnv):
         # object placement initializer
         self.placement_initializer = placement_initializer
 
-        # Get config
-        self.task_config = DEFAULT_CLEANUP_CONFIG.copy()
+        self.num_objs = num_objs
+        self.objs_idx = [o for o in range(self.num_objs)]
+        if left_bin_obj_ids is not None:
+            self.objs_idx = sorted(left_bin_obj_ids + right_bin_obj_ids + left_mat_obj_ids + right_mat_obj_ids)
+            assert len(self.objs_idx) == self.num_objs
+            for _obj_ids_list in [left_bin_obj_ids, right_bin_obj_ids, left_mat_obj_ids, right_mat_obj_ids]:
+                for _id in range(len(_obj_ids_list)):
+                    for _obj_id in range(len(self.objs_idx)):
+                        if self.objs_idx[_obj_id] == _obj_ids_list[_id]:
+                            _obj_ids_list[_id] = _obj_id
+                            break
+        self.left_bin_obj_ids = left_bin_obj_ids
+        self.right_bin_obj_ids = right_bin_obj_ids
+        self.left_mat_obj_ids = left_mat_obj_ids
+        self.right_mat_obj_ids = right_mat_obj_ids
 
         self.eef_bounds = np.array([
-                [-0.32, -0.26, 0.80],
-                [0.20, 0.26, 1.0]
+                [-0.28, -0.32, 0.80],
+                [0.15, 0.32, 1.0]
             ])
+
+        self.data_eef_bounds = np.array([
+            [-0.26, -0.31, 0.80],
+            [0.14, 0.31, 1.0]
+        ])
 
         super().__init__(
             robots=robots,
@@ -228,38 +242,6 @@ class CleanUp(SingleArmEnv):
         )
 
     def reward(self, action=None):
-        """
-        Reward function for the task.
-
-        Sparse un-normalized reward:
-
-            - a discrete reward of 2.0 is provided if the red block is stacked on the green block
-
-        Un-normalized components if using reward shaping:
-
-            - Reaching: in [0, 0.25], to encourage the arm to reach the cube
-            - Grasping: in {0, 0.25}, non-zero if arm is grasping the cube
-            - Lifting: in {0, 1}, non-zero if arm has lifted the cube
-            - Aligning: in [0, 0.5], encourages aligning one cube over the other
-            - Stacking: in {0, 2}, non-zero if cube is stacked on other cube
-
-        The reward is max over the following:
-
-            - Reaching + Grasping
-            - Lifting + Aligning
-            - Stacking
-
-        The sparse reward only consists of the stacking component.
-
-        Note that the final reward is normalized and scaled by
-        reward_scale / 2.0 as well so that the max score is equal to reward_scale
-
-        Args:
-            action (np array): [NOT USED]
-
-        Returns:
-            float: reward value
-        """
         if self._check_success():
             return 1.0
         return 0.0
@@ -276,7 +258,7 @@ class CleanUp(SingleArmEnv):
         self.robots[0].robot_model.set_base_xpos(xpos)
 
         # load model for table top workspace
-        mujoco_arena = TableArenaBin(
+        mujoco_arena = TableArenaReal(
             table_full_size=self.table_full_size,
             table_friction=self.table_friction,
             table_offset=self.table_offset,
@@ -290,65 +272,50 @@ class CleanUp(SingleArmEnv):
             "type": "cube",
         }
         mat_attrib = {
-            "texrepeat": "1 1",
+            "texrepeat": "3 3",
             "specular": "0.4",
             "shininess": "0.1",
         }
 
-        pnpmaterial = CustomMaterial(
-            texture="Spam",
-            tex_name="pnpobj_tex",
-            mat_name="pnpobj_mat",
-            tex_attrib=tex_attrib,
-            mat_attrib=mat_attrib,
-        )
-        pushmaterial = CustomMaterial(
-            texture="Jello",
-            tex_name="pushobj_tex",
-            mat_name="pushobj_mat",
-            tex_attrib=tex_attrib,
-            mat_attrib=mat_attrib,
-        )
+        obj_texture_lst = ["WoodBlue", "WoodGreen", "WoodRed"]
+        obj_material_list = []
+        for i in range(len(obj_texture_lst)):
+            obj_material_list.append(
+                CustomMaterial(
+                texture=obj_texture_lst[i],
+                tex_name="obj{}_tex".format(i),
+                mat_name="obj{}_mat".format(i),
+                tex_attrib=tex_attrib,
+                mat_attrib=mat_attrib,
+            ))
 
-        self.pnp_objs = []
-        num_pnp_objs = self.task_config['num_pnp_objs']
-        for i in range(num_pnp_objs):
-            if num_pnp_objs > 1:
-                color = 0.25 + 0.75 * i / (num_pnp_objs - 1)
+        obj_size_list = [
+            np.array([0.04, 0.022, 0.033]) * 0.7,
+            np.array([0.022, 0.022, 0.04]) * 0.7,
+            np.array([0.0350, 0.0425, 0.025]) * 1.25
+        ]
+        assert len(obj_texture_lst) == len(obj_size_list) == len(obj_material_list) == MAX_OBJ_NUMS
+        self.objs = []
+        for i in self.objs_idx:
+            if self.num_objs > 1:
+                color = 0.25 + 0.75 * i / (self.num_objs - 1)
             else:
                 color = 1.0
-            pnp_size = np.array([0.04, 0.022, 0.033]) * 0.7
+            obj_size = obj_size_list[i]
             obj = BoxObject(
-                name="obj_pnp_{}".format(i),
-                size_min=pnp_size,
-                size_max=pnp_size,
+                name="obj_{}".format(i),
+                size_min=obj_size,
+                size_max=obj_size,
                 rgba=[color, 0, 0, 1],
-                material=pnpmaterial,
+                material=obj_material_list[i],
+                solimp=[0.998, 0.998, 0.001],
+                solref=[0.02, 1]
             )
-            self.pnp_objs.append(obj)
+            self.objs.append(obj)
 
-        self.push_objs = []
-        num_push_objs = self.task_config['num_push_objs']
-        for i in range(num_push_objs):
-            if num_push_objs > 1:
-                color = 0.25 + 0.75 * i / (num_push_objs - 1)
-            else:
-                color = 1.0
-            push_size = np.array([0.0350, 0.0425, 0.025]) * 1.25
-            obj = BoxObject(
-                name="obj_push_{}".format(i),
-                size_min=push_size,
-                size_max=push_size,
-                rgba=[0, color, 0, 1],
-                material=pushmaterial,
-            )
-            self.push_objs.append(obj)
+        self._get_placement_initializer()
 
-        self.grasp_objs = self.pnp_objs
-
-        mujoco_objects = self.pnp_objs + self.push_objs
-
-        self.objs = mujoco_objects
+        mujoco_objects = self.objs
 
         # Create placement initializer
         # if self.placement_initializer is not None:
@@ -356,19 +323,6 @@ class CleanUp(SingleArmEnv):
         #     self.placement_initializer.add_objects(cubes)
         # else:
 
-        self.placement_initializer = SequentialCompositeSampler(name="ObjectSampler")
-        self.placement_initializer.append_sampler(
-            UniformRandomSampler(
-            name="ObjectSampler",
-            mujoco_objects=mujoco_objects,
-            x_range=[0.0, 0.05],
-            y_range=[-0.13, 0.13],
-            rotation=None,
-            ensure_object_boundary_in_range=False,
-            ensure_valid_placement=True,
-            reference_pos=self.table_offset,
-            z_offset=0.01,
-        ))
 
         # task includes arena, robot, and objects of interest
         self.model = ManipulationTask(
@@ -376,6 +330,9 @@ class CleanUp(SingleArmEnv):
             mujoco_robots=[robot.robot_model for robot in self.robots],
             mujoco_objects=mujoco_objects,
         )
+
+    def _get_placement_initializer(self):
+        pass
 
     def _setup_references(self):
         """
@@ -387,55 +344,31 @@ class CleanUp(SingleArmEnv):
 
         self.table_body_id = self.sim.model.body_name2id("table")
 
-        self.pnp_obj_body_ids = []
-        for i in range(self.task_config['num_pnp_objs']):
-            obj = self.pnp_objs[i]
-            id = self.sim.model.body_name2id(obj.root_body)
-            self.pnp_obj_body_ids.append(id)
-        self.grasp_obj_body_ids = self.pnp_obj_body_ids
-
-        self.push_obj_body_ids = []
-        for i in range(self.task_config['num_push_objs']):
-            obj = self.push_objs[i]
-            id = self.sim.model.body_name2id(obj.root_body)
-            self.push_obj_body_ids.append(id)
-
         self.obj_body_ids = []
-        for i in range(self.task_config['num_pnp_objs']+self.task_config['num_push_objs']):
+        for i in range(self.num_objs):
             obj = self.objs[i]
             id = self.sim.model.body_name2id(obj.root_body)
             self.obj_body_ids.append(id)
 
-
-        self.bin_body_id = self.sim.model.body_name2id("bin")
+        self.bins_body_id = [self.sim.model.body_name2id("bin0"), self.sim.model.body_name2id("bin1")]
 
     @property
     def obj_positions(self):
-        pnp_obj_positions = [
-            self.sim.data.body_xpos[self.pnp_obj_body_ids[i]].copy()
-            for i in range(self.task_config['num_pnp_objs'])
+        _obj_positions = [
+            self.sim.data.body_xpos[self.obj_body_ids[i]].copy()
+            for i in range(self.num_objs)
         ]
-        push_obj_positions = [
-            self.sim.data.body_xpos[self.push_obj_body_ids[i]].copy()
-            for i in range(self.task_config['num_push_objs'])
-        ]
-        return pnp_obj_positions + push_obj_positions
+        return _obj_positions
 
     @property
     def obj_quats(self):
-        pnp_obj_quats = [
+        _obj_quats = [
             convert_quat(
-                np.array(self.sim.data.body_xquat[self.pnp_obj_body_ids[i]]), to="xyzw"
+                np.array(self.sim.data.body_xquat[self.obj_body_ids[i]]), to="xyzw"
             )
-            for i in range(self.task_config['num_pnp_objs'])
+            for i in range(self.num_objs)
         ]
-        push_obj_quats = [
-            convert_quat(
-                np.array(self.sim.data.body_xquat[self.push_obj_body_ids[i]]), to="xyzw"
-            )
-            for i in range(self.task_config['num_push_objs'])
-        ]
-        return pnp_obj_quats + push_obj_quats
+        return _obj_quats
 
     def _reset_internal(self):
         """
@@ -477,10 +410,17 @@ class CleanUp(SingleArmEnv):
                 return np.array(self.obj_quats).flatten()
 
             @sensor(modality=modality)
+            def obj_ind(obs_cache):
+                assert self.num_objs <= MAX_OBJ_NUMS
+                objs_ind = np.zeros((self.num_objs, MAX_OBJ_NUMS))
+                for i in range(self.num_objs):
+                    objs_ind[i][self.objs_idx[i]] = 1
+                return objs_ind.flatten()
+
+            @sensor(modality=modality)
             def object_centric(obs_cache):
                 _objs_pos = np.array(self.obj_positions).copy().reshape(-1, 3)
                 nobject = _objs_pos.shape[0]
-                # print(obs_cache.keys())
                 gripper_site_pos = self.sim.data.site_xpos[self.robots[0].eef_site_id]
                 gripper_to_objects_pos = np.stack([_obj_pos - gripper_site_pos for _obj_pos in _objs_pos])
                 assert len(gripper_to_objects_pos) == nobject
@@ -498,7 +438,7 @@ class CleanUp(SingleArmEnv):
             #     obj_quat = np.array(self.obj_quats).flatten()
             #     return np.concatenate([obj_pos, obj_quat])
 
-            sensors = [obj_pos, obj_quat, object_centric]
+            sensors = [obj_pos, obj_quat, object_centric, obj_ind]
             names = [s.__name__ for s in sensors]
 
             # Create observables
@@ -511,73 +451,71 @@ class CleanUp(SingleArmEnv):
 
         return observables
 
-    def in_bin(self, obj_pos):
-        bin_pos = np.array(self.sim.data.body_xpos[self.bin_body_id])
-        return abs(obj_pos[0] - bin_pos[0]) < 0.10 \
-               and abs(obj_pos[1] - bin_pos[1]) < 0.15 \
-               and obj_pos[2] < self.table_offset[2] + 0.05
+    def in_bin(self, obj_pos, bin_id):
+        # bins_pos = [np.array(self.sim.data.body_xpos[bin_body_id]) for bin_body_id in self.bins_body_id]
+        bin_pos = np.array(self.sim.data.body_xpos[self.bins_body_id[bin_id]])
+        if abs(obj_pos[0] - bin_pos[0]) < 0.15 \
+                and abs(obj_pos[1] - bin_pos[1]) < 0.09 \
+                and obj_pos[2] < self.table_offset[2] + 0.09:
+            return True
+        return False
 
-    def _check_success_pnp(self):
-        for i in range(self.task_config['num_pnp_objs']):
-            obj_pos = self.sim.data.body_xpos[self.pnp_obj_body_ids[i]]
-            if not self.in_bin(obj_pos):
+    def _all_in_bins(self):
+        for i in self.left_bin_obj_ids:
+            obj_pos = self.sim.data.body_xpos[self.obj_body_ids[i]]
+            if not self.in_bin(obj_pos, 0):
+                return False
+        for i in self.right_bin_obj_ids:
+            obj_pos = self.sim.data.body_xpos[self.obj_body_ids[i]]
+            if not self.in_bin(obj_pos, 1):
                 return False
         return True
 
-    def _check_success_push(self):
-        for i in range(self.task_config['num_push_objs']):
-            obj_pos = self.sim.data.body_xpos[self.push_obj_body_ids[i]]
-            # target_pos_xy = self.table_offset[:2] + np.array([-0.15, 0.15])
-            # d_push = np.linalg.norm(obj_pos[:2] - target_pos_xy)
-            # if d_push > 0.09:
-            #     return False
-            if obj_pos[0] > -0.07:
+    def _all_on_mats(self):
+        for i in self.left_mat_obj_ids:
+            obj_pos = self.sim.data.body_xpos[self.obj_body_ids[i]]
+            target_pos_xy = np.array([-0.29, -0.105])
+            d_push = np.linalg.norm(obj_pos[:2] - target_pos_xy)
+            if d_push > 0.05:
+                return False
+
+        for i in self.right_mat_obj_ids:
+            obj_pos = self.sim.data.body_xpos[self.obj_body_ids[i]]
+            target_pos_xy = np.array([-0.29, 0.105])
+            d_push = np.linalg.norm(obj_pos[:2] - target_pos_xy)
+            if d_push > 0.05:
                 return False
         return True
 
     def _check_success(self):
-        """
-        Check if blocks are stacked correctly.
-
-        Returns:
-            bool: True if blocks are correctly stacked
-        """
-        if not self._check_success_pnp():
+        if not self._all_in_bins():
             return False
-        if not self._check_success_push():
+        if not self._all_on_mats():
             return False
         return True
 
     def _get_skill_info(self):
-        pos_info = dict(
-            grasp=[],
-            push=[],
-            reach=[],
-        )
-
-        bin_pos = self.sim.data.body_xpos[self.bin_body_id].copy()
-        obj_positions = self.obj_positions
-        num_pnp_objs = self.task_config['num_pnp_objs']
-
-        pnp_objs = obj_positions[:num_pnp_objs]
-        push_objs = obj_positions[num_pnp_objs:]
-
-        drop_pos = bin_pos + [0, 0, 0.15]
-
-        pos_info['grasp'] += pnp_objs
-        pos_info['push'] += push_objs
-        pos_info['reach'].append(drop_pos)
-
-        info = {}
-        for k in pos_info:
-            info[k + '_pos'] = pos_info[k]
-
-        return info
+        return None
+        # pos_info = dict(
+        #     grasp=[],
+        #     push=[],
+        #     reach=[],
+        # )
+        #
+        # obj_positions = self.obj_positions
+        #
+        # # pos_info['obj_pos'] += obj_positions
+        #
+        # info = {}
+        # for k in pos_info:
+        #     info[k + '_pos'] = pos_info[k]
+        #
+        # return info
 
     def _get_env_info(self, action):
         env_info = {}
-        env_info['success_pnp'] = self._check_success_pnp()
-        env_info['success_push'] = self._check_success_push()
+        # env_info['success_pnp'] = self._check_success_pnp()
+        # env_info['success_push'] = self._check_success_push()
         env_info['success'] = self._check_success()
 
         return env_info
@@ -599,3 +537,107 @@ class CleanUp(SingleArmEnv):
         # if vis_settings["grippers"]:
         #     self._visualize_gripper_to_target(gripper=self.robots[0].gripper, target=self.cubeA)
 
+    @property
+    def _has_gripper_contact(self):
+        return np.linalg.norm(self.robots[0].ee_force) > 20
+
+class CleanUpMediumSmallInit(CleanUpMedium):
+
+    def __init__(self, **kwargs):
+        assert "single_object_mode" not in kwargs, "invalid set of arguments"
+        super().__init__(left_bin_obj_ids=[0],
+                         right_bin_obj_ids=[1],
+                         left_mat_obj_ids=[2],
+                         right_mat_obj_ids=[],
+                         **kwargs)
+
+    def _get_placement_initializer(self):
+        self.placement_initializer = SequentialCompositeSampler(name="ObjectSampler")
+        self.placement_initializer.append_sampler(
+            UniformRandomSampler(
+                name="ObjectSampler_0",
+                mujoco_objects=self.objs[0],
+                x_range=[-0.17, -0.07],
+                y_range=[-0.13, -0.03],
+                rotation=None,
+                ensure_object_boundary_in_range=True,
+                ensure_valid_placement=True,
+                reference_pos=self.table_offset,
+                z_offset=0.01,
+            ))
+
+        self.placement_initializer.append_sampler(
+            UniformRandomSampler(
+                name="ObjectSampler_1",
+                mujoco_objects=self.objs[1],
+                x_range=[-0.05, 0.05],
+                y_range=[-0.13, -0.03],
+                rotation=None,
+                ensure_object_boundary_in_range=True,
+                ensure_valid_placement=True,
+                reference_pos=self.table_offset,
+                z_offset=0.01,
+            ))
+
+        self.placement_initializer.append_sampler(
+            UniformRandomSampler(
+                name="ObjectSampler_2",
+                mujoco_objects=self.objs[2],
+                x_range=[-0.12, 0.05],
+                y_range=[0.0, 0.12],
+                rotation=None,
+                ensure_object_boundary_in_range=True,
+                ensure_valid_placement=True,
+                reference_pos=self.table_offset,
+                z_offset=0.01,
+            ))
+
+class CleanUpMediumMediumInit(CleanUpMedium):
+
+    def __init__(self, **kwargs):
+        assert "single_object_mode" not in kwargs, "invalid set of arguments"
+        super().__init__(left_bin_obj_ids=[0],
+                         right_bin_obj_ids=[1],
+                         left_mat_obj_ids=[2],
+                         right_mat_obj_ids=[],
+                         **kwargs)
+
+    def _get_placement_initializer(self):
+        self.placement_initializer = SequentialCompositeSampler(name="ObjectSampler")
+        self.placement_initializer.append_sampler(
+            UniformRandomSampler(
+                name="ObjectSampler",
+                mujoco_objects=self.objs,
+                x_range=[-0.12, 0.12],
+                y_range=[-0.12, 0.12],
+                rotation=None,
+                ensure_object_boundary_in_range=True,
+                ensure_valid_placement=True,
+                reference_pos=self.table_offset,
+                z_offset=0.01,
+            ))
+
+class CleanUpMediumLargeInit(CleanUpMedium):
+
+    def __init__(self, **kwargs):
+        assert "single_object_mode" not in kwargs, "invalid set of arguments"
+        super().__init__(left_bin_obj_ids=[0],
+                         right_bin_obj_ids=[1],
+                         left_mat_obj_ids=[2],
+                         right_mat_obj_ids=[],
+                         **kwargs)
+
+    def _get_placement_initializer(self):
+        self.placement_initializer = SequentialCompositeSampler(name="ObjectSampler")
+        self.placement_initializer.append_sampler(
+            UniformRandomSampler(
+                name="ObjectSampler",
+                mujoco_objects=self.objs,
+                x_range=[-0.20, 0.10],
+                y_range=[-0.15, 0.15],
+                rotation=None,
+                ensure_object_boundary_in_range=True,
+                ensure_valid_placement=True,
+                reference_pos=self.table_offset,
+                z_offset=0.01,
+            ))
