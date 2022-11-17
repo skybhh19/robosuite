@@ -1,10 +1,11 @@
+import random
 from collections import OrderedDict
 
 import numpy as np
 from copy import deepcopy
 
 from robosuite.environments.manipulation.single_arm_env import SingleArmEnv
-from robosuite.models.arenas import TableArenaReal
+from robosuite.models.arenas import TableArenaDoubleBins
 from robosuite.models.objects import BoxObject
 from robosuite.models.tasks import ManipulationTask
 from robosuite.utils.mjcf_utils import CustomMaterial
@@ -144,7 +145,7 @@ class CleanUpMedium(SingleArmEnv):
         gripper_types="default",
         initialization_noise="default",
         table_full_size=(0.8, 0.8, 0.05),
-        table_friction=(1., 5e-3, 1e-4),
+        table_friction=(0.6, 5e-3, 1e-4),
         use_camera_obs=True,
         use_object_obs=True,
         reward_scale=1.0,
@@ -206,12 +207,12 @@ class CleanUpMedium(SingleArmEnv):
 
         self.eef_bounds = np.array([
                 [-0.28, -0.32, 0.80],
-                [0.15, 0.32, 1.0]
+                [0.15, 0.32, 1.05]
             ])
 
         self.data_eef_bounds = np.array([
             [-0.26, -0.31, 0.80],
-            [0.14, 0.31, 1.0]
+            [0.14, 0.31, 1.05]
         ])
 
         super().__init__(
@@ -258,7 +259,7 @@ class CleanUpMedium(SingleArmEnv):
         self.robots[0].robot_model.set_base_xpos(xpos)
 
         # load model for table top workspace
-        mujoco_arena = TableArenaReal(
+        mujoco_arena = TableArenaDoubleBins(
             table_full_size=self.table_full_size,
             table_friction=self.table_friction,
             table_offset=self.table_offset,
@@ -291,8 +292,8 @@ class CleanUpMedium(SingleArmEnv):
 
         obj_size_list = [
             np.array([0.04, 0.022, 0.033]) * 0.7,
-            np.array([0.022, 0.022, 0.04]) * 0.7,
-            np.array([0.0350, 0.0425, 0.025]) * 1.25
+            np.array([0.03, 0.03, 0.04]) * 0.7,
+            np.array([0.0350, 0.0425, 0.02]) * 1.2
         ]
         assert len(obj_texture_lst) == len(obj_size_list) == len(obj_material_list) == MAX_OBJ_NUMS
         self.objs = []
@@ -474,14 +475,14 @@ class CleanUpMedium(SingleArmEnv):
     def _all_on_mats(self):
         for i in self.left_mat_obj_ids:
             obj_pos = self.sim.data.body_xpos[self.obj_body_ids[i]]
-            target_pos_xy = np.array([-0.29, -0.105])
+            target_pos_xy = np.array([0.17, -0.105])
             d_push = np.linalg.norm(obj_pos[:2] - target_pos_xy)
             if d_push > 0.05:
                 return False
 
         for i in self.right_mat_obj_ids:
             obj_pos = self.sim.data.body_xpos[self.obj_body_ids[i]]
-            target_pos_xy = np.array([-0.29, 0.105])
+            target_pos_xy = np.array([0.17, 0.105])
             d_push = np.linalg.norm(obj_pos[:2] - target_pos_xy)
             if d_push > 0.05:
                 return False
@@ -559,7 +560,7 @@ class CleanUpMediumSmallInit(CleanUpMedium):
                 mujoco_objects=self.objs[0],
                 x_range=[-0.17, -0.07],
                 y_range=[-0.13, -0.03],
-                rotation=None,
+                rotation=(-np.pi / 4., np.pi / 4.),
                 ensure_object_boundary_in_range=True,
                 ensure_valid_placement=True,
                 reference_pos=self.table_offset,
@@ -572,7 +573,7 @@ class CleanUpMediumSmallInit(CleanUpMedium):
                 mujoco_objects=self.objs[1],
                 x_range=[-0.05, 0.05],
                 y_range=[-0.13, -0.03],
-                rotation=None,
+                rotation=(-np.pi / 4., np.pi / 4.),
                 ensure_object_boundary_in_range=True,
                 ensure_valid_placement=True,
                 reference_pos=self.table_offset,
@@ -585,7 +586,7 @@ class CleanUpMediumSmallInit(CleanUpMedium):
                 mujoco_objects=self.objs[2],
                 x_range=[-0.12, 0.05],
                 y_range=[0.0, 0.12],
-                rotation=None,
+                rotation=(-np.pi / 4., np.pi / 4.),
                 ensure_object_boundary_in_range=True,
                 ensure_valid_placement=True,
                 reference_pos=self.table_offset,
@@ -604,13 +605,42 @@ class CleanUpMediumMediumInit(CleanUpMedium):
 
     def _get_placement_initializer(self):
         self.placement_initializer = SequentialCompositeSampler(name="ObjectSampler")
+        obj_idx = [0, 1, 2]
+        random.shuffle(obj_idx)
+        self.placement_initializer = SequentialCompositeSampler(name="ObjectSampler")
         self.placement_initializer.append_sampler(
             UniformRandomSampler(
-                name="ObjectSampler",
-                mujoco_objects=self.objs,
-                x_range=[-0.12, 0.12],
-                y_range=[-0.12, 0.12],
-                rotation=None,
+                name="ObjectSampler_{}".format(obj_idx[0]),
+                mujoco_objects=self.objs[obj_idx[0]],
+                x_range=[-0.19, -0.07],
+                y_range=[-0.13, -0.03],
+                rotation=(-np.pi / 4., np.pi / 4.),
+                ensure_object_boundary_in_range=True,
+                ensure_valid_placement=True,
+                reference_pos=self.table_offset,
+                z_offset=0.01,
+            ))
+
+        self.placement_initializer.append_sampler(
+            UniformRandomSampler(
+                name="ObjectSampler_{}".format(obj_idx[1]),
+                mujoco_objects=self.objs[obj_idx[1]],
+                x_range=[-0.05, 0.07],
+                y_range=[-0.14, -0.02],
+                rotation=(-np.pi / 4., np.pi / 4.),
+                ensure_object_boundary_in_range=True,
+                ensure_valid_placement=True,
+                reference_pos=self.table_offset,
+                z_offset=0.01,
+            ))
+
+        self.placement_initializer.append_sampler(
+            UniformRandomSampler(
+                name="ObjectSampler_{}".format(obj_idx[2]),
+                mujoco_objects=self.objs[obj_idx[2]],
+                x_range=[-0.12, 0.05],
+                y_range=[0.01, 0.13],
+                rotation=(-np.pi / 4., np.pi / 4.),
                 ensure_object_boundary_in_range=True,
                 ensure_valid_placement=True,
                 reference_pos=self.table_offset,
@@ -633,7 +663,7 @@ class CleanUpMediumLargeInit(CleanUpMedium):
             UniformRandomSampler(
                 name="ObjectSampler",
                 mujoco_objects=self.objs,
-                x_range=[-0.20, 0.10],
+                x_range=[-0.18, 0.10],
                 y_range=[-0.15, 0.15],
                 rotation=None,
                 ensure_object_boundary_in_range=True,

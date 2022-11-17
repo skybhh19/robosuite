@@ -42,8 +42,8 @@
       <geom pos="0 0 0" size="0.4 0.4 0.4" type="box" group="0" name="table_collision" friction="1 0.005 0.0001"/>
       <geom pos="0 0 0" size="0.4 0.4 0.4" type="box" conaffinity="0" contype="0" group="1" name="table_visual" material="table_ceramic"/>
         <!-- Mat body -->
-        <geom pos="-0.29 0.105 0.0" size="0.11 0.105 0.026" type="box" conaffinity="0" contype="0" group="1" name="table_visual2" material="storage0" friction="0.6 0.005 0.0001"/>
-        <geom pos="-0.29 -0.105 0.0" size="0.11 0.105 0.026" type="box" conaffinity="0" contype="0" group="1" name="table_visual3" material="storage1" friction="0.6 0.005 0.0001"/>
+        <geom pos="0.19 0.105 0.0" size="0.11 0.105 0.026" type="box" conaffinity="0" contype="0" group="1" name="table_visual2" material="storage0" friction="0.6 0.005 0.0001"/>
+        <geom pos="0.19 -0.105 0.0" size="0.11 0.105 0.026" type="box" conaffinity="0" contype="0" group="1" name="table_visual3" material="storage1" friction="0.6 0.005 0.0001"/>
 
       <site pos="0 0 0.4" name="table_top" size="0.001 0.001 0.001" rgba="0 0 0 0"/>
 

@@ -16,6 +16,8 @@ from glob import glob
 
 import h5py
 import numpy as np
+import sys
+sys.path.append('')
 
 import robosuite as suite
 from robosuite import load_controller_config
@@ -23,8 +25,6 @@ from robosuite.utils.input_utils import input2action
 from robosuite.wrappers import DataCollectionWrapper, VisualizationWrapper
 import robosuite.utils.transform_utils as T
 
-import sys
-sys.path.append('..')
 from utils.env_utils import get_eef_quat, get_obs, get_target_quat, get_axisangle_error, get_eef_pos
 from utils.primitive_utils import unscale_action, scale_action
 
@@ -93,8 +93,8 @@ def collect_human_trajectory(env, device, arm, env_configuration, only_yaw):
 
         obs = get_obs(env)
         eef_pos = get_eef_pos(obs)
-        print(eef_pos[2])
-        print(np.linalg.norm(env.robots[0].ee_force))
+        # print(eef_pos[2])
+        # print(np.linalg.norm(env.robots[0].ee_force))
         for pos_i in range(3):
             if eef_pos[pos_i] < env.data_eef_bounds[0][pos_i] and action[pos_i] < 0:
                 action[pos_i] = 0
