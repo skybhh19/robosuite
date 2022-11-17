@@ -371,11 +371,11 @@ class GripperSkill(BaseSkill):
         super().check_interesting_interaction()
         return True
         # for obj_id in range(len(self._env.grasp_objs)):
-        #     obj = self._env.grasp_objs[obj_id]
-        #     obj_pos = self._env.sim.data.body_xpos[self._env.pnp_obj_body_ids[obj_id]]
+        #     obj = self._env.env.grasp_objs[obj_id]
+        #     obj_pos = self._env.env.sim.data.body_xpos[self._env.env.obj_body_ids[obj_id]]
         #     obs = get_obs(self._env)
         #     eef_pos = get_eef_pos(obs)
-        #     if np.linalg.norm(obj_pos - eef_pos) < 0.1 and not self._env._check_grasp(gripper=self._env.robots[0].gripper, object_geoms=obj):
+        #     if np.linalg.norm(obj_pos - eef_pos) < 0.1 and not self._env.env._check_grasp(gripper=self._env.env.robots[0].gripper, object_geoms=obj):
         #         return True
         # return False
 
@@ -712,11 +712,11 @@ class GraspSkill(BaseSkill):
         for obj_id, obj in enumerate(self._env.env.objs):
             obj_size = obj.size
             if obj_size[0] > 0.04 and obj_size[1] > 0.04:
-                return False
+                continue
             if self._env.env._check_grasp(gripper=self._env.env.robots[0].gripper, object_geoms=obj):
                 end_obs = self._env.get_observation()
                 eef_pos = get_eef_pos(end_obs)
-                if np.all(np.abs(eef_pos - self._env.sim.data.body_xpos[self._env.obj_body_ids[obj_id]]) < obj_size):
+                if np.all(np.abs(eef_pos - self._env.env.sim.data.body_xpos[self._env.env.obj_body_ids[obj_id]]) < obj_size):
                     return True
         return False
 
@@ -1099,6 +1099,9 @@ class PushSkill(BaseSkill):
         # aff_centers = info.get('push_pos', [])
         aff_centers = []
         for obj_id in range(len(self._env.env.objs)):
+            obj_size = self._env.env.objs[obj_id].size
+            if obj_size[0] < 0.04 and obj_size[1] < 0.04:
+                continue
             obj_pos = self._env.env.sim.data.body_xpos[self._env.env.obj_body_ids[obj_id]].copy()
             aff_centers.append(obj_pos)
         if aff_centers is None:
@@ -1136,6 +1139,9 @@ class PushSkill(BaseSkill):
     def check_interesting_interaction(self):
         super().check_interesting_interaction()
         for obj_id in range(len(self._env.env.objs)):
+            obj_size = self._env.env.objs[obj_id].size
+            if obj_size[0] < 0.04 and obj_size[1] < 0.04:
+                continue
             obj_pos = self._env.env.sim.data.body_xpos[self._env.env.obj_body_ids[obj_id]].copy()
             initial_obj_pos = self._initial_obj_pos[obj_id]
             obs = self._env.get_observation()
