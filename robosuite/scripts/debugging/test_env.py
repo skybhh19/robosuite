@@ -17,7 +17,7 @@ options["env_name"] = "CleanUpMediumSmallInit"
 
 
 env = suite.make(**options,
-                 has_renderer=True,
+                 has_renderer=False,
                  render_camera="robot0_eye_in_hand",
                  has_offscreen_renderer=False,
                  ignore_done=True,
@@ -25,16 +25,18 @@ env = suite.make(**options,
                  horizon=1000,
                  control_freq=20,
                  use_object_obs=True,)
-for _ in range(100):
-    obs = env.reset()
-    env.render()
-    input()
+# for _ in range(100):
+obs = env.reset()
+
+    # env.render()
+    # input()
 # for i in range(1000):
 #     env.reset()
 #     print(i)
-for _ in range(1000):
-    env.render()
-    obs, _, _, _ = env.step([0, 0, 0, 0])
+for _ in range(10):
+    # env.render()
+    obs, _, _, _ = env.step([0, 0, 0, 1])
+    print(obs['robot0_gripper_qpos'])
     # obs = get_obs(env)
     # print(obs['robot0_eef_pos'])
     # obs, _, _, _ = env.step([0.1] * 4)

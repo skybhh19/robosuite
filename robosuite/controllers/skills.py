@@ -675,6 +675,9 @@ class GraspSkill(BaseSkill):
         # aff_centers = info.get('grasp_pos', [])
         aff_centers = []
         for obj_id in range(len(self._env.env.objs)):
+            obj_size = self._env.env.objs[obj_id].size
+            if obj_size[0] > 0.04 and obj_size[1] > 0.04:
+                continue
             obj_pos = self._env.env.sim.data.body_xpos[self._env.env.obj_body_ids[obj_id]].copy()
             aff_centers.append(obj_pos)
         if aff_centers is None:
@@ -707,11 +710,14 @@ class GraspSkill(BaseSkill):
     def check_interesting_interaction(self):
         super().check_interesting_interaction()
         for obj_id, obj in enumerate(self._env.env.objs):
+            obj_size = obj.size
+            if obj_size[0] > 0.04 and obj_size[1] > 0.04:
+                return False
             if self._env.env._check_grasp(gripper=self._env.env.robots[0].gripper, object_geoms=obj):
                 end_obs = self._env.get_observation()
                 eef_pos = get_eef_pos(end_obs)
-                # if np.linalg.norm(eef_pos - self._env.sim.data.body_xpos[self._env.pnp_obj_body_ids[obj_id]]) < 0.025:
-                return True
+                if np.all(np.abs(eef_pos - self._env.sim.data.body_xpos[self._env.obj_body_ids[obj_id]]) < obj_size):
+                    return True
         return False
 
     def _test_start_state(self):
