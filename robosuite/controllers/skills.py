@@ -220,7 +220,7 @@ class BaseSkill:
                 self._env.render()
             reward_sum += reward
             if self._config['image_obs_in_info']:
-                image_obs.append(self._env.render(mode="rgb_array", height=84, width=84, camera_name='agentview'))
+                image_obs.append(self._env.render(mode="rgb_array", height=256, width=256, camera_name='agentview'))
 
             if self.skill_done() or done:
                 self._env_done = done
