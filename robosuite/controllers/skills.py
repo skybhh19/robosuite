@@ -830,8 +830,8 @@ class PlaceSkill(BaseSkill):
                 if self._env.env._check_grasp(gripper=self._env.env.robots[0].gripper, object_geoms=obj):
                     grasped_flag = True
                     break
-            if not grasped_flag:
-                self._skill_is_interesting = False
+            # if not grasped_flag:
+            #     self._skill_is_interesting = False
             self._state = 'INIT'
             self._num_reach_steps += 1
 
