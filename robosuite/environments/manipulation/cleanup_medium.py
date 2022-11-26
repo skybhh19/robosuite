@@ -207,12 +207,12 @@ class CleanUpMedium(SingleArmEnv):
 
         self.eef_bounds = np.array([
                 [-0.28, -0.32, 0.80],
-                [0.15, 0.32, 1.05]
+                [0.135, 0.32, 1.05]
             ])
 
         self.data_eef_bounds = np.array([
             [-0.26, -0.31, 0.80],
-            [0.14, 0.31, 1.05]
+            [0.13, 0.31, 1.05]
         ])
 
         super().__init__(
@@ -309,8 +309,7 @@ class CleanUpMedium(SingleArmEnv):
                 size_max=obj_size,
                 rgba=[color, 0, 0, 1],
                 material=obj_material_list[i],
-                solimp=[0.998, 0.998, 0.001],
-                solref=[0.02, 1]
+                # solimp=[0.998, 0.998, 0.001],
             )
             self.objs.append(obj)
 
@@ -455,8 +454,8 @@ class CleanUpMedium(SingleArmEnv):
     def in_bin(self, obj_pos, bin_id):
         # bins_pos = [np.array(self.sim.data.body_xpos[bin_body_id]) for bin_body_id in self.bins_body_id]
         bin_pos = np.array(self.sim.data.body_xpos[self.bins_body_id[bin_id]])
-        if abs(obj_pos[0] - bin_pos[0]) < 0.15 \
-                and abs(obj_pos[1] - bin_pos[1]) < 0.09 \
+        if abs(obj_pos[0] - bin_pos[0]) < 0.12 \
+                and abs(obj_pos[1] - bin_pos[1]) < 0.07 \
                 and obj_pos[2] < self.table_offset[2] + 0.09:
             return True
         return False
@@ -475,14 +474,14 @@ class CleanUpMedium(SingleArmEnv):
     def _all_on_mats(self):
         for i in self.left_mat_obj_ids:
             obj_pos = self.sim.data.body_xpos[self.obj_body_ids[i]]
-            target_pos_xy = np.array([0.17, -0.105])
+            target_pos_xy = np.array([0.14, -0.1])
             d_push = np.linalg.norm(obj_pos[:2] - target_pos_xy)
             if d_push > 0.05:
                 return False
 
         for i in self.right_mat_obj_ids:
             obj_pos = self.sim.data.body_xpos[self.obj_body_ids[i]]
-            target_pos_xy = np.array([0.17, 0.105])
+            target_pos_xy = np.array([0.14, 0.1])
             d_push = np.linalg.norm(obj_pos[:2] - target_pos_xy)
             if d_push > 0.05:
                 return False
@@ -559,7 +558,7 @@ class CleanUpMediumSmallInit(CleanUpMedium):
                 name="ObjectSampler_0",
                 mujoco_objects=self.objs[0],
                 x_range=[-0.17, -0.07],
-                y_range=[-0.13, -0.03],
+                y_range=[-0.15, -0.05],
                 rotation=(-np.pi / 4., np.pi / 4.),
                 ensure_object_boundary_in_range=True,
                 ensure_valid_placement=True,
@@ -572,7 +571,7 @@ class CleanUpMediumSmallInit(CleanUpMedium):
                 name="ObjectSampler_1",
                 mujoco_objects=self.objs[1],
                 x_range=[-0.05, 0.05],
-                y_range=[-0.13, -0.03],
+                y_range=[-0.15, -0.05],
                 rotation=(-np.pi / 4., np.pi / 4.),
                 ensure_object_boundary_in_range=True,
                 ensure_valid_placement=True,
@@ -585,7 +584,7 @@ class CleanUpMediumSmallInit(CleanUpMedium):
                 name="ObjectSampler_2",
                 mujoco_objects=self.objs[2],
                 x_range=[-0.12, 0.05],
-                y_range=[0.0, 0.12],
+                y_range=[-0.03, 0.09],
                 rotation=(-np.pi / 4., np.pi / 4.),
                 ensure_object_boundary_in_range=True,
                 ensure_valid_placement=True,
