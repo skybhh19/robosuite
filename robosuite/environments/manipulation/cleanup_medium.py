@@ -5,7 +5,7 @@ import numpy as np
 from copy import deepcopy
 
 from robosuite.environments.manipulation.single_arm_env import SingleArmEnv
-from robosuite.models.arenas import TableArenaDoubleBins
+from robosuite.models.arenas import TableArenaDoubleBinsA, TableArenaDoubleBinsB, TableArenaDoubleBinsC, TableArenaDoubleBinsD
 from robosuite.models.objects import BoxObject
 from robosuite.models.tasks import ManipulationTask
 from robosuite.utils.mjcf_utils import CustomMaterial
@@ -172,7 +172,10 @@ class CleanUpMedium(SingleArmEnv):
         right_bin_obj_ids=None,
         left_mat_obj_ids=None,
         right_mat_obj_ids=None,
+        left_mat_center=None,
+        right_mat_center=None,
 	    num_objs=3,
+        table_class_name=None,
     ):
         # settings for table top
         self.table_full_size = table_full_size
@@ -204,6 +207,10 @@ class CleanUpMedium(SingleArmEnv):
         self.right_bin_obj_ids = right_bin_obj_ids
         self.left_mat_obj_ids = left_mat_obj_ids
         self.right_mat_obj_ids = right_mat_obj_ids
+
+        self.left_mat_center = left_mat_center
+        self.right_mat_center = right_mat_center
+        self.table_class_name = table_class_name
 
         self.eef_bounds = np.array([
                 [-0.28, -0.32, 0.80],
@@ -259,7 +266,7 @@ class CleanUpMedium(SingleArmEnv):
         self.robots[0].robot_model.set_base_xpos(xpos)
 
         # load model for table top workspace
-        mujoco_arena = TableArenaDoubleBins(
+        mujoco_arena = self.table_class_name(
             table_full_size=self.table_full_size,
             table_friction=self.table_friction,
             table_offset=self.table_offset,
@@ -474,14 +481,14 @@ class CleanUpMedium(SingleArmEnv):
     def _all_on_mats(self):
         for i in self.left_mat_obj_ids:
             obj_pos = self.sim.data.body_xpos[self.obj_body_ids[i]]
-            target_pos_xy = np.array([0.14, -0.1])
+            target_pos_xy = self.left_mat_center
             d_push = np.linalg.norm(obj_pos[:2] - target_pos_xy)
             if d_push > 0.07:
                 return False
 
         for i in self.right_mat_obj_ids:
             obj_pos = self.sim.data.body_xpos[self.obj_body_ids[i]]
-            target_pos_xy = np.array([0.14, 0.1])
+            target_pos_xy = self.right_mat_center
             d_push = np.linalg.norm(obj_pos[:2] - target_pos_xy)
             if d_push > 0.07:
                 return False
@@ -540,8 +547,90 @@ class CleanUpMedium(SingleArmEnv):
     @property
     def _has_gripper_contact(self):
         return np.linalg.norm(self.robots[0].ee_force) > 20
-
 class CleanUpMediumSmallInit(CleanUpMedium):
+
+    def __init__(self, **kwargs):
+        assert "single_object_mode" not in kwargs, "invalid set of arguments"
+        super().__init__(**kwargs)
+
+    def _get_placement_initializer(self):
+        self.placement_initializer = SequentialCompositeSampler(name="ObjectSampler")
+        self.placement_initializer.append_sampler(
+            UniformRandomSampler(
+                name="ObjectSampler_0",
+                mujoco_objects=self.objs[0],
+                x_range=[-0.17, -0.07],
+                y_range=[-0.15, -0.05],
+                rotation=(-np.pi / 4., np.pi / 4.),
+                ensure_object_boundary_in_range=True,
+                ensure_valid_placement=True,
+                reference_pos=self.table_offset,
+                z_offset=0.01,
+            ))
+
+        self.placement_initializer.append_sampler(
+            UniformRandomSampler(
+                name="ObjectSampler_1",
+                mujoco_objects=self.objs[1],
+                x_range=[-0.05, 0.05],
+                y_range=[-0.15, -0.05],
+                rotation=(-np.pi / 4., np.pi / 4.),
+                ensure_object_boundary_in_range=True,
+                ensure_valid_placement=True,
+                reference_pos=self.table_offset,
+                z_offset=0.01,
+            ))
+
+        self.placement_initializer.append_sampler(
+            UniformRandomSampler(
+                name="ObjectSampler_2",
+                mujoco_objects=self.objs[2],
+                x_range=[-0.12, 0.05],
+                y_range=[-0.03, 0.09],
+                rotation=(-np.pi / 4., np.pi / 4.),
+                ensure_object_boundary_in_range=True,
+                ensure_valid_placement=True,
+                reference_pos=self.table_offset,
+                z_offset=0.01,
+            ))
+
+class CleanUpMediumSmallInitA(CleanUpMediumSmallInit):
+
+    def __init__(self, **kwargs):
+        assert "single_object_mode" not in kwargs, "invalid set of arguments"
+        super().__init__(table_class_name=TableArenaDoubleBinsA,
+                         left_mat_center=np.array([-0.135, 0.29]),
+                         right_mat_center=np.array([0.075, 0.29]),
+                         **kwargs)
+
+class CleanUpMediumSmallInitB(CleanUpMediumSmallInit):
+
+    def __init__(self, **kwargs):
+        assert "single_object_mode" not in kwargs, "invalid set of arguments"
+        super().__init__(table_class_name=TableArenaDoubleBinsB,
+                         left_mat_center=np.array([-0.135, -0.29]),
+                         right_mat_center=np.array([0.075, -0.29]),
+                         **kwargs)
+
+class CleanUpMediumSmallInitC(CleanUpMediumSmallInit):
+
+    def __init__(self, **kwargs):
+        assert "single_object_mode" not in kwargs, "invalid set of arguments"
+        super().__init__(table_class_name=TableArenaDoubleBinsC,
+                         left_mat_center=np.array([0.14, -0.1]),
+                         right_mat_center=np.array([0.14, 0.1]),
+                         **kwargs)
+
+class CleanUpMediumSmallInitD(CleanUpMediumSmallInit):
+
+    def __init__(self, **kwargs):
+        assert "single_object_mode" not in kwargs, "invalid set of arguments"
+        super().__init__(table_class_name=TableArenaDoubleBinsD,
+                         left_mat_center=np.array([0.14, -0.1]),
+                         right_mat_center=np.array([0.14, 0.1]),
+                         **kwargs)
+
+class CleanUpMediumSmallInitA1(CleanUpMediumSmallInitA):
 
     def __init__(self, **kwargs):
         assert "single_object_mode" not in kwargs, "invalid set of arguments"
@@ -551,48 +640,37 @@ class CleanUpMediumSmallInit(CleanUpMedium):
                          right_mat_obj_ids=[],
                          **kwargs)
 
-    def _get_placement_initializer(self):
-        self.placement_initializer = SequentialCompositeSampler(name="ObjectSampler")
-        self.placement_initializer.append_sampler(
-            UniformRandomSampler(
-                name="ObjectSampler_0",
-                mujoco_objects=self.objs[0],
-                x_range=[-0.17, -0.07],
-                y_range=[-0.15, -0.05],
-                rotation=(-np.pi / 4., np.pi / 4.),
-                ensure_object_boundary_in_range=True,
-                ensure_valid_placement=True,
-                reference_pos=self.table_offset,
-                z_offset=0.01,
-            ))
+class CleanUpMediumSmallInitB1(CleanUpMediumSmallInitB):
 
-        self.placement_initializer.append_sampler(
-            UniformRandomSampler(
-                name="ObjectSampler_1",
-                mujoco_objects=self.objs[1],
-                x_range=[-0.05, 0.05],
-                y_range=[-0.15, -0.05],
-                rotation=(-np.pi / 4., np.pi / 4.),
-                ensure_object_boundary_in_range=True,
-                ensure_valid_placement=True,
-                reference_pos=self.table_offset,
-                z_offset=0.01,
-            ))
+    def __init__(self, **kwargs):
+        assert "single_object_mode" not in kwargs, "invalid set of arguments"
+        super().__init__(left_bin_obj_ids=[0],
+                         right_bin_obj_ids=[1],
+                         left_mat_obj_ids=[2],
+                         right_mat_obj_ids=[],
+                         **kwargs)
 
-        self.placement_initializer.append_sampler(
-            UniformRandomSampler(
-                name="ObjectSampler_2",
-                mujoco_objects=self.objs[2],
-                x_range=[-0.12, 0.05],
-                y_range=[-0.03, 0.09],
-                rotation=(-np.pi / 4., np.pi / 4.),
-                ensure_object_boundary_in_range=True,
-                ensure_valid_placement=True,
-                reference_pos=self.table_offset,
-                z_offset=0.01,
-            ))
+class CleanUpMediumSmallInitC1(CleanUpMediumSmallInitC):
 
-class CleanUpMediumSmallInit2(CleanUpMedium):
+    def __init__(self, **kwargs):
+        assert "single_object_mode" not in kwargs, "invalid set of arguments"
+        super().__init__(left_bin_obj_ids=[0],
+                         right_bin_obj_ids=[1],
+                         left_mat_obj_ids=[2],
+                         right_mat_obj_ids=[],
+                         **kwargs)
+
+class CleanUpMediumSmallInitD1(CleanUpMediumSmallInitD):
+
+    def __init__(self, **kwargs):
+        assert "single_object_mode" not in kwargs, "invalid set of arguments"
+        super().__init__(left_bin_obj_ids=[0],
+                         right_bin_obj_ids=[1],
+                         left_mat_obj_ids=[2],
+                         right_mat_obj_ids=[],
+                         **kwargs)
+
+class CleanUpMediumSmallInitD2(CleanUpMediumSmallInitD):
 
     def __init__(self, **kwargs):
         assert "single_object_mode" not in kwargs, "invalid set of arguments"
@@ -601,47 +679,6 @@ class CleanUpMediumSmallInit2(CleanUpMedium):
                          left_mat_obj_ids=[],
                          right_mat_obj_ids=[2],
                          **kwargs)
-
-    def _get_placement_initializer(self):
-        self.placement_initializer = SequentialCompositeSampler(name="ObjectSampler")
-        self.placement_initializer.append_sampler(
-            UniformRandomSampler(
-                name="ObjectSampler_0",
-                mujoco_objects=self.objs[0],
-                x_range=[-0.17, -0.07],
-                y_range=[-0.15, -0.05],
-                rotation=(-np.pi / 4., np.pi / 4.),
-                ensure_object_boundary_in_range=True,
-                ensure_valid_placement=True,
-                reference_pos=self.table_offset,
-                z_offset=0.01,
-            ))
-
-        self.placement_initializer.append_sampler(
-            UniformRandomSampler(
-                name="ObjectSampler_1",
-                mujoco_objects=self.objs[1],
-                x_range=[-0.05, 0.05],
-                y_range=[-0.15, -0.05],
-                rotation=(-np.pi / 4., np.pi / 4.),
-                ensure_object_boundary_in_range=True,
-                ensure_valid_placement=True,
-                reference_pos=self.table_offset,
-                z_offset=0.01,
-            ))
-
-        self.placement_initializer.append_sampler(
-            UniformRandomSampler(
-                name="ObjectSampler_2",
-                mujoco_objects=self.objs[2],
-                x_range=[-0.12, 0.05],
-                y_range=[-0.03, 0.09],
-                rotation=(-np.pi / 4., np.pi / 4.),
-                ensure_object_boundary_in_range=True,
-                ensure_valid_placement=True,
-                reference_pos=self.table_offset,
-                z_offset=0.01,
-            ))
 
 class CleanUpMediumMediumInit(CleanUpMedium):
 
