@@ -23,7 +23,7 @@
 
     <texture file="../textures/light-wood.png" type="2d" name="tex-light-wood"/>
     <texture file="../textures/dark-wood.png" type="2d" name="tex-dark-wood"/>
-    <texture file="../textures/plywood-4k.png" type="2d" name="tex-ply-wood"/>
+    <texture file="../textures/ply-wood.png" type="2d" name="tex-ply-wood"/>
     <material name="light-wood" reflectance="0" texrepeat="15 15" texture="tex-light-wood" texuniform="true"/>
     <material name="dark-wood" reflectance="0" texrepeat="5 5" texture="tex-dark-wood" texuniform="true"/>
     <material name="ply-wood" reflectance="0" texrepeat="5 5" texture="tex-ply-wood" texuniform="true"/>
