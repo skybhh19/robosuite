@@ -746,7 +746,7 @@ class CleanUpMediumSmallInitBReal1(CleanUpMediumSmallInitB):
         }
 
         self.objs = []
-        self.objs.append(CanObject(name="can"))
+        self.objs.append(ColaObject(name="cola"))
 
         obj_size_list = [
             np.array([0.038, 0.025, 0.027]) * 0.7,
@@ -826,7 +826,7 @@ class CleanUpMediumSmallInitCReal1(CleanUpMediumSmallInitC):
             color = 1.0
         obj_size = np.array([0.038, 0.04, 0.02]) * 1.2
         obj_material = CustomMaterial(
-            texture="jello",
+            texture="Jello",
             tex_name="pushobj_tex",
             mat_name="pushobj_mat",
             tex_attrib=tex_attrib,

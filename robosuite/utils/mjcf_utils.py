@@ -126,7 +126,7 @@ TEXTURE_FILES = {
     "Lemon": "lemon.png",
 
     "Cheese": "cheese.png",
-    "Pancake": "pancakge.png",
+    "Pancake": "pancake.png",
 
     "Jello": "jello.png",
     "Spam": "spam.png",
