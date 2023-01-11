@@ -15,6 +15,16 @@ from robosuite.utils.transform_utils import convert_quat
 
 from robosuite.utils.mjcf_utils import CustomMaterial, array_to_string, add_material
 
+from robosuite.models.objects import (
+    BreadObject,
+    MilkObject,
+    AppleObject,
+    JuiceObject,
+    ColaObject,
+    LemonObject,
+    CanObject,
+)
+
 MAX_OBJ_NUMS = 3
 class CleanUpMedium(SingleArmEnv):
     """
@@ -254,6 +264,8 @@ class CleanUpMedium(SingleArmEnv):
             return 1.0
         return 0.0
 
+    def _load_objects(self):
+        pass
 
     def _load_model(self):
         """
@@ -275,50 +287,7 @@ class CleanUpMedium(SingleArmEnv):
         # Arena always gets set to zero origin
         mujoco_arena.set_origin([0, 0, 0])
 
-        # initialize objects of interest
-        tex_attrib = {
-            "type": "cube",
-        }
-        mat_attrib = {
-            "texrepeat": "3 3",
-            "specular": "0.4",
-            "shininess": "0.1",
-        }
-
-        obj_texture_lst = ["WoodBlue", "WoodGreen", "WoodRed"]
-        obj_material_list = []
-        for i in range(len(obj_texture_lst)):
-            obj_material_list.append(
-                CustomMaterial(
-                texture=obj_texture_lst[i],
-                tex_name="obj{}_tex".format(i),
-                mat_name="obj{}_mat".format(i),
-                tex_attrib=tex_attrib,
-                mat_attrib=mat_attrib,
-            ))
-
-        obj_size_list = [
-            np.array([0.04, 0.022, 0.033]) * 0.7,
-            np.array([0.03, 0.03, 0.04]) * 0.7,
-            np.array([0.0350, 0.0425, 0.02]) * 1.2
-        ]
-        assert len(obj_texture_lst) == len(obj_size_list) == len(obj_material_list) == MAX_OBJ_NUMS
-        self.objs = []
-        for i in self.objs_idx:
-            if self.num_objs > 1:
-                color = 0.25 + 0.75 * i / (self.num_objs - 1)
-            else:
-                color = 1.0
-            obj_size = obj_size_list[i]
-            obj = BoxObject(
-                name="obj_{}".format(i),
-                size_min=obj_size,
-                size_max=obj_size,
-                rgba=[color, 0, 0, 1],
-                material=obj_material_list[i],
-                # solimp=[0.998, 0.998, 0.001],
-            )
-            self.objs.append(obj)
+        self._load_objects()
 
         self._get_placement_initializer()
 
@@ -547,11 +516,58 @@ class CleanUpMedium(SingleArmEnv):
     @property
     def _has_gripper_contact(self):
         return np.linalg.norm(self.robots[0].ee_force) > 20
+
 class CleanUpMediumSmallInit(CleanUpMedium):
 
     def __init__(self, **kwargs):
         assert "single_object_mode" not in kwargs, "invalid set of arguments"
         super().__init__(**kwargs)
+
+    def _load_objects(self):
+        # initialize objects of interest
+        tex_attrib = {
+            "type": "cube",
+        }
+        mat_attrib = {
+            "texrepeat": "3 3",
+            "specular": "0.4",
+            "shininess": "0.1",
+        }
+
+        obj_texture_lst = ["WoodBlue", "WoodGreen", "WoodRed"]
+        obj_material_list = []
+        for i in range(len(obj_texture_lst)):
+            obj_material_list.append(
+                CustomMaterial(
+                    texture=obj_texture_lst[i],
+                    tex_name="obj{}_tex".format(i),
+                    mat_name="obj{}_mat".format(i),
+                    tex_attrib=tex_attrib,
+                    mat_attrib=mat_attrib,
+                ))
+
+        obj_size_list = [
+            np.array([0.04, 0.022, 0.033]) * 0.7,
+            np.array([0.03, 0.03, 0.04]) * 0.7,
+            np.array([0.0350, 0.0425, 0.02]) * 1.2
+        ]
+        assert len(obj_texture_lst) == len(obj_size_list) == len(obj_material_list) == MAX_OBJ_NUMS
+        self.objs = []
+        for i in self.objs_idx:
+            if self.num_objs > 1:
+                color = 0.25 + 0.75 * i / (self.num_objs - 1)
+            else:
+                color = 1.0
+            obj_size = obj_size_list[i]
+            obj = BoxObject(
+                name="obj_{}".format(i),
+                size_min=obj_size,
+                size_max=obj_size,
+                rgba=[color, 0, 0, 1],
+                material=obj_material_list[i],
+                # solimp=[0.998, 0.998, 0.001],
+            )
+            self.objs.append(obj)
 
     def _get_placement_initializer(self):
         self.placement_initializer = SequentialCompositeSampler(name="ObjectSampler")
@@ -640,6 +656,65 @@ class CleanUpMediumSmallInitA1(CleanUpMediumSmallInitA):
                          right_mat_obj_ids=[],
                          **kwargs)
 
+class CleanUpMediumSmallInitAReal1(CleanUpMediumSmallInitA):
+
+    def __init__(self, **kwargs):
+        assert "single_object_mode" not in kwargs, "invalid set of arguments"
+        super().__init__(left_bin_obj_ids=[0],
+                         right_bin_obj_ids=[1],
+                         left_mat_obj_ids=[2],
+                         right_mat_obj_ids=[],
+                         **kwargs)
+
+    def _load_objects(self):
+        tex_attrib = {
+            "type": "cube",
+        }
+        mat_attrib = {
+            "texrepeat": "3 3",
+            "specular": "0.4",
+            "shininess": "0.1",
+        }
+
+        self.objs = []
+        self.objs.append(CanObject(name="can"))
+
+        obj_size_list = [
+            np.array([0.04, 0.022, 0.033]) * 0.7,
+            np.array([0.0375, 0.041, 0.02]) * 1.2
+        ]
+
+        obj_material_list = [
+            CustomMaterial(
+                texture="Cheese",
+                tex_name="pnpobj_tex",
+                mat_name="pnpobj_mat",
+                tex_attrib=tex_attrib,
+                mat_attrib=mat_attrib, ),
+            CustomMaterial(
+                texture="Cereal",
+                tex_name="pushobj_tex",
+                mat_name="pushobj_mat",
+                tex_attrib=tex_attrib,
+                mat_attrib=mat_attrib, )
+        ]
+        for i in range(1, 3):
+            if self.num_objs > 1:
+                color = 0.25 + 0.75 * i / (self.num_objs - 1)
+            else:
+                color = 1.0
+            obj_size = obj_size_list[i-1]
+            obj = BoxObject(
+                name="obj_{}".format(i),
+                size_min=obj_size,
+                size_max=obj_size,
+                rgba=[color, 0, 0, 1],
+                material=obj_material_list[i-1],
+                # solimp=[0.998, 0.998, 0.001],
+            )
+            self.objs.append(obj)
+
+
 class CleanUpMediumSmallInitB1(CleanUpMediumSmallInitB):
 
     def __init__(self, **kwargs):
@@ -650,6 +725,64 @@ class CleanUpMediumSmallInitB1(CleanUpMediumSmallInitB):
                          right_mat_obj_ids=[],
                          **kwargs)
 
+class CleanUpMediumSmallInitBReal1(CleanUpMediumSmallInitB):
+
+    def __init__(self, **kwargs):
+        assert "single_object_mode" not in kwargs, "invalid set of arguments"
+        super().__init__(left_bin_obj_ids=[0],
+                         right_bin_obj_ids=[1],
+                         left_mat_obj_ids=[2],
+                         right_mat_obj_ids=[],
+                         **kwargs)
+
+    def _load_objects(self):
+        tex_attrib = {
+            "type": "cube",
+        }
+        mat_attrib = {
+            "texrepeat": "3 3",
+            "specular": "0.4",
+            "shininess": "0.1",
+        }
+
+        self.objs = []
+        self.objs.append(CanObject(name="can"))
+
+        obj_size_list = [
+            np.array([0.038, 0.025, 0.027]) * 0.7,
+            np.array([0.0325, 0.045, 0.02]) * 1.2
+        ]
+
+        obj_material_list = [
+            CustomMaterial(
+                texture="Pancake",
+                tex_name="pnpobj_tex",
+                mat_name="pnpobj_mat",
+                tex_attrib=tex_attrib,
+                mat_attrib=mat_attrib, ),
+            CustomMaterial(
+                texture="Spam",
+                tex_name="pushobj_tex",
+                mat_name="pushobj_mat",
+                tex_attrib=tex_attrib,
+                mat_attrib=mat_attrib, )
+        ]
+        for i in range(1, 3):
+            if self.num_objs > 1:
+                color = 0.25 + 0.75 * i / (self.num_objs - 1)
+            else:
+                color = 1.0
+            obj_size = obj_size_list[i-1]
+            obj = BoxObject(
+                name="obj_{}".format(i),
+                size_min=obj_size,
+                size_max=obj_size,
+                rgba=[color, 0, 0, 1],
+                material=obj_material_list[i-1],
+                # solimp=[0.998, 0.998, 0.001],
+            )
+            self.objs.append(obj)
+
 class CleanUpMediumSmallInitC1(CleanUpMediumSmallInitC):
 
     def __init__(self, **kwargs):
@@ -659,6 +792,54 @@ class CleanUpMediumSmallInitC1(CleanUpMediumSmallInitC):
                          left_mat_obj_ids=[2],
                          right_mat_obj_ids=[],
                          **kwargs)
+
+class CleanUpMediumSmallInitCReal1(CleanUpMediumSmallInitC):
+
+    def __init__(self, **kwargs):
+        assert "single_object_mode" not in kwargs, "invalid set of arguments"
+        super().__init__(left_bin_obj_ids=[0],
+                         right_bin_obj_ids=[1],
+                         left_mat_obj_ids=[2],
+                         right_mat_obj_ids=[],
+                         **kwargs)
+
+    def _load_objects(self):
+        tex_attrib = {
+            "type": "cube",
+        }
+        mat_attrib = {
+            "texrepeat": "3 3",
+            "specular": "0.4",
+            "shininess": "0.1",
+        }
+
+        self.objs = []
+        for obj_cls, obj_name in zip(
+                (JuiceObject, BreadObject), ["juice", "bread"]
+        ):
+            obj = obj_cls(name=obj_name)
+            self.objs.append(obj)
+
+        if self.num_objs > 1:
+            color = 0.25 + 0.75 * 2 / (self.num_objs - 1)
+        else:
+            color = 1.0
+        obj_size = np.array([0.038, 0.04, 0.02]) * 1.2
+        obj_material = CustomMaterial(
+            texture="jello",
+            tex_name="pushobj_tex",
+            mat_name="pushobj_mat",
+            tex_attrib=tex_attrib,
+            mat_attrib=mat_attrib,
+        )
+        obj = BoxObject(
+            name="obj_{}".format(2),
+            size_min=obj_size,
+            size_max=obj_size,
+            rgba=[color, 0, 0, 1],
+            material=obj_material,
+        )
+        self.objs.append(obj)
 
 class CleanUpMediumSmallInitD1(CleanUpMediumSmallInitD):
 
@@ -679,6 +860,55 @@ class CleanUpMediumSmallInitD2(CleanUpMediumSmallInitD):
                          left_mat_obj_ids=[],
                          right_mat_obj_ids=[2],
                          **kwargs)
+
+class CleanUpMediumSmallInitDReal1(CleanUpMediumSmallInitD):
+
+    def __init__(self, **kwargs):
+        assert "single_object_mode" not in kwargs, "invalid set of arguments"
+        super().__init__(left_bin_obj_ids=[0],
+                         right_bin_obj_ids=[1],
+                         left_mat_obj_ids=[2],
+                         right_mat_obj_ids=[],
+                         **kwargs)
+
+    def _load_objects(self):
+        tex_attrib = {
+            "type": "cube",
+        }
+        mat_attrib = {
+            "texrepeat": "3 3",
+            "specular": "0.4",
+            "shininess": "0.1",
+        }
+
+        self.objs = []
+        for obj_cls, obj_name in zip(
+                (AppleObject, MilkObject), ["apple", "milk"]
+        ):
+            obj = obj_cls(name=obj_name)
+            self.objs.append(obj)
+
+        if self.num_objs > 1:
+            color = 0.25 + 0.75 * 2 / (self.num_objs - 1)
+        else:
+            color = 1.0
+        obj_size = np.array([0.0350, 0.0425, 0.02]) * 1.2
+        obj_material = CustomMaterial(
+            texture="Tea",
+            tex_name="pushobj_tex",
+            mat_name="pushobj_mat",
+            tex_attrib=tex_attrib,
+            mat_attrib=mat_attrib,
+        )
+        obj = BoxObject(
+            name="obj_{}".format(2),
+            size_min=obj_size,
+            size_max=obj_size,
+            rgba=[color, 0, 0, 1],
+            material=obj_material,
+        )
+        self.objs.append(obj)
+
 
 class CleanUpMediumMediumInit(CleanUpMedium):
 

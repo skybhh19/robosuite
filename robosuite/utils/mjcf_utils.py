@@ -126,9 +126,13 @@ TEXTURE_FILES = {
     "Lemon": "lemon.png",
 
     "Cheese": "cheese.png",
+    "Pancake": "pancakge.png",
 
     "Jello": "jello.png",
     "Spam": "spam.png",
+    "Tea": "tea.png",
+    "Juice": "juice.png",
+    "Milk": "milk.png"
 }
 
 TEXTURES = {

@@ -17,6 +17,8 @@ from .xml_objects import (
     PlateWithHoleObject,
     DoorObject,
     AppleObject,
+    JuiceObject,
+    ColaObject,
     StoveObject,
     ServingRegionObject,
     CabinetObject,

@@ -116,6 +116,33 @@ class AppleObject(MujocoXMLObject):
             duplicate_collision_geoms=True,
         )
 
+class ColaObject(MujocoXMLObject):
+    """
+    Bottle object
+    """
+
+    def __init__(self, name):
+        super().__init__(
+            xml_path_completion("objects/cola.xml"),
+            name=name,
+            joints=[dict(type="free", damping="0.0005")],
+            obj_type="all",
+            duplicate_collision_geoms=True,
+        )
+
+class JuiceObject(MujocoXMLObject):
+    """
+    Can object
+    """
+
+    def __init__(self, name):
+        super().__init__(
+            xml_path_completion("objects/juice.xml"),
+            name=name,
+            joints=[dict(type="free", damping="0.0005")],
+            obj_type="all",
+            duplicate_collision_geoms=True,
+        )
 
 class BottleObject(MujocoXMLObject):
     """
