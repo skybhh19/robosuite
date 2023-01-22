@@ -17,10 +17,21 @@ from robosuite.utils.mjcf_utils import CustomMaterial, array_to_string, add_mate
 
 from robosuite.models.objects import (
     BreadObject,
-    MilkObject,
-    AppleObject,
-    JuiceObject,
-    ColaObject,
+    AppleJuiceObject,
+    CoffeeObject,
+    LimoncelloObject,
+    StrawberryJuiceObject,
+    JuiceGrayObject,
+    BeerObject,
+    SodaObject,
+    TeaObject,
+    MilkBlueObject,
+    MilkGreenObject,
+    MilkBlackObject,
+    MilkGrayObject,
+    MilkRedObject,
+    OatsMilkObject,
+    ChocolateMilkObject,
     LemonObject,
     CanObject,
 )
@@ -814,10 +825,10 @@ class CleanUpMediumSmallInitCReal1(CleanUpMediumSmallInitC):
         }
 
         self.objs = []
-        for obj_cls, obj_name in zip(
-                (JuiceObject, BreadObject), ["juice", "bread"]
+        for obj_cls, obj_name, obj_scale in zip(
+                (AppleJuiceObject, StrawberryJuiceObject), ["apple_juice", "strawberry_juice"], [0.8, 1.0]
         ):
-            obj = obj_cls(name=obj_name)
+            obj = obj_cls(name=obj_name, scale=obj_scale)
             self.objs.append(obj)
 
         if self.num_objs > 1:
@@ -883,7 +894,7 @@ class CleanUpMediumSmallInitDReal1(CleanUpMediumSmallInitD):
 
         self.objs = []
         for obj_cls, obj_name in zip(
-                (AppleObject, MilkObject), ["apple", "milk"]
+                (CanObject, MilkBlueObject), ["can", "milk"]
         ):
             obj = obj_cls(name=obj_name)
             self.objs.append(obj)
@@ -908,6 +919,99 @@ class CleanUpMediumSmallInitDReal1(CleanUpMediumSmallInitD):
             material=obj_material,
         )
         self.objs.append(obj)
+
+class CleanUpMediumSmallInitDObjectTrain(CleanUpMediumSmallInitD):
+
+    def __init__(self, **kwargs):
+        assert "single_object_mode" not in kwargs, "invalid set of arguments"
+        super().__init__(left_bin_obj_ids=[0],
+                         right_bin_obj_ids=[1],
+                         left_mat_obj_ids=[2],
+                         right_mat_obj_ids=[],
+                         **kwargs)
+
+    def _load_objects(self):
+        """
+        Loads an xml model, puts it in self.model
+        """
+
+        tex_attrib_list = [
+            {"type": "cube", },
+            {"type": "2d", }
+        ]
+        mat_attrib_list = [
+            {
+                "texrepeat": "3 3",
+                "specular": "0.4",
+                "shininess": "0.1",
+            },
+            {
+                "texrepeat": "5 5",
+                "reflectance": "0.7",
+                "specular": "0.4",
+                "shininess": "0.1",
+            }
+        ]
+        box_material_list = [
+            dict(texture="Cereal", tex_name="cereal", mat_name="MatCereal"),
+            dict(texture="Spam", tex_name="spam", mat_name="MatSpam"),
+            dict(texture="Cheese", tex_name="cheese", mat_name="MatCheese"),
+            dict(texture="Jello", tex_name="jello", mat_name="MatJello"),
+            dict(texture="Burger", tex_name="burger", mat_name="MatBurger"),
+            dict(texture="Bean", tex_name="bean", mat_name="MatBean"),
+            dict(texture="Chip", tex_name="chip", mat_name="MatChip"),
+            dict(texture="Candy", tex_name="candy", mat_name="MatCandy"),
+        ]
+        object_list = dict(
+            milk=[
+                MilkBlueObject,
+                MilkGreenObject,
+                MilkBlackObject,
+                MilkRedObject,
+                MilkGrayObject,
+                OatsMilkObject,
+            ],
+            can=[
+                 CoffeeObject,
+                 LimoncelloObject,
+                 JuiceGrayObject,
+                 BeerObject,
+                 SodaObject,
+                 CanObject,
+                 TeaObject,
+            ]
+        )
+
+
+        object_category_list = ["milk", "can", "box"]
+        selected_obj_num = 3
+        selected_obj_shape_list = random.choices(object_category_list, k=selected_obj_num)
+        self.objs = []
+        for i in range(len(selected_obj_shape_list)):
+            if selected_obj_shape_list[i] in ["milk", "can"]:
+                obj_category = selected_obj_shape_list[i]
+                scale = random.uniform(0.8, 1.0)
+                selected_object_idx = random.randint(0, len(object_list[obj_category]) - 1)
+                obj = object_list[obj_category][selected_object_idx](name=obj_category + str(i), scale=scale)
+            elif selected_obj_shape_list[i] in ["box"]:
+                selected_texture_idx = random.randint(0, len(box_material_list) - 1)
+                obj_material = CustomMaterial(
+                    texture=box_material_list[selected_texture_idx]['texture'],
+                    tex_name=box_material_list[selected_texture_idx]['tex_name'],
+                    mat_name=box_material_list[selected_texture_idx]['mat_name'],
+                    tex_attrib=tex_attrib_list[0],
+                    mat_attrib=mat_attrib_list[0],
+                )
+                obj = BoxObject(
+                    name="box_{}".format(i),
+                    size_min=np.array([0.025, 0.014, 0.02]),
+                    size_max=np.array([0.05, 0.05, 0.03]),
+                    rgba=[1, 0, 0, 1],
+                    material=obj_material,
+                )
+            else:
+                raise NotImplementedError
+            self.objs.append(obj)
 
 
 class CleanUpMediumMediumInit(CleanUpMedium):

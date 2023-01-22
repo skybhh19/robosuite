@@ -1,8 +1,108 @@
 import numpy as np
+import xml.etree.ElementTree as ET
+import os
+import random
+import string
 
+import robosuite
 from robosuite.models.objects import MujocoXMLObject
-from robosuite.utils.mjcf_utils import array_to_string, find_elements, xml_path_completion
+from robosuite.utils.mjcf_utils import array_to_string, find_elements, xml_path_completion, string_to_array
 
+def postprocess_model_xml(xml_str):
+    """
+    New version of postprocess model xml that only replaces robosuite file paths if necessary (otherwise
+    there is an error with the "max" operation), and also replaces robosuite-model-zoo file paths
+    if necessary.
+    """
+
+    path = os.path.split(robosuite.__file__)[0]
+    path_split = path.split("/")
+
+    # replace mesh and texture file paths
+    tree = ET.fromstring(xml_str)
+    root = tree
+    asset = root.find("asset")
+    meshes = asset.findall("mesh")
+    textures = asset.findall("texture")
+    all_elements = meshes + textures
+
+    for elem in all_elements:
+        old_path = elem.get("file")
+        if old_path is None:
+            continue
+
+        old_path_split = old_path.split("/")
+        # maybe replace all paths to robosuite assets
+        check_lst = [loc for loc, val in enumerate(old_path_split) if val == "robosuite"]
+        if len(check_lst) > 0:
+            ind = max(check_lst)  # last occurrence index
+            new_path_split = path_split + old_path_split[ind + 1:]
+            new_path = "/".join(new_path_split)
+            elem.set("file", new_path)
+
+        # maybe replace all paths to robosuite model zoo assets
+        # check_lst = [loc for loc, val in enumerate(old_path_split) if val == "robosuite-model-zoo-dev"]
+        # if len(check_lst) > 0:
+        #     ind = max(check_lst)  # last occurrence index
+        #     new_path_split = os.path.split(robosuite_model_zoo.__file__)[0].split("/")[:-1] + old_path_split[ind + 1:]
+        #     new_path = "/".join(new_path_split)
+        #     elem.set("file", new_path)
+
+    return ET.tostring(root, encoding="utf8").decode("utf8")
+
+class ScaledMujocoXMLObject(MujocoXMLObject):
+    def __init__(self, name, xml_path, scale):
+        if isinstance(scale, float):
+            scale = [scale, scale, scale]
+        elif isinstance(scale, tuple) or isinstance(scale, list):
+            assert len(scale) == 3
+            scale = tuple(scale)
+        else:
+            raise Exception("got invalid scale: {}".format(scale))
+        scale = np.array(scale)
+
+        tree = ET.parse(xml_path)
+        folder = os.path.dirname(xml_path)
+        root = tree.getroot()
+
+        # modify mesh scales
+        asset = root.find("asset")
+        mesh = asset.find("mesh")
+        scale_to_set = scale
+        existing_scale = mesh.get("scale")
+        if existing_scale is not None:
+            scale_to_set = string_to_array(existing_scale) * scale
+        mesh.set("scale", array_to_string(scale_to_set))
+
+        # modify sites for collision (assumes we can just scale up the locations - may or may not work)
+        for n in ["bottom_site", "top_site", "horizontal_radius_site"]:
+            site = root.find("worldbody/body/site[@name='{}']".format(n))
+            pos = string_to_array(site.get("pos"))
+            pos = scale * pos
+            site.set("pos", array_to_string(pos))
+
+        # write modified xml (and make sure to postprocess any paths just in case)
+        xml_str = ET.tostring(root, encoding="utf8").decode("utf8")
+        xml_str = postprocess_model_xml(xml_str)
+        random_code = ''.join(random.choice(string.ascii_lowercase) for i in range(10))
+        new_xml_path = os.path.join(folder, "{}.xml".format(random_code))
+        f = open(new_xml_path, "w")
+        f.write(xml_str)
+        f.close()
+        # print(f"Write to {new_xml_path}")
+
+        # initialize object with new xml we wrote
+        super().__init__(
+            # xml_path_completion("objects/{}.xml".format(obj_name)),
+            fname=new_xml_path,
+            name=name,
+            joints=[dict(type="free", damping="0.0005")],
+            obj_type="all",
+            duplicate_collision_geoms=True,
+        )
+
+        # clean up xml - we don't need it anymore
+        os.remove(new_xml_path)
 
 class StoveObject(MujocoXMLObject):
     def __init__(
@@ -104,7 +204,7 @@ class ButtonObject(MujocoXMLObject):
 
 class AppleObject(MujocoXMLObject):
     """
-    Bottle object
+    Apple object
     """
 
     def __init__(self, name):
@@ -116,28 +216,118 @@ class AppleObject(MujocoXMLObject):
             duplicate_collision_geoms=True,
         )
 
-class ColaObject(MujocoXMLObject):
-    """
-    Bottle object
-    """
-
-    def __init__(self, name):
-        super().__init__(
-            xml_path_completion("objects/cola.xml"),
-            name=name,
-            joints=[dict(type="free", damping="0.0005")],
-            obj_type="all",
-            duplicate_collision_geoms=True,
-        )
-
-class JuiceObject(MujocoXMLObject):
+class AppleJuiceObject(ScaledMujocoXMLObject):
     """
     Can object
     """
 
+    def __init__(self, name, scale=1.0):
+        xml_path = xml_path_completion("objects/apple_juice.xml")
+        super().__init__(
+            name=name,
+            xml_path=xml_path,
+            scale=scale,
+        )
+
+class CoffeeObject(ScaledMujocoXMLObject):
+    """
+    Can object
+    """
+
+    def __init__(self, name, scale=1.0):
+        xml_path = xml_path_completion("objects/coffee.xml")
+        super().__init__(
+            name=name,
+            xml_path=xml_path,
+            scale=scale,
+        )
+
+class LimoncelloObject(ScaledMujocoXMLObject):
+    """
+    Can object
+    """
+
+    def __init__(self, name, scale=1.0):
+        xml_path = xml_path_completion("objects/limoncello.xml")
+        super().__init__(
+            name=name,
+            xml_path=xml_path,
+            scale=scale,
+        )
+
+class JuiceGrayObject(ScaledMujocoXMLObject):
+    """
+    Can object
+    """
+
+    def __init__(self, name, scale=1.0):
+        xml_path = xml_path_completion("objects/juice_gray.xml")
+        super().__init__(
+            name=name,
+            xml_path=xml_path,
+            scale=scale,
+        )
+
+class StrawberryJuiceObject(ScaledMujocoXMLObject):
+    """
+    Can object
+    """
+
+    def __init__(self, name, scale=1.0):
+        xml_path = xml_path_completion("objects/strawberry_juice.xml")
+        super().__init__(
+            name=name,
+            xml_path=xml_path,
+            scale=scale,
+        )
+
+class BeerObject(ScaledMujocoXMLObject):
+    """
+    Can object
+    """
+
+    def __init__(self, name, scale=1.0):
+        xml_path = xml_path_completion("objects/beer.xml")
+        super().__init__(
+            name=name,
+            xml_path=xml_path,
+            scale=scale,
+        )
+
+class SodaObject(ScaledMujocoXMLObject):
+    """
+    Can object
+    """
+
+    def __init__(self, name, scale=1.0):
+        xml_path = xml_path_completion("objects/soda.xml")
+        super().__init__(
+            name=name,
+            xml_path=xml_path,
+            scale=scale,
+        )
+
+class TeaObject(ScaledMujocoXMLObject):
+    """
+    Can object
+    """
+
+    def __init__(self, name, scale=1.0):
+        xml_path = xml_path_completion("objects/tea.xml")
+        super().__init__(
+            name=name,
+            xml_path=xml_path,
+            scale=scale,
+        )
+
+class MilkObject(MujocoXMLObject):
+    """
+    Milk carton object (used in PickPlace)
+    """
+
     def __init__(self, name):
         super().__init__(
-            xml_path_completion("objects/juice.xml"),
+            xml_path_completion("objects/milk.xml"),
             name=name,
             joints=[dict(type="free", damping="0.0005")],
             obj_type="all",
@@ -159,18 +349,16 @@ class BottleObject(MujocoXMLObject):
         )
 
 
-class CanObject(MujocoXMLObject):
+class CanObject(ScaledMujocoXMLObject):
     """
     Coke can object (used in PickPlace)
     """
 
-    def __init__(self, name):
+    def __init__(self, name, scale=1.0):
         super().__init__(
-            xml_path_completion("objects/can.xml"),
+            xml_path=xml_path_completion("objects/can.xml"),
             name=name,
-            joints=[dict(type="free", damping="0.0005")],
-            obj_type="all",
-            duplicate_collision_geoms=True,
+            scale=scale,
         )
 
 
@@ -185,33 +373,100 @@ class LemonObject(MujocoXMLObject):
         )
 
 
-class MilkObject(MujocoXMLObject):
+class MilkBlueObject(ScaledMujocoXMLObject):
     """
     Milk carton object (used in PickPlace)
     """
 
-    def __init__(self, name):
+    def __init__(self, name, scale=1.0):
         super().__init__(
-            xml_path_completion("objects/milk.xml"),
+            xml_path=xml_path_completion("objects/milk_blue.xml"),
             name=name,
-            joints=[dict(type="free", damping="0.0005")],
-            obj_type="all",
-            duplicate_collision_geoms=True,
+            scale=scale
         )
 
+class MilkGreenObject(ScaledMujocoXMLObject):
+    """
+    Milk carton object (used in PickPlace)
+    """
 
-class BreadObject(MujocoXMLObject):
+    def __init__(self, name, scale=1.0):
+        super().__init__(
+            xml_path=xml_path_completion("objects/milk_green.xml"),
+            name=name,
+            scale=scale
+        )
+
+class MilkBlackObject(ScaledMujocoXMLObject):
+    """
+    Milk carton object (used in PickPlace)
+    """
+
+    def __init__(self, name, scale=1.0):
+        super().__init__(
+            xml_path=xml_path_completion("objects/milk_black.xml"),
+            name=name,
+            scale=scale
+        )
+
+class MilkRedObject(ScaledMujocoXMLObject):
+    """
+    Milk carton object (used in PickPlace)
+    """
+
+    def __init__(self, name, scale=1.0):
+        super().__init__(
+            xml_path=xml_path_completion("objects/milk_red.xml"),
+            name=name,
+            scale=scale
+        )
+
+class MilkGrayObject(ScaledMujocoXMLObject):
+    """
+    Milk carton object (used in PickPlace)
+    """
+
+    def __init__(self, name, scale=1.0):
+        super().__init__(
+            xml_path=xml_path_completion("objects/milk_gray.xml"),
+            name=name,
+            scale=scale
+        )
+
+class OatsMilkObject(ScaledMujocoXMLObject):
+    """
+    Milk carton object (used in PickPlace)
+    """
+
+    def __init__(self, name, scale=1.0):
+        super().__init__(
+            xml_path=xml_path_completion("objects/oats_milk.xml"),
+            name=name,
+            scale=scale
+        )
+
+class ChocolateMilkObject(ScaledMujocoXMLObject):
+    """
+    Milk carton object (used in PickPlace)
+    """
+
+    def __init__(self, name, scale=1.0):
+        super().__init__(
+            xml_path=xml_path_completion("objects/chocolate_milk.xml"),
+            name=name,
+            scale=scale
+        )
+
+class BreadObject(ScaledMujocoXMLObject):
     """
     Bread loaf object (used in PickPlace)
     """
 
-    def __init__(self, name):
+    def __init__(self, name, scale=1.0):
         super().__init__(
-            xml_path_completion("objects/bread.xml"),
             name=name,
-            joints=[dict(type="free", damping="0.0005")],
-            obj_type="all",
-            duplicate_collision_geoms=True,
+            xml_path=xml_path_completion("objects/bread.xml"),
+            scale=scale
         )
 
 

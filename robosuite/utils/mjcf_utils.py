@@ -115,10 +115,7 @@ TEXTURE_FILES = {
     "SteelScratched": "steel-scratched.png",
     "Brass": "brass-ambra.png",
     "Bread": "bread.png",
-    "Can": "can.png",
     "Ceramic": "ceramic.png",
-    "Cereal": "cereal_square.png",
-    "Soda": "soda_square.png",
     "Clay": "clay.png",
     "Dirt": "dirt.png",
     "Glass": "glass.png",
@@ -127,12 +124,32 @@ TEXTURE_FILES = {
 
     "Cheese": "cheese.png",
     "Pancake": "pancake.png",
-
     "Jello": "jello.png",
     "Spam": "spam.png",
+    "Biscuit": "biscuit.png",
+    "Burger": "burger.png",
+    "Bean": "bean.png",
+    "Chip": "chip.png",
+    "Candy": "candy.png",
+    "Cereal": "cereal_square.png",
+
+    "AppleJuice": "apple_juice.png",
+    "Coffee": "coffee.png",
+    "Limoncello": "limoncello.png",
+    "StrawberryJuice": "strawberry_juice.png",
+    "GrayJuice": "juice_gray.png",
+    "Beer": "beer.png",
+    "Soda": "soda_square.png",
+    "Can": "can.png",
     "Tea": "tea.png",
-    "Juice": "juice.png",
-    "Milk": "milk.png"
+
+    "MilkBlue": "milk_blue.png",
+    "MilkGreen": "milk_green.png",
+    "MilkBlack": "milk_black.png",
+    "MilkRed": "milk_red.png",
+    "MilkGray": "milk_gray.png",
+    "OatsMilk": "oats_milk.png",
+    "ChocolateMilk": "chocolate_milk.png",
 }
 
 TEXTURES = {
