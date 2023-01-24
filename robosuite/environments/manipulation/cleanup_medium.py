@@ -5,7 +5,7 @@ import numpy as np
 from copy import deepcopy
 
 from robosuite.environments.manipulation.single_arm_env import SingleArmEnv
-from robosuite.models.arenas import TableArenaDoubleBinsA, TableArenaDoubleBinsB, TableArenaDoubleBinsC, TableArenaDoubleBinsD
+from robosuite.models.arenas import TableArenaDoubleBinsA, TableArenaDoubleBinsB, TableArenaDoubleBinsC, TableArenaDoubleBinsD, TableArenaDoubleBinsE
 from robosuite.models.objects import BoxObject
 from robosuite.models.tasks import ManipulationTask
 from robosuite.utils.mjcf_utils import CustomMaterial
@@ -657,6 +657,15 @@ class CleanUpMediumSmallInitD(CleanUpMediumSmallInit):
                          right_mat_center=np.array([0.14, 0.1]),
                          **kwargs)
 
+class CleanUpMediumSmallInitE(CleanUpMediumSmallInit):
+
+    def __init__(self, **kwargs):
+        assert "single_object_mode" not in kwargs, "invalid set of arguments"
+        super().__init__(table_class_name=TableArenaDoubleBinsE,
+                         left_mat_center=np.array([0.14, -0.1]),
+                         right_mat_center=np.array([0.14, 0.1]),
+                         **kwargs)
+
 class CleanUpMediumSmallInitA1(CleanUpMediumSmallInitA):
 
     def __init__(self, **kwargs):
@@ -1022,6 +1031,17 @@ class CleanUpMediumSmallInitDObjectTrain(CleanUpMediumSmallInitD):
             else:
                 raise NotImplementedError
             self.objs.append(obj)
+
+
+class CleanUpMediumSmallInitE1(CleanUpMediumSmallInitE):
+
+    def __init__(self, **kwargs):
+        assert "single_object_mode" not in kwargs, "invalid set of arguments"
+        super().__init__(left_bin_obj_ids=[],
+                         right_bin_obj_ids=[0, 1],
+                         left_mat_obj_ids=[],
+                         right_mat_obj_ids=[2],
+                         **kwargs)
 
 
 class CleanUpMediumMediumInit(CleanUpMedium):
