@@ -872,6 +872,16 @@ class CleanUpMediumSmallInitD2(CleanUpMediumSmallInitD):
                          right_mat_obj_ids=[2],
                          **kwargs)
 
+class CleanUpMediumSmallInitD3(CleanUpMediumSmallInitD):
+
+    def __init__(self, **kwargs):
+        assert "single_object_mode" not in kwargs, "invalid set of arguments"
+        super().__init__(left_bin_obj_ids=[],
+                         right_bin_obj_ids=[0, 1],
+                         left_mat_obj_ids=[],
+                         right_mat_obj_ids=[2],
+                         **kwargs)
+
 class CleanUpMediumSmallInitDReal1(CleanUpMediumSmallInitD):
 
     def __init__(self, **kwargs):
