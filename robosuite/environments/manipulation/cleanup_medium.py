@@ -5,7 +5,7 @@ import numpy as np
 from copy import deepcopy
 
 from robosuite.environments.manipulation.single_arm_env import SingleArmEnv
-from robosuite.models.arenas import TableArenaDoubleBinsA, TableArenaDoubleBinsB, TableArenaDoubleBinsC, TableArenaDoubleBinsD, TableArenaDoubleBinsE
+from robosuite.models.arenas import TableArenaDoubleBinsA, TableArenaDoubleBinsB, TableArenaDoubleBinsC, TableArenaDoubleBinsD, TableArenaDoubleBinsDa, TableArenaDoubleBinsE
 from robosuite.models.objects import BoxObject
 from robosuite.models.tasks import ManipulationTask
 from robosuite.utils.mjcf_utils import CustomMaterial
@@ -657,6 +657,15 @@ class CleanUpMediumSmallInitD(CleanUpMediumSmallInit):
                          right_mat_center=np.array([0.14, 0.1]),
                          **kwargs)
 
+class CleanUpMediumSmallInitDa(CleanUpMediumSmallInit):
+
+    def __init__(self, **kwargs):
+        assert "single_object_mode" not in kwargs, "invalid set of arguments"
+        super().__init__(table_class_name=TableArenaDoubleBinsDa,
+                         left_mat_center=np.array([0.14, -0.1]),
+                         right_mat_center=np.array([0.14, 0.1]),
+                         **kwargs)
+
 class CleanUpMediumSmallInitE(CleanUpMediumSmallInit):
 
     def __init__(self, **kwargs):
@@ -891,6 +900,7 @@ class CleanUpMediumSmallInitD3(CleanUpMediumSmallInitD):
                          right_mat_obj_ids=[2],
                          **kwargs)
 
+
 class CleanUpMediumSmallInitDReal1(CleanUpMediumSmallInitD):
 
     def __init__(self, **kwargs):
@@ -1032,6 +1042,90 @@ class CleanUpMediumSmallInitDObjectTrain(CleanUpMediumSmallInitD):
                 raise NotImplementedError
             self.objs.append(obj)
 
+class CleanUpMediumSmallInitDObjectTest(CleanUpMediumSmallInitD):
+
+    def __init__(self, **kwargs):
+        assert "single_object_mode" not in kwargs, "invalid set of arguments"
+        super().__init__(left_bin_obj_ids=[0],
+                         right_bin_obj_ids=[1],
+                         left_mat_obj_ids=[2],
+                         right_mat_obj_ids=[],
+                         **kwargs)
+
+    def _load_objects(self):
+        """
+        Loads an xml model, puts it in self.model
+        """
+
+        tex_attrib_list = [
+            {"type": "cube", },
+            {"type": "2d", }
+        ]
+        mat_attrib_list = [
+            {
+                "texrepeat": "3 3",
+                "specular": "0.4",
+                "shininess": "0.1",
+            },
+            {
+                "texrepeat": "5 5",
+                "reflectance": "0.7",
+                "specular": "0.4",
+                "shininess": "0.1",
+            }
+        ]
+        box_material_list = [
+            dict(texture="Biscuit", tex_name="biscuit", mat_name="MatBiscuit"),
+        ]
+        object_list = dict(
+            milk=[
+                 ChocolateMilkObject,
+            ],
+            can=[
+                 AppleJuiceObject,
+            ]
+        )
+
+
+        selected_obj_shape_list = ["milk", "can", "box"]
+        # selected_obj_num = 3
+        # selected_obj_shape_list = random.choices(object_category_list, k=selected_obj_num)
+        self.objs = []
+        for i in range(len(selected_obj_shape_list)):
+            if selected_obj_shape_list[i] in ["milk", "can"]:
+                obj_category = selected_obj_shape_list[i]
+                scale = 0.9
+                selected_object_idx = random.randint(0, len(object_list[obj_category]) - 1)
+                obj = object_list[obj_category][selected_object_idx](name=obj_category + str(i), scale=scale)
+            elif selected_obj_shape_list[i] in ["box"]:
+                selected_texture_idx = random.randint(0, len(box_material_list) - 1)
+                obj_material = CustomMaterial(
+                    texture=box_material_list[selected_texture_idx]['texture'],
+                    tex_name=box_material_list[selected_texture_idx]['tex_name'],
+                    mat_name=box_material_list[selected_texture_idx]['mat_name'],
+                    tex_attrib=tex_attrib_list[0],
+                    mat_attrib=mat_attrib_list[0],
+                )
+                obj = BoxObject(
+                    name="box_{}".format(i),
+                    size_min=np.array([0.0350, 0.0425, 0.02]) * 1.2,
+                    size_max=np.array([0.0350, 0.0425, 0.02]) * 1.2,
+                    rgba=[1, 0, 0, 1],
+                    material=obj_material,
+                )
+            else:
+                raise NotImplementedError
+            self.objs.append(obj)
+
+class CleanUpMediumSmallInitDa1(CleanUpMediumSmallInitDa):
+
+    def __init__(self, **kwargs):
+        assert "single_object_mode" not in kwargs, "invalid set of arguments"
+        super().__init__(left_bin_obj_ids=[0, 1],
+                         right_bin_obj_ids=[],
+                         left_mat_obj_ids=[],
+                         right_mat_obj_ids=[2],
+                         **kwargs)
 
 class CleanUpMediumSmallInitE1(CleanUpMediumSmallInitE):
 
@@ -1042,7 +1136,6 @@ class CleanUpMediumSmallInitE1(CleanUpMediumSmallInitE):
                          left_mat_obj_ids=[],
                          right_mat_obj_ids=[2],
                          **kwargs)
-
 
 class CleanUpMediumMediumInit(CleanUpMedium):
 

@@ -1,5 +1,5 @@
 from .arena import Arena
-from .table_arena import TableArena, TableArenaBin, TableArenaDoubleBinsA, TableArenaDoubleBinsB, TableArenaDoubleBinsC, TableArenaDoubleBinsD, TableArenaDoubleBinsE
+from .table_arena import TableArena, TableArenaBin, TableArenaDoubleBinsA, TableArenaDoubleBinsB, TableArenaDoubleBinsC, TableArenaDoubleBinsD, TableArenaDoubleBinsDa, TableArenaDoubleBinsE
 from .pegs_arena import PegsArena
 from .bins_arena import BinsArena
 from .empty_arena import EmptyArena
