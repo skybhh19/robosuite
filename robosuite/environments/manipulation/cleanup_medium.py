@@ -925,7 +925,7 @@ class CleanUpMediumSmallInitDReal1(CleanUpMediumSmallInitD):
         for obj_cls, obj_name in zip(
                 (CanObject, MilkBlueObject), ["can", "milk"]
         ):
-            obj = obj_cls(name=obj_name)
+            obj = obj_cls(name=obj_name, scale=1.0)
             self.objs.append(obj)
 
         if self.num_objs > 1:
