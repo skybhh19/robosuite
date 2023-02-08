@@ -1075,14 +1075,14 @@ class CleanUpMediumSmallInitDObjectTest(CleanUpMediumSmallInitD):
             }
         ]
         box_material_list = [
-            dict(texture="Biscuit", tex_name="biscuit", mat_name="MatBiscuit"),
+            dict(texture="Jello", tex_name="jello", mat_name="MatJello"),
         ]
         object_list = dict(
             milk=[
-                 ChocolateMilkObject,
+                 MilkBlueObject,
             ],
             can=[
-                 AppleJuiceObject,
+                 TeaObject,
             ]
         )
 
