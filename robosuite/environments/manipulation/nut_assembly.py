@@ -553,6 +553,11 @@ class NutAssembly(SingleArmEnv):
             def obj_quat(obs_cache):
                 return np.array(self.obj_quats).flatten()
 
+            # sensors.extend([obj_pos, obj_quat])
+            # names.extend(["obj_pos", "obj_quat"])
+            # enableds.extend([True, True])
+            # actives.extend([True, True])
+
             if self.single_object_mode == 1:
                 # This is randomly sampled object, so we need to include object id as observation
                 @sensor(modality=modality)
