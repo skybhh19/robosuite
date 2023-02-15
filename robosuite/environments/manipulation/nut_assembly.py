@@ -410,6 +410,7 @@ class NutAssembly(SingleArmEnv):
 
         # define nuts
         self.nuts = []
+        self.objs = self.nuts
         nut_names = ("SquareNut", "RoundNut")
 
         # Create default (SequentialCompositeSampler) sampler if it has not already been specified
@@ -466,6 +467,7 @@ class NutAssembly(SingleArmEnv):
         # Additional object references from this env
         self.obj_body_id = {}
         self.obj_geom_id = {}
+        self.obj_body_ids = []
 
         self.table_body_id = self.sim.model.body_name2id("table")
         self.peg1_body_id = self.sim.model.body_name2id("peg1")
@@ -473,6 +475,7 @@ class NutAssembly(SingleArmEnv):
 
         for nut in self.nuts:
             self.obj_body_id[nut.name] = self.sim.model.body_name2id(nut.root_body)
+            self.obj_body_ids.append(self.obj_body_id[nut.name])
             self.obj_geom_id[nut.name] = [self.sim.model.geom_name2id(g) for g in nut.contact_geoms]
 
         # information of objects
@@ -480,6 +483,16 @@ class NutAssembly(SingleArmEnv):
 
         # keep track of which objects are on their corresponding pegs
         self.objects_on_pegs = np.zeros(len(self.nuts))
+
+    @property
+    def obj_positions(self):
+        return [np.array(self.sim.data.body_xpos[self.obj_body_id[nut_name]])
+                for nut_name in self.nuts]
+
+    @property
+    def obj_quats(self):
+        return [T.convert_quat(self.sim.data.body_xquat[self.obj_body_id[nut_name]], to="xyzw")
+                for nut_name in self.nuts]
 
     def _setup_observables(self):
         """
@@ -524,6 +537,22 @@ class NutAssembly(SingleArmEnv):
                 actives += [using_nut] * 4
                 self.nut_id_to_sensors[i] = nut_sensor_names
 
+            @sensor(modality=modality)
+            def nut_pos(obs_cache):
+                return np.array(self.sim.data.body_xpos[self.obj_body_id[nut_name]])
+
+            @sensor(modality=modality)
+            def nut_quat(obs_cache):
+                return T.convert_quat(self.sim.data.body_xquat[self.obj_body_id[nut_name]], to="xyzw")
+
+            @sensor(modality=modality)
+            def obj_pos(obs_cache):
+                return np.array(self.obj_positions).flatten()
+
+            @sensor(modality=modality)
+            def obj_quat(obs_cache):
+                return np.array(self.obj_quats).flatten()
+
             if self.single_object_mode == 1:
                 # This is randomly sampled object, so we need to include object id as observation
                 @sensor(modality=modality)
@@ -546,6 +575,9 @@ class NutAssembly(SingleArmEnv):
                 )
 
         return observables
+
+    def _get_skill_info(self):
+        return None
 
     def _create_nut_sensors(self, nut_name, modality="object"):
         """
@@ -687,6 +719,10 @@ class NutAssembly(SingleArmEnv):
                 target_type="site",
             )
 
+    @property
+    def _has_gripper_contact(self):
+        return np.linalg.norm(self.robots[0].ee_force) > 20
+
 
 class NutAssemblySingle(NutAssembly):
     """
@@ -716,3 +752,37 @@ class NutAssemblyRound(NutAssembly):
     def __init__(self, **kwargs):
         assert "single_object_mode" not in kwargs and "nut_type" not in kwargs, "invalid set of arguments"
         super().__init__(single_object_mode=2, nut_type="round", **kwargs)
+
+class NutAssemblySquareTmp(NutAssembly):
+    """
+    Easier version of task - place one square nut into its peg.
+    """
+
+    def __init__(self, **kwargs):
+        assert "single_object_mode" not in kwargs and "nut_type" not in kwargs, "invalid set of arguments"
+        super().__init__(**kwargs)
+
+    def _check_success(self):
+        """
+        Check if all nuts have been successfully placed around their corresponding pegs.
+
+        Returns:
+            bool: True if all nuts are placed correctly
+        """
+        # remember objects that are on the correct pegs
+        gripper_site_pos = self.sim.data.site_xpos[self.robots[0].eef_site_id]
+        for i, nut in enumerate(self.nuts):
+            obj_str = nut.name
+            if nut.name == "RoundNut":
+                continue
+            obj_pos = self.sim.data.body_xpos[self.obj_body_id[obj_str]]
+            dist = np.linalg.norm(gripper_site_pos - obj_pos)
+            r_reach = 1 - np.tanh(10.0 * dist)
+            self.objects_on_pegs[i] = int(self.on_peg(obj_pos, i) and r_reach < 0.6)
+
+        if self.single_object_mode > 0:
+            return np.sum(self.objects_on_pegs) > 0  # need one object on peg
+
+        # returns True if all objects are on correct pegs
+        return np.sum(self.objects_on_pegs) == 1
+
