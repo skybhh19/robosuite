@@ -210,6 +210,16 @@ class NutAssembly(SingleArmEnv):
         # object placement initializer
         self.placement_initializer = placement_initializer
 
+        self.eef_bounds = np.array([
+            [-0.26, -0.01, 0.80],
+            [0.225, 0.28, 1.00]
+        ])
+
+        self.data_eef_bounds = np.array([
+            [-0.24, -0., 0.80],
+            [0.22, 0.27, 1.00]
+        ])
+
         super().__init__(
             robots=robots,
             env_configuration=env_configuration,
