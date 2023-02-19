@@ -325,8 +325,13 @@ class GripperSkill(BaseSkill):
         self.gripper_dim = None
         return 0
 
+    def _reset(self, params, norm):
+        super()._reset(params, norm)
+        self._num_gripper_steps = 0
+
     def _update_state(self):
         self._state = None
+        self._num_gripper_steps += 1
 
     def _get_pos_ac(self):
         return None
@@ -348,6 +353,9 @@ class GripperSkill(BaseSkill):
             raise ValueError
 
         return gripper_action
+
+    def skill_done(self):
+        return True
 
     def is_success(self):
         return self._num_ac_calls >= self._config['max_ac_calls']
@@ -380,7 +388,10 @@ class GripperSkill(BaseSkill):
         # return False
 
     def _test_start_state(self):
-        return True
+        for obj in self._env.env.objs:
+            if self._env.env._check_grasp(gripper=self._env.env.robots[0].gripper, object_geoms=obj):
+                return True
+        return False
 
 class ReachSkill(BaseSkill):
 
@@ -413,24 +424,6 @@ class ReachSkill(BaseSkill):
                 self.gripper_dim = (3, 4)
             param_dim += 1
         return param_dim
-
-    def _reset(self, params, norm):
-        super()._reset(params, norm)
-        self.initial_grasped = False
-        for obj in self._env.env.objs:
-            if self._env.env._check_grasp(gripper=self._env.env.robots[0].gripper, object_geoms=obj):
-                self.initial_grasped = True
-
-    def _get_reach_pos(self):
-        if self._normalize_params:
-            pos = self._get_unnormalized_params(
-                self._params[:3], self._config['global_xyz_bounds']
-            )
-        else:
-            pos = self._params[:3]
-        # if pos[0] > 0.08:
-        #     pos[2] = min(0.85, pos[2])
-        return pos
 
     def _update_state(self):
         obs = self._env.get_observation()
@@ -486,6 +479,24 @@ class ReachSkill(BaseSkill):
         else:
             ori_y = param_y
         return ori_y
+
+    def _reset(self, params, norm):
+        super()._reset(params, norm)
+        self.initial_grasped = False
+        for obj in self._env.env.objs:
+            if self._env.env._check_grasp(gripper=self._env.env.robots[0].gripper, object_geoms=obj):
+                self.initial_grasped = True
+
+    def _get_reach_pos(self):
+        if self._normalize_params:
+            pos = self._get_unnormalized_params(
+                self._params[:3], self._config['global_xyz_bounds']
+            )
+        else:
+            pos = self._params[:3]
+        # if pos[0] > 0.08:
+        #     pos[2] = min(0.85, pos[2])
+        return pos
 
     def _get_gripper_ac(self):
         self._check_params_dim()
@@ -544,6 +555,7 @@ class ReachSkill(BaseSkill):
         return True
 
 class GraspSkill(BaseSkill):
+
     STATES = ['INIT', 'LIFTED', 'HOVERING', 'REACHED', 'GRASPED']
 
     def __init__(self,
@@ -1094,7 +1106,7 @@ class PushSkill(BaseSkill):
 
     def _get_gripper_ac(self):
         self._check_params_dim()
-        gripper_action = np.array([-1, ])
+        gripper_action = np.array([1, ])
         return gripper_action
 
     def is_success(self):
