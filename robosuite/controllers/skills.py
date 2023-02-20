@@ -354,9 +354,6 @@ class GripperSkill(BaseSkill):
 
         return gripper_action
 
-    def skill_done(self):
-        return True
-
     def is_success(self):
         return self._num_ac_calls >= self._config['max_ac_calls']
 
