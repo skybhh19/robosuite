@@ -1106,7 +1106,10 @@ class PushSkill(BaseSkill):
 
     def _get_gripper_ac(self):
         self._check_params_dim()
-        gripper_action = np.array([1, ])
+        if self._state in ['INIT']:
+            gripper_action = np.array([0, ])
+        else:
+            gripper_action = np.array([1, ])
         return gripper_action
 
     def is_success(self):
@@ -1117,12 +1120,12 @@ class PushSkill(BaseSkill):
         # aff_centers = info.get('push_pos', [])
         aff_centers = []
         for obj_id in range(len(self._env.env.objs)):
-            try:
-                obj_size = self._env.env.objs[obj_id].size
-                if obj_size[0] < 0.04 and obj_size[1] < 0.04:
-                    continue
-            except:
-                pass
+            # try:
+            #     obj_size = self._env.env.objs[obj_id].size
+            #     if obj_size[0] < 0.04 and obj_size[1] < 0.04:
+            #         continue
+            # except:
+            #     pass
             obj_pos = self._env.env.sim.data.body_xpos[self._env.env.obj_body_ids[obj_id]].copy()
             aff_centers.append(obj_pos)
         if aff_centers is None:
