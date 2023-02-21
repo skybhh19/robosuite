@@ -4,7 +4,7 @@ import numpy as np
 from copy import deepcopy
 
 from robosuite.environments.manipulation.single_arm_env import SingleArmEnv
-from robosuite.models.arenas import TableArenaBin
+from robosuite.models.arenas import TableArena
 from robosuite.models.objects import BoxObject
 from robosuite.models.tasks import ManipulationTask
 from robosuite.utils.mjcf_utils import CustomMaterial
@@ -13,6 +13,7 @@ from robosuite.utils.placement_samplers import UniformRandomSampler,SequentialCo
 from robosuite.utils.transform_utils import convert_quat
 
 from robosuite.utils.mjcf_utils import CustomMaterial, array_to_string, add_material
+from robosuite.utils import RandomizationError
 
 DEFAULT_CLEANUP_CONFIG = {
     'use_pnp_rew': True,
@@ -153,6 +154,7 @@ class CleanUp(SingleArmEnv):
         initialization_noise="default",
         table_full_size=(0.8, 0.8, 0.05),
         table_friction=(1., 5e-3, 1e-4),
+        table_offset=(0, 0, 0.8),
         use_camera_obs=True,
         use_object_obs=True,
         reward_scale=1.0,
@@ -179,7 +181,7 @@ class CleanUp(SingleArmEnv):
         # settings for table top
         self.table_full_size = table_full_size
         self.table_friction = table_friction
-        self.table_offset = np.array((0, 0, 0.8))
+        self.table_offset = np.array(table_offset)
         self.table_height = 0.8
 
         # reward configuration
@@ -227,43 +229,187 @@ class CleanUp(SingleArmEnv):
             renderer_config=renderer_config,
         )
 
-    def reward(self, action=None):
-        """
-        Reward function for the task.
+    def reward(self, action):
+        _, _, reward = self.reward_infos()
+        return reward
 
-        Sparse un-normalized reward:
+    def reward_infos(self):
+        rew_pnp = 0
+        partial_rew_pnp = 0
+        num_pnp_success = 0
+        for i in range(self.task_config['num_pnp_objs']):
+            r, g, l, h, b = self.pnp_staged_rewards(obj_id=i)
 
-            - a discrete reward of 2.0 is provided if the red block is stacked on the green block
+            if b == 1.0:
+                rew_pnp += 1.0
+                num_pnp_success += 1
+            elif b == 0.0:
+                partial_rew_pnp = max(partial_rew_pnp, max(r, g, l, h))
+            else:
+                raise ValueError
 
-        Un-normalized components if using reward shaping:
+        if self.reward_shaping:
+            rew_pnp += partial_rew_pnp
 
-            - Reaching: in [0, 0.25], to encourage the arm to reach the cube
-            - Grasping: in {0, 0.25}, non-zero if arm is grasping the cube
-            - Lifting: in {0, 1}, non-zero if arm has lifted the cube
-            - Aligning: in [0, 0.5], encourages aligning one cube over the other
-            - Stacking: in {0, 2}, non-zero if cube is stacked on other cube
+        rew_push = 0
+        for i in range(self.task_config['num_push_objs']):
+            r, p, d = self.push_staged_rewards(obj_id=i)
+            rew_push += p
+            if self.task_config['shaped_push_rew']:
+                rew_push += r
 
-        The reward is max over the following:
+        if self.task_config['use_pnp_rew'] and self.task_config['use_push_rew']:
+            if self.task_config['rew_type'] == 'sum':
+                reward = rew_pnp + rew_push
+            elif self.task_config['rew_type'] == 'step':
+                pnp_success = (num_pnp_success == self.task_config['num_pnp_objs'])
+                reward = rew_pnp + float(pnp_success) * rew_push
+            else:
+                raise ValueError
+        elif self.task_config['use_pnp_rew']:
+            reward = rew_pnp
+        elif self.task_config['use_push_rew']:
+            reward = rew_push
+        else:
+            raise ValueError
 
-            - Reaching + Grasping
-            - Lifting + Aligning
-            - Stacking
+        if self.reward_scale is not None:
+            reward *= self.reward_scale
 
-        The sparse reward only consists of the stacking component.
+        return rew_pnp, rew_push, reward
 
-        Note that the final reward is normalized and scaled by
-        reward_scale / 2.0 as well so that the max score is equal to reward_scale
+    def pnp_staged_rewards(self, obj_id=0):
+        reach_mult = 0.1
+        grasp_mult = 0.35
+        lift_mult = 0.5
+        hover_mult = 0.7
 
-        Args:
-            action (np array): [NOT USED]
+        obj_pos = self.sim.data.body_xpos[self.pnp_obj_body_ids[obj_id]]
+        obj = self.pnp_objs[obj_id]
 
-        Returns:
-            float: reward value
-        """
-        if self._check_success():
-            return 1.0
-        return 0.0
+        gripper_site_pos = self.sim.data.site_xpos[self.robots[0].eef_site_id]
+        dist = np.linalg.norm(gripper_site_pos - obj_pos)
+        r_reach = (1 - np.tanh(10.0 * dist)) * reach_mult
 
+        # grasping reward
+        r_grasp = int(self._check_grasp(
+            gripper=self.robots[0].gripper,
+            object_geoms=obj)
+        ) * grasp_mult
+
+        r_lift = 0.
+        r_hover = 0.
+        if r_grasp > 0.:
+            table_pos = np.array(self.sim.data.body_xpos[self.table_body_id])
+            z_target = table_pos[2] + 0.15
+            obj_z = obj_pos[2]
+            z_dist = np.maximum(z_target - obj_z, 0.)
+            r_lift = grasp_mult + (1 - np.tanh(15.0 * z_dist)) * (
+                    lift_mult - grasp_mult
+            )
+
+            bin_xy = np.array(self.sim.data.body_xpos[self.bin_body_id])[:2]
+            obj_xy = obj_pos[:2]
+            dist = np.linalg.norm(bin_xy - obj_xy)
+            r_hover = r_lift + (1 - np.tanh(10.0 * dist)) * (
+                    hover_mult - lift_mult
+            )
+
+        # stacking is successful when the block is lifted and the gripper is not holding the object
+        r_bin = self.in_bin(obj_pos)
+
+        return r_reach, r_grasp, r_lift, r_hover, r_bin
+
+    def push_staged_rewards(self, obj_id=0):
+        gripper_site_pos = self.sim.data.site_xpos[self.robots[0].eef_site_id]
+        obj_pos = self.sim.data.body_xpos[self.push_obj_body_ids[obj_id]]
+        target_pos_xy = self.table_offset[:2] + np.array([-0.15, 0.15])
+        d_push = np.linalg.norm(obj_pos[:2] - target_pos_xy)
+
+        th = [0.08, 0.08, 0.04]
+        d_reach = np.sum(
+            np.clip(
+                np.abs(gripper_site_pos - obj_pos) - th,
+                0, None
+            )
+        )
+        r_reach = (1 - np.tanh(10.0 * d_reach)) * 0.25
+
+        r_push = 1 - np.tanh(self.task_config['push_scale_fac'] * d_push)
+        return r_reach, r_push, d_push
+
+    def in_bin(self, obj_pos):
+        bin_pos = np.array(self.sim.data.body_xpos[self.bin_body_id])
+        res = False
+        if (
+                abs(obj_pos[0] - bin_pos[0]) < 0.10
+                and abs(obj_pos[1] - bin_pos[1]) < 0.15
+                and obj_pos[2] < self.table_offset[2] + 0.05
+        ):
+            res = True
+        return res
+
+    def _get_env_info(self, action):
+        env_info = {}
+        env_info['success_pnp'] = self._check_success_pnp()
+        env_info['success_push'] = self._check_success_push()
+        env_info['success'] = self._check_success()
+
+        return env_info
+
+    def _get_skill_info(self):
+        pos_info = dict(
+            grasp=[],
+            push=[],
+            reach=[],
+        )
+
+        bin_pos = self.sim.data.body_xpos[self.bin_body_id].copy()
+        obj_positions = self.obj_positions
+        num_pnp_objs = self.task_config['num_pnp_objs']
+
+        pnp_objs = obj_positions[:num_pnp_objs]
+        push_objs = obj_positions[num_pnp_objs:]
+
+        drop_pos = bin_pos + [0, 0, 0.15]
+
+        pos_info['grasp'] += pnp_objs
+        pos_info['push'] += push_objs
+        pos_info['reach'].append(drop_pos)
+
+        info = {}
+        for k in pos_info:
+            info[k + '_pos'] = pos_info[k]
+
+        return info
+
+    @property
+    def obj_positions(self):
+        pnp_obj_positions = [
+            self.sim.data.body_xpos[self.pnp_obj_body_ids[i]].copy()
+            for i in range(self.task_config['num_pnp_objs'])
+        ]
+        push_obj_positions = [
+            self.sim.data.body_xpos[self.push_obj_body_ids[i]].copy()
+            for i in range(self.task_config['num_push_objs'])
+        ]
+        return pnp_obj_positions + push_obj_positions
+
+    @property
+    def obj_quats(self):
+        pnp_obj_quats = [
+            convert_quat(
+                np.array(self.sim.data.body_xquat[self.pnp_obj_body_ids[i]]), to="xyzw"
+            )
+            for i in range(self.task_config['num_pnp_objs'])
+        ]
+        push_obj_quats = [
+            convert_quat(
+                np.array(self.sim.data.body_xquat[self.push_obj_body_ids[i]]), to="xyzw"
+            )
+            for i in range(self.task_config['num_push_objs'])
+        ]
+        return pnp_obj_quats + push_obj_quats
 
     def _load_model(self):
         """
@@ -276,10 +422,11 @@ class CleanUp(SingleArmEnv):
         self.robots[0].robot_model.set_base_xpos(xpos)
 
         # load model for table top workspace
-        mujoco_arena = TableArenaBin(
+        mujoco_arena = TableArena(
             table_full_size=self.table_full_size,
             table_friction=self.table_friction,
             table_offset=self.table_offset,
+            xml="arenas/table_arena_box.xml",
         )
 
         # Arena always gets set to zero origin
@@ -317,7 +464,7 @@ class CleanUp(SingleArmEnv):
                 color = 0.25 + 0.75 * i / (num_pnp_objs - 1)
             else:
                 color = 1.0
-            pnp_size = np.array([0.04, 0.022, 0.033]) * 0.7
+            pnp_size = np.array([0.04, 0.022, 0.033]) * 0.75
             obj = BoxObject(
                 name="obj_pnp_{}".format(i),
                 size_min=pnp_size,
@@ -334,7 +481,7 @@ class CleanUp(SingleArmEnv):
                 color = 0.25 + 0.75 * i / (num_push_objs - 1)
             else:
                 color = 1.0
-            push_size = np.array([0.0350, 0.0425, 0.025]) * 1.25
+            push_size = np.array([0.0350, 0.0425, 0.0125]) * 1.20
             obj = BoxObject(
                 name="obj_push_{}".format(i),
                 size_min=push_size,
@@ -356,19 +503,21 @@ class CleanUp(SingleArmEnv):
         #     self.placement_initializer.add_objects(cubes)
         # else:
 
-        self.placement_initializer = SequentialCompositeSampler(name="ObjectSampler")
-        self.placement_initializer.append_sampler(
-            UniformRandomSampler(
+        if self.placement_initializer is not None:
+            self.placement_initializer.reset()
+            self.placement_initializer.add_objects(self.objs)
+        else:
+            self.placement_initializer = UniformRandomSampler(
             name="ObjectSampler",
             mujoco_objects=mujoco_objects,
-            x_range=[0.0, 0.05],
-            y_range=[-0.13, 0.13],
+            x_range=[0.0, 0.16],
+            y_range=[-0.16, 0.16],
             rotation=None,
             ensure_object_boundary_in_range=False,
             ensure_valid_placement=True,
             reference_pos=self.table_offset,
             z_offset=0.01,
-        ))
+        )
 
         # task includes arena, robot, and objects of interest
         self.model = ManipulationTask(
@@ -409,34 +558,6 @@ class CleanUp(SingleArmEnv):
 
         self.bin_body_id = self.sim.model.body_name2id("bin")
 
-    @property
-    def obj_positions(self):
-        pnp_obj_positions = [
-            self.sim.data.body_xpos[self.pnp_obj_body_ids[i]].copy()
-            for i in range(self.task_config['num_pnp_objs'])
-        ]
-        push_obj_positions = [
-            self.sim.data.body_xpos[self.push_obj_body_ids[i]].copy()
-            for i in range(self.task_config['num_push_objs'])
-        ]
-        return pnp_obj_positions + push_obj_positions
-
-    @property
-    def obj_quats(self):
-        pnp_obj_quats = [
-            convert_quat(
-                np.array(self.sim.data.body_xquat[self.pnp_obj_body_ids[i]]), to="xyzw"
-            )
-            for i in range(self.task_config['num_pnp_objs'])
-        ]
-        push_obj_quats = [
-            convert_quat(
-                np.array(self.sim.data.body_xquat[self.push_obj_body_ids[i]]), to="xyzw"
-            )
-            for i in range(self.task_config['num_push_objs'])
-        ]
-        return pnp_obj_quats + push_obj_quats
-
     def _reset_internal(self):
         """
         Resets simulation internal configurations.
@@ -447,7 +568,15 @@ class CleanUp(SingleArmEnv):
         if not self.deterministic_reset:
 
             # Sample from the placement initializer for all objects
-            object_placements = self.placement_initializer.sample()
+            while True:
+                try:
+                    object_placements = self.placement_initializer.sample()
+                    sample_success = True
+                except RandomizationError:
+                    sample_success = False
+
+                if sample_success:
+                    break
 
             # Loop through all objects and reset their positions
             for obj_pos, obj_quat, obj in object_placements.values():
@@ -511,12 +640,6 @@ class CleanUp(SingleArmEnv):
 
         return observables
 
-    def in_bin(self, obj_pos):
-        bin_pos = np.array(self.sim.data.body_xpos[self.bin_body_id])
-        return abs(obj_pos[0] - bin_pos[0]) < 0.10 \
-               and abs(obj_pos[1] - bin_pos[1]) < 0.15 \
-               and obj_pos[2] < self.table_offset[2] + 0.05
-
     def _check_success_pnp(self):
         for i in range(self.task_config['num_pnp_objs']):
             obj_pos = self.sim.data.body_xpos[self.pnp_obj_body_ids[i]]
@@ -527,11 +650,9 @@ class CleanUp(SingleArmEnv):
     def _check_success_push(self):
         for i in range(self.task_config['num_push_objs']):
             obj_pos = self.sim.data.body_xpos[self.push_obj_body_ids[i]]
-            # target_pos_xy = self.table_offset[:2] + np.array([-0.15, 0.15])
-            # d_push = np.linalg.norm(obj_pos[:2] - target_pos_xy)
-            # if d_push > 0.09:
-            #     return False
-            if obj_pos[0] > -0.07:
+            target_pos_xy = self.table_offset[:2] + np.array([-0.15, 0.15])
+            d_push = np.linalg.norm(obj_pos[:2] - target_pos_xy)
+            if d_push > 0.10:
                 return False
         return True
 
@@ -547,40 +668,6 @@ class CleanUp(SingleArmEnv):
         if not self._check_success_push():
             return False
         return True
-
-    def _get_skill_info(self):
-        pos_info = dict(
-            grasp=[],
-            push=[],
-            reach=[],
-        )
-
-        bin_pos = self.sim.data.body_xpos[self.bin_body_id].copy()
-        obj_positions = self.obj_positions
-        num_pnp_objs = self.task_config['num_pnp_objs']
-
-        pnp_objs = obj_positions[:num_pnp_objs]
-        push_objs = obj_positions[num_pnp_objs:]
-
-        drop_pos = bin_pos + [0, 0, 0.15]
-
-        pos_info['grasp'] += pnp_objs
-        pos_info['push'] += push_objs
-        pos_info['reach'].append(drop_pos)
-
-        info = {}
-        for k in pos_info:
-            info[k + '_pos'] = pos_info[k]
-
-        return info
-
-    def _get_env_info(self, action):
-        env_info = {}
-        env_info['success_pnp'] = self._check_success_pnp()
-        env_info['success_push'] = self._check_success_push()
-        env_info['success'] = self._check_success()
-
-        return env_info
 
     def visualize(self, vis_settings):
         """
