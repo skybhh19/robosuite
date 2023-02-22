@@ -233,7 +233,7 @@ class CleanUp(SingleArmEnv):
             renderer_config=renderer_config,
         )
 
-    def reward(self, action):
+    def reward(self, action=None):
         _, _, reward = self.reward_infos()
         return reward
 

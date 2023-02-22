@@ -1103,10 +1103,7 @@ class PushSkill(BaseSkill):
 
     def _get_gripper_ac(self):
         self._check_params_dim()
-        if self._state in ['INIT']:
-            gripper_action = np.array([0, ])
-        else:
-            gripper_action = np.array([1, ])
+        gripper_action = np.array([-1, ])
         return gripper_action
 
     def is_success(self):
