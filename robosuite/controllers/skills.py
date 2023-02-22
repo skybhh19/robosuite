@@ -1054,8 +1054,8 @@ class PushSkill(BaseSkill):
                 if reached_src_xy and reached_ori_y:
                     self._state = 'HOVERING'
                     self._num_reach_steps += 1
-                    if self._env.env._has_gripper_contact:
-                        self._skill_is_success = False
+                    # if self._env.env._has_gripper_contact:
+                    #     self._skill_is_success = False
                 else:
                     if reached_lift:
                         self._state = 'LIFTED'
@@ -1160,12 +1160,12 @@ class PushSkill(BaseSkill):
     def check_interesting_interaction(self):
         super().check_interesting_interaction()
         for obj_id in range(len(self._env.env.objs)):
-            try:
-                obj_size = self._env.env.objs[obj_id].size
-                if obj_size[0] < 0.04 and obj_size[1] < 0.04:
-                    continue
-            except:
-                pass
+            # try:
+            #     obj_size = self._env.env.objs[obj_id].size
+            #     if obj_size[0] < 0.04 and obj_size[1] < 0.04:
+            #         continue
+            # except:
+            #     pass
             obj_pos = self._env.env.sim.data.body_xpos[self._env.env.obj_body_ids[obj_id]].copy()
             initial_obj_pos = self._initial_obj_pos[obj_id]
             obs = self._env.get_observation()
