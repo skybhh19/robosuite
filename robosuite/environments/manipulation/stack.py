@@ -180,6 +180,15 @@ class Stack(SingleArmEnv):
         # object placement initializer
         self.placement_initializer = placement_initializer
 
+        self.eef_bounds = np.array([
+            [-0.16, -0.16, 0.80],
+            [0.16, 0.16, 1.01]
+        ])
+        self.data_eef_bounds = np.array([
+            [-0.15, -0.15, 0.80],
+            [0.15, 0.15, 1.0]
+        ])
+
         super().__init__(
             robots=robots,
             env_configuration=env_configuration,

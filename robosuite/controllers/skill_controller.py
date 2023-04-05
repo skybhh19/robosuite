@@ -7,7 +7,7 @@ from robosuite.controllers.skills import (
     AtomicSkill,
     ReachSkill,
     GraspSkill,
-    PushSkill,
+    # PushSkill,
     GripperSkill,
     PlaceSkill,
 )
@@ -16,8 +16,8 @@ PRIMITIVE_TO_ID = {
     'reach': 0,
     'gripper_release': 1,
     'grasp': 2,
-    'push': 3,
-    'atomic': 4
+    # 'push': 3,
+    'atomic': 3
 }
 
 DELTA_XYZ_SCALE = np.array([0.4, 0.4, 0.01])
@@ -26,7 +26,7 @@ ID_TO_PRIMITIVE = [
     'reach',
     'gripper_release',
     'grasp',
-    'push',
+    # 'push',
     'atomic'
    ]
 
@@ -34,7 +34,7 @@ NON_ATOMIC_PRIMITIVES = [
     'reach',
     'gripper_release',
     'grasp',
-    'push'
+    # 'push'
 ]
 # GLOBAL_XYZ_BOUNDS = np.array([
 #                 [-0.32, -0.26, 0.80],
