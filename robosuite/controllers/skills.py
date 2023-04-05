@@ -27,7 +27,7 @@ class BaseSkill:
         self._num_ac_calls = None
         self._params = None
         self._state = None
-        self._normalize_params = None
+        self._normalize_pos_params = None
         self.skill_obs_list = []
         self.skill_image_obs_list = []
         # self._aff_reward = None
@@ -117,7 +117,7 @@ class BaseSkill:
 
     def _reset(self, params, norm):
         self._params = np.array(params).copy()
-        self._normalize_params = norm
+        self._normalize_pos_params = norm
         self._num_ac_calls = 0
         self._state = None
 
@@ -471,10 +471,7 @@ class ReachSkill(BaseSkill):
         # if self._state == 'INIT':
         #     return None
         param_y = self._params[3:4].copy()
-        if self._normalize_params:
-            ori_y = self._get_unnormalized_params(param_y, self._config['yaw_bounds'])
-        else:
-            ori_y = param_y
+        ori_y = self._get_unnormalized_params(param_y, self._config['yaw_bounds'])
         return ori_y
 
     def _reset(self, params, norm):
@@ -485,7 +482,7 @@ class ReachSkill(BaseSkill):
                 self.initial_grasped = True
 
     def _get_reach_pos(self):
-        if self._normalize_params:
+        if self._normalize_pos_params:
             pos = self._get_unnormalized_params(
                 self._params[:3], self._config['global_xyz_bounds']
             )
@@ -589,7 +586,7 @@ class GraspSkill(BaseSkill):
         self._skill_is_success = True
 
     def _get_reach_pos(self):
-        if self._normalize_params:
+        if self._normalize_pos_params:
             pos = self._get_unnormalized_params(
                 self._params[:3], self._config['global_xyz_bounds']
             )
@@ -611,10 +608,12 @@ class GraspSkill(BaseSkill):
         reached_xyz = (np.linalg.norm(cur_pos - goal_pos) < th)
         reached_ori_y = self._reached_goal_ori_y()
 
-        if self._state == 'GRASPED' or self._num_grasp_steps >= self._config['max_grasp_steps']:
+        if self._state == 'GRASPED' \
+                or self._num_grasp_steps >= self._config['max_grasp_steps']:
             self._state = 'GRASPED'
             self._num_grasp_steps += 1
-        elif self._state == 'REACHED' or (reached_xyz and reached_ori_y) or self._num_reach_steps >= self._config['max_reach_steps']:
+        elif self._state == 'REACHED' or (reached_xyz and reached_ori_y) or \
+                self._num_reach_steps >= self._config['max_reach_steps']:
             if (self._state != 'REACHED' or not (reached_xyz and reached_ori_y)) \
                     and self._num_reach_steps >= self._config['max_reach_steps']:
                 self._skill_is_success = False
@@ -660,10 +659,7 @@ class GraspSkill(BaseSkill):
         # if self._state == 'INIT':
         #     return None
         param_y = self._params[3:4].copy()
-        if self._normalize_params:
-            ori_y = self._get_unnormalized_params(param_y, self._config['yaw_bounds'])
-        else:
-            ori_y = param_y
+        ori_y = self._get_unnormalized_params(param_y, self._config['yaw_bounds'])
         return ori_y
 
     def _get_gripper_ac(self):
@@ -787,7 +783,7 @@ class PlaceSkill(BaseSkill):
         #         break
 
     def _get_reach_pos(self):
-        if self._normalize_params:
+        if self._normalize_pos_params:
             pos = self._get_unnormalized_params(
                 self._params[:3], self._config['global_xyz_bounds']
             )
@@ -880,10 +876,7 @@ class PlaceSkill(BaseSkill):
         # if self._state == 'INIT':
         #     return None
         param_y = self._params[3:4].copy()
-        if self._normalize_params:
-            ori_y = self._get_unnormalized_params(param_y, self._config['yaw_bounds'])
-        else:
-            ori_y = param_y
+        ori_y = self._get_unnormalized_params(param_y, self._config['yaw_bounds'])
         return ori_y
 
     def _get_gripper_ac(self):
@@ -996,7 +989,7 @@ class PushSkill(BaseSkill):
             self._initial_obj_pos.append(self._env.env.sim.data.body_xpos[self._env.env.obj_body_ids[obj_id]].copy())
 
     def _get_reach_pos(self):
-        if self._normalize_params:
+        if self._normalize_pos_params:
             push_reach_bounds = np.array(self._config['global_xyz_bounds']).copy()
             if self._config['push_height_thres'] is not None:
                 push_reach_bounds[1][2] = push_reach_bounds[0][2] + self._config['push_height_thres']
@@ -1014,7 +1007,7 @@ class PushSkill(BaseSkill):
         pos = src_pos.copy()
 
         delta_pos = self._params[-3:].copy()
-        if self._normalize_params:
+        if self._normalize_pos_params:
             delta_pos = np.clip(delta_pos, -1, 1)
             delta_pos *= self._config['delta_xyz_scale']
         pos += delta_pos
@@ -1095,10 +1088,7 @@ class PushSkill(BaseSkill):
         # if self._state == 'INIT':
         #     return None
         param_y = self._params[3:4].copy()
-        if self._normalize_params:
-            ori_y = self._get_unnormalized_params(param_y, self._config['yaw_bounds'])
-        else:
-            ori_y = param_y
+        ori_y = self._get_unnormalized_params(param_y, self._config['yaw_bounds'])
         return ori_y
 
     def _get_gripper_ac(self):
