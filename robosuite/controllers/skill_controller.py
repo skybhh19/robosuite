@@ -7,7 +7,7 @@ from robosuite.controllers.skills import (
     AtomicSkill,
     ReachSkill,
     GraspSkill,
-    # PushSkill,
+    PushSkill,
     GripperSkill,
     PlaceSkill,
 )
@@ -132,7 +132,7 @@ class SkillController:
             # place=self.place,
             reach=self.reach,
             grasp=self.grasp,
-            push=self.push
+            # push=self.push
         )
 
         self.output_dim = 0

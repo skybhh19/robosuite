@@ -216,7 +216,7 @@ class Stack(SingleArmEnv):
             renderer_config=renderer_config,
         )
 
-    def reward(self, action):
+    def reward(self, action=None):
         """
         Reward function for the task.
 
@@ -359,7 +359,7 @@ class Stack(SingleArmEnv):
             rgba=[0, 1, 0, 1],
             material=greenwood,
         )
-        cubes = [self.cubeA, self.cubeB]
+        self.objs = cubes = [self.cubeA, self.cubeB]
         # Create placement initializer
         if self.placement_initializer is not None:
             self.placement_initializer.reset()
@@ -395,6 +395,12 @@ class Stack(SingleArmEnv):
         # Additional object references from this env
         self.cubeA_body_id = self.sim.model.body_name2id(self.cubeA.root_body)
         self.cubeB_body_id = self.sim.model.body_name2id(self.cubeB.root_body)
+
+        self.obj_body_ids = []
+        for i in range(2):
+            obj = self.objs[i]
+            id = self.sim.model.body_name2id(obj.root_body)
+            self.obj_body_ids.append(id)
 
     def _reset_internal(self):
         """
@@ -506,3 +512,38 @@ class Stack(SingleArmEnv):
         # Color the gripper visualization site according to its distance to the cube
         if vis_settings["grippers"]:
             self._visualize_gripper_to_target(gripper=self.robots[0].gripper, target=self.cubeA)
+
+    @property
+    def obj_positions(self):
+        obj_positions = [
+            self.sim.data.body_xpos[self.obj_body_ids[i]].copy()
+            for i in range(len(self.obj_body_ids))
+        ]
+        return obj_positions
+
+    @property
+    def obj_quats(self):
+        obj_quats = [
+            convert_quat(
+                np.array(self.sim.data.body_xquat[self.obj_body_ids[i]]), to="xyzw"
+            )
+            for i in range(len(self.obj_body_ids))
+        ]
+        return obj_quats
+
+    def _get_skill_info(self):
+        pos_info = dict(
+            grasp=[],
+            push=[],
+            reach=[],
+        )
+
+        obj_positions = self.obj_positions
+
+        pos_info['grasp'] += obj_positions
+
+        info = {}
+        for k in pos_info:
+            info[k + '_pos'] = pos_info[k]
+
+        return info
