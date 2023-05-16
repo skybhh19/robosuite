@@ -44,7 +44,7 @@ cookies_dict = {
 
 butter_base_dict = {
     "xrange": [[0.22, 0.28]],
-    "yrange": [[0.05, 0.10]],        
+    "yrange": [[0.05, 0.10]],
     "rotation": [-np.pi / 20., np.pi / 20.],    
     "z_offset": 0.01,
     "rotation_axis": "z"
@@ -122,6 +122,14 @@ class StackTwoTypesDomain(BaseDomain):
 
         self.task_specs = task_specs
         self.CAMERA_VARIANT_POSES = CAMERA_VARIANT_POSES
+        self.eef_bounds = np.array([
+            [-0.26, -0.13, 0.8],
+            [0.13, 0.13, 1.04],
+        ])
+        self.data_eef_bounds = np.array([
+            [-0.25, -0.12, 0.8],
+            [0.12, 0.12, 1.03],
+        ])
         # kwargs["table_full_size"] = (0.8, 0.8, 0.05)
         super().__init__(*args, **kwargs)
 
