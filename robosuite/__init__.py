@@ -16,6 +16,7 @@ from robosuite.environments.manipulation.cleanup_medium import CleanUpMediumSmal
 from robosuite.environments.manipulation.tidy_real import TidyReal1, TidyReal2, TidyReal3, TidyReal4, TidyReal5, TidyReal6, TidyRealExploreSmall, TidyRealExploreLarge
 from robosuite.environments.manipulation.cleanup_pnp import CleanUpPnP
 from robosuite.environments.manipulation.kitchen import Kitchen
+from robosuite.environments.manipulation.viola_envs.envs.tasks.stack_two_types import StackTwoTypesDomain
 
 from robosuite.environments import ALL_ENVIRONMENTS
 from robosuite.controllers import ALL_CONTROLLERS, load_controller_config

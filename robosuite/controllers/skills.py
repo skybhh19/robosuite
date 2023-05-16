@@ -855,10 +855,10 @@ class PlaceSkill(BaseSkill):
 
         if self._state == 'INIT':
             pos = cur_pos.copy()
-            pos[2] = self._config['lift_height']
+            pos[2] = max(self._config['lift_height'], pos[2])
         elif self._state == 'LIFTED':
             pos = goal_pos.copy()
-            pos[2] = self._config['lift_height']
+            pos[2] = max(self._config['lift_height'], pos[2])
         elif self._state == 'HOVERING':
             pos = goal_pos.copy()
         elif self._state == 'REACHED':
