@@ -46,7 +46,7 @@ class SkillController:
 
     def __init__(self,
                  env,
-                 controller_type='OSC_POSE',
+                 controller_type=None,
                  image_obs_in_info=False,
                  aff_type='sparse',
                  render=False,
@@ -85,7 +85,8 @@ class SkillController:
             aff_tanh_scaling=10.0,
             binary_gripper=False,
             env_idx=env_idx,
-            push_height_thres=None
+            push_height_thres=None,
+            controller_type=controller_type
         )
 
         self.atomic = AtomicSkill(

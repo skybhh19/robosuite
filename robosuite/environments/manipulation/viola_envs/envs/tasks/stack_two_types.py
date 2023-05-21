@@ -130,6 +130,11 @@ class StackTwoTypesDomain(BaseDomain):
             [-0.25, -0.12, 0.8],
             [0.12, 0.12, 1.03],
         ])
+        # self.objs = []
+        self.pnp_objs = []
+        self.push_objs = []
+        self.pnp_obj_body_ids = []
+        self.push_obj_body_ids = []
         # kwargs["table_full_size"] = (0.8, 0.8, 0.05)
         super().__init__(*args, **kwargs)
 
@@ -148,11 +153,22 @@ class StackTwoTypesDomain(BaseDomain):
     def _load_objects_in_arena(self, mujoco_arena):
 
         # loading HOPE objects
+
         for obj in self.hope_objects:
-            self.objects_dict[obj] = HopeObject(
+            hope_obj = HopeObject(
                 name=obj,
                 obj_name=obj
             )
+            self.objects_dict[obj] = hope_obj
+
+
+    def _setup_references(self):
+        super()._setup_references()
+        for obj_name in self.objects_dict:
+            if 'base' not in obj_name:
+                pnp_obj = self.objects_dict[obj_name]
+                self.pnp_objs.append(pnp_obj)
+                self.pnp_obj_body_ids.append(self.sim.model.body_name2id(pnp_obj.root_body))
 
     def _setup_placement_initializer(self, mujoco_arena):
         self.placement_initializer = SequentialCompositeSampler(name="ObjectSampler")
@@ -213,3 +229,18 @@ class StackTwoTypesDomain(BaseDomain):
             pos=[0.456131746834771, 0.0, 1.3503500240372423],
             quat=[0.6380177736282349, 0.3048497438430786, 0.30484986305236816, 0.6380177736282349]
         )
+
+    @property
+    def _has_gripper_contact(self):
+        return np.linalg.norm(self.robots[0].ee_force) > 20
+
+    def _get_skill_info(self):
+        return None
+
+    def _get_env_info(self, action):
+        env_info = {}
+        # env_info['success_pnp'] = self._check_success_pnp()
+        # env_info['success_push'] = self._check_success_push()
+        env_info['success'] = self._check_success()
+
+        return env_info
