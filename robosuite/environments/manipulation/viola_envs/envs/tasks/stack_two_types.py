@@ -184,7 +184,7 @@ class StackTwoTypesDomain(BaseDomain):
                     rotation_axis=self.task_specs[obj]["rotation_axis"],
                     ensure_object_boundary_in_range=False,
                     ensure_valid_placement=True,
-                    reference_pos=self.table_offset,
+                    reference_pos=self.table_offset,  # (-0.2, 0, 0.9)
                     z_offset=self.task_specs[obj]["z_offset"],
                 )
             )
