@@ -149,6 +149,13 @@ class SortTwoObjectsDomain(BaseDomain):
                 obj_name=obj
             )
 
+    def _setup_references(self):
+        super()._setup_references()
+        for obj_name in self.task_specs["objects"]:
+            pnp_obj = self.objects_dict[obj_name]
+            self.pnp_objs.append(pnp_obj)
+            self.pnp_obj_body_ids.append(self.sim.model.body_name2id(pnp_obj.root_body))
+
     def _setup_placement_initializer(self, mujoco_arena):
         self.placement_initializer = SequentialCompositeSampler(name="ObjectSampler")
 

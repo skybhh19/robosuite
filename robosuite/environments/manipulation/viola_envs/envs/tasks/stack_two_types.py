@@ -164,7 +164,7 @@ class StackTwoTypesDomain(BaseDomain):
 
     def _setup_references(self):
         super()._setup_references()
-        for obj_name in self.objects_dict:
+        for obj_name in self.task_specs["objects"]:
             if 'base' not in obj_name:
                 pnp_obj = self.objects_dict[obj_name]
                 self.pnp_objs.append(pnp_obj)

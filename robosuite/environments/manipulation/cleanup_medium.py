@@ -331,7 +331,7 @@ class CleanUpMedium(SingleArmEnv):
 
         self.table_body_id = self.sim.model.body_name2id("table")
 
-        self.obj_body_ids = []
+        self.pnp_obj_body_ids = self.push_obj_body_ids = self.obj_body_ids = []
         for i in range(self.num_objs):
             obj = self.objs[i]
             id = self.sim.model.body_name2id(obj.root_body)
@@ -563,7 +563,7 @@ class CleanUpMediumSmallInit(CleanUpMedium):
             np.array([0.0350, 0.0425, 0.02]) * 1.2
         ]
         assert len(obj_texture_lst) == len(obj_size_list) == len(obj_material_list) == MAX_OBJ_NUMS
-        self.objs = []
+        self.pnp_objs = self.push_objs = self.objs = []
         for i in self.objs_idx:
             if self.num_objs > 1:
                 color = 0.25 + 0.75 * i / (self.num_objs - 1)
@@ -705,7 +705,7 @@ class CleanUpMediumSmallInitAReal1(CleanUpMediumSmallInitA):
             "shininess": "0.1",
         }
 
-        self.objs = []
+        self.pnp_objs = self.push_objs = self.objs = []
         self.objs.append(CanObject(name="can"))
 
         obj_size_list = [
@@ -774,7 +774,7 @@ class CleanUpMediumSmallInitBReal1(CleanUpMediumSmallInitB):
             "shininess": "0.1",
         }
 
-        self.objs = []
+        self.pnp_objs = self.push_objs = self.objs = []
         self.objs.append(ColaObject(name="cola"))
 
         obj_size_list = [
@@ -842,7 +842,7 @@ class CleanUpMediumSmallInitCReal1(CleanUpMediumSmallInitC):
             "shininess": "0.1",
         }
 
-        self.objs = []
+        self.pnp_objs = self.push_objs = self.objs = []
         for obj_cls, obj_name, obj_scale in zip(
                 (AppleJuiceObject, StrawberryJuiceObject), ["apple_juice", "strawberry_juice"], [0.8, 1.0]
         ):
@@ -921,7 +921,7 @@ class CleanUpMediumSmallInitDReal1(CleanUpMediumSmallInitD):
             "shininess": "0.1",
         }
 
-        self.objs = []
+        self.pnp_objs = self.push_objs = self.objs = []
         for obj_cls, obj_name in zip(
                 (CanObject, MilkBlueObject), ["can", "milk"]
         ):
@@ -1015,7 +1015,7 @@ class CleanUpMediumSmallInitDObjectTrain(CleanUpMediumSmallInitD):
         object_category_list = ["milk", "can", "box"]
         selected_obj_num = 3
         selected_obj_shape_list = random.choices(object_category_list, k=selected_obj_num)
-        self.objs = []
+        self.pnp_objs = self.push_objs = self.objs = []
         for i in range(len(selected_obj_shape_list)):
             if selected_obj_shape_list[i] in ["milk", "can"]:
                 obj_category = selected_obj_shape_list[i]
@@ -1090,7 +1090,7 @@ class CleanUpMediumSmallInitDObjectTest(CleanUpMediumSmallInitD):
         selected_obj_shape_list = ["milk", "can", "box"]
         # selected_obj_num = 3
         # selected_obj_shape_list = random.choices(object_category_list, k=selected_obj_num)
-        self.objs = []
+        self.pnp_objs = self.push_objs = self.objs = []
         for i in range(len(selected_obj_shape_list)):
             if selected_obj_shape_list[i] in ["milk", "can"]:
                 obj_category = selected_obj_shape_list[i]
