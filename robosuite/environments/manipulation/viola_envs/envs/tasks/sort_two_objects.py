@@ -110,6 +110,18 @@ class SortTwoObjectsDomain(BaseDomain):
 
         self.task_specs = task_specs
         self.CAMERA_VARIANT_POSES = CAMERA_VARIANT_POSES
+        self.eef_bounds = np.array([
+            [-0.23, -0.25, 0.9],
+            [0.06, 0.21, 1.07],
+        ])
+        self.data_eef_bounds = np.array([
+            [-0.22, -0.25, 0.9],
+            [0.05, 0.20, 1.07],
+        ])
+        self.pnp_objs = []
+        self.push_objs = []
+        self.pnp_obj_body_ids = []
+        self.push_obj_body_ids = []
         # kwargs["table_full_size"] = (0.8, 0.8, 0.05)
         super().__init__(*args, **kwargs)
 
@@ -148,6 +160,13 @@ class SortTwoObjectsDomain(BaseDomain):
                 name=obj,
                 obj_name=obj
             )
+
+    def _setup_references(self):
+        super()._setup_references()
+        for obj_name in self.task_specs["objects"]:
+            pnp_obj = self.objects_dict[obj_name]
+            self.pnp_objs.append(pnp_obj)
+            self.pnp_obj_body_ids.append(self.sim.model.body_name2id(pnp_obj.root_body))
 
     def _setup_placement_initializer(self, mujoco_arena):
         self.placement_initializer = SequentialCompositeSampler(name="ObjectSampler")
