@@ -479,10 +479,10 @@ class BaseDomain(SingleArmEnv):
         super().visualize(vis_settings=vis_settings)
 
     def step(self, action):
-        if self.action_dim == 4 and len(action) > 4:
-            # Convert OSC_POSITION action
-            action = np.array(action)
-            action = np.concatenate((action[:3], action[-1:]), axis=-1)
+        # if self.action_dim == 4 and len(action) > 4:
+        #     # Convert OSC_POSITION action
+        #     action = np.array(action)
+        #     action = np.concatenate((action[:3], action[-1:]), axis=-1)
         
         obs, reward, done, info = super().step(action)
         done = self._check_success()

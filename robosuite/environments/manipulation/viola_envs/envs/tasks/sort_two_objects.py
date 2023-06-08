@@ -237,3 +237,18 @@ class SortTwoObjectsDomain(BaseDomain):
             pos=[0.456131746834771, 0.0, 1.3503500240372423],
             quat=[0.6380177736282349, 0.3048497438430786, 0.30484986305236816, 0.6380177736282349]
         )
+
+    @property
+    def _has_gripper_contact(self):
+        return np.linalg.norm(self.robots[0].ee_force) > 20
+
+    def _get_skill_info(self):
+        return None
+
+    def _get_env_info(self, action):
+        env_info = {}
+        # env_info['success_pnp'] = self._check_success_pnp()
+        # env_info['success_push'] = self._check_success_push()
+        env_info['success'] = self._check_success()
+
+        return env_info

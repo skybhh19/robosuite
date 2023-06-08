@@ -14,17 +14,25 @@ from robosuite.controllers.skills import (
 
 PRIMITIVE_TO_ID = {
     'reach': 0,
-    'place': 1,
-    'grasp': 2,
-    'push': 3,
-    'atomic': 4
+    # 'place': 1,
+    'grasp': 1,
+    'push': 2,
+    'atomic': 3
 }
+
+# PRIMITIVE_TO_ID = {
+#     'reach': 0,
+#     'place': 1,
+#     'grasp': 2,
+#     'push': 3,
+#     'atomic': 4
+# }
 
 DELTA_XYZ_SCALE = np.array([0.4, 0.4, 0.01])
 
 ID_TO_PRIMITIVE = [
     'reach',
-    'place',
+    # 'place',
     'grasp',
     'push',
     'atomic'
@@ -32,7 +40,7 @@ ID_TO_PRIMITIVE = [
 
 NON_ATOMIC_PRIMITIVES = [
     'reach',
-    'place',
+    # 'place',
     'grasp',
     'push'
 ]
@@ -52,7 +60,8 @@ class SkillController:
                  render=False,
                  reach_use_gripper=False,
                  env_idx=None,
-                 output_mode=None):
+                 output_mode=None,
+                 skill_names=None):
 
         self._env = env
         self._env_idx = env_idx
@@ -129,12 +138,21 @@ class SkillController:
 
         self.name_to_skill = OrderedDict(
             atomic=self.atomic,
-            # gripper_release=self.gripper_release,
-            place=self.place,
+            # place=self.place,
             reach=self.reach,
             grasp=self.grasp,
             push=self.push
         )
+        # if 'atomic' in skill_names:
+        #     self.name_to_skill['atomic'] = self.atomic
+        # if 'place' in skill_names:
+        #     self.name_to_skill['place'] = self.atomic
+        # if 'reach' in skill_names:
+        #     self.name_to_skill['reach'] = self.atomic
+        # if 'grasp' in skill_names:
+        #     self.name_to_skill['grasp'] = self.atomic
+        # if 'push' in skill_names:
+        #     self.name_to_skill['push'] = self.atomic
 
         self.output_dim = 0
         self.primitive_dim_info = {}
