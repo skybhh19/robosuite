@@ -582,7 +582,36 @@ class NutAssembly(SingleArmEnv):
         return observables
 
     def _get_skill_info(self):
-        return None
+        nut = self.nuts[1]
+        nut_pos = np.array(self.sim.data.body_xpos[self.obj_body_id[nut.name]])
+        peg_pos = np.array(self.sim.data.body_xpos[self.peg2_body_id])
+        peg_pos[2] = 0.85
+        lift_pos = peg_pos.copy()
+        lift_pos[2] = 0.95
+
+        # info['src_pos'] = [nut_pos]
+        # info['lift_pos'] = [lift_pos]
+        # info['target_pos'] = [peg_pos]
+
+        pos_info = {}
+
+        pos_info['interact'] = [nut_pos, peg_pos, lift_pos]  # interaction positions
+        pos_info['obj'] = [nut_pos, peg_pos]  # object positions
+
+        pos_info['grasp'] = [nut_pos]  # grasp target positions
+        pos_info['push'] = []  # push target positions
+        pos_info['reach'] = [lift_pos]  # reach target positions
+
+        info = {}
+        for k in pos_info:
+            info[k + '_pos'] = pos_info[k]
+
+        info['grasped_obj'] = [
+            self._check_grasp(gripper=self.robots[0].gripper, object_geoms=[g for g in nut.contact_geoms])]
+
+        info['gripper_contact'] = self._has_gripper_contact
+
+        return info
 
     def _create_nut_sensors(self, nut_name, modality="object"):
         """

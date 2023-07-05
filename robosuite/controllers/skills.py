@@ -513,11 +513,10 @@ class ReachSkill(BaseSkill):
         return self._state == 'REACHED'
 
     def _get_aff_centers(self):
-        return None
-        # info = self._get_info()
-        # aff_centers = info.get('reach_pos', [])
-        if aff_centers is None:
+        info = self._get_info()
+        if info is None:
             return None
+        aff_centers = info.get('reach_pos', [])
         return np.array(aff_centers, copy=True)
 
     def _get_action(self):
@@ -685,19 +684,21 @@ class GraspSkill(BaseSkill):
 
     def _get_aff_centers(self):
         info = self._get_info()
-        # aff_centers = info.get('grasp_pos', [])
-        aff_centers = []
-        for obj_id in range(len(self._env.env.pnp_objs)):
-            try:
-                obj_size = self._env.env.pnp_objs[obj_id].size
-                if obj_size[0] > 0.04 and obj_size[1] > 0.04:
-                    continue
-            except:
-                pass
-            obj_pos = self._env.env.sim.data.body_xpos[self._env.env.pnp_obj_body_ids[obj_id]].copy()
-            aff_centers.append(obj_pos)
-        if aff_centers is None:
-            return None
+        if info is not None:
+            aff_centers = info.get('grasp_pos', [])
+        else:
+            aff_centers = []
+            for obj_id in range(len(self._env.env.pnp_objs)):
+                try:
+                    obj_size = self._env.env.pnp_objs[obj_id].size
+                    if obj_size[0] > 0.04 and obj_size[1] > 0.04:
+                        continue
+                except:
+                    pass
+                obj_pos = self._env.env.sim.data.body_xpos[self._env.env.pnp_obj_body_ids[obj_id]].copy()
+                aff_centers.append(obj_pos)
+            if aff_centers is None:
+                return None
         return np.array(aff_centers, copy=True)
 
     def _get_action(self):
@@ -901,8 +902,12 @@ class PlaceSkill(BaseSkill):
         return self._skill_is_success and self._state == 'PLACED'
 
     def _get_aff_centers(self):
-        return None
-        # info = self._get_info()
+        info = self._get_info()
+        if info is not None:
+            aff_centers = info.get('place_pos', [])
+            return np.array(aff_centers, copy=True)
+        else:
+            return None
         # aff_centers = info.get('reach_pos', [])
         # if aff_centers is None:
         #     return None
@@ -1108,20 +1113,16 @@ class PushSkill(BaseSkill):
         return self._state == 'PUSHED' and self._skill_is_success
 
     def _get_aff_centers(self):
-        # info = self._get_info()
-        # aff_centers = info.get('push_pos', [])
-        aff_centers = []
-        for obj_id in range(len(self._env.env.push_objs)):
-            # try:
-            #     obj_size = self._env.env.objs[obj_id].size
-            #     if obj_size[0] < 0.04 and obj_size[1] < 0.04:
-            #         continue
-            # except:
-            #     pass
-            obj_pos = self._env.env.sim.data.body_xpos[self._env.env.push_obj_body_ids[obj_id]].copy()
-            aff_centers.append(obj_pos)
-        if aff_centers is None:
-            return None
+        info = self._get_info()
+        if info is not None:
+            aff_centers = info.get('push_pos', [])
+        else:
+            aff_centers = []
+            for obj_id in range(len(self._env.env.push_objs)):
+                obj_pos = self._env.env.sim.data.body_xpos[self._env.env.push_obj_body_ids[obj_id]].copy()
+                aff_centers.append(obj_pos)
+            if aff_centers is None:
+                return None
         return np.array(aff_centers, copy=True)
 
     def _get_action(self):
