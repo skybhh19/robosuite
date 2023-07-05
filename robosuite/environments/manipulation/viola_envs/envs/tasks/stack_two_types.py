@@ -20,7 +20,7 @@ from robosuite.environments.manipulation.viola_envs.envs.utils import MultiRegio
 
 butter_dict = {
     "xrange": [[0.05, 0.10]],
-    "yrange": [[-0.10, 0.10]],        
+    "yrange": [[-0.08, -0.03]],
     "rotation": [-np.pi / 10., np.pi / 10.],    
     "z_offset": 0.01,
     "rotation_axis": "z"
@@ -28,7 +28,7 @@ butter_dict = {
 
 cream_cheese_dict = {
     "xrange": [[0.05, 0.10]],
-    "yrange": [[-0.10, 0.10]],
+    "yrange": [[0.03, 0.08]],
     "rotation": [-np.pi / 10., np.pi / 10.],
     "z_offset": 0.01,
     "rotation_axis": "z"    

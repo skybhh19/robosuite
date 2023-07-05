@@ -12,13 +12,13 @@ from robosuite.controllers.skills import (
     PlaceSkill,
 )
 
-PRIMITIVE_TO_ID = {
-    'reach': 0,
-    # 'place': 1,
-    'grasp': 1,
-    'push': 2,
-    'atomic': 3
-}
+# PRIMITIVE_TO_ID = {
+#     'reach': 0,
+#     # 'place': 1,
+#     'grasp': 1,
+#     'push': 2,
+#     'atomic': 3
+# }
 
 # PRIMITIVE_TO_ID = {
 #     'reach': 0,
@@ -28,22 +28,30 @@ PRIMITIVE_TO_ID = {
 #     'atomic': 4
 # }
 
+# PRIMITIVE_TO_ID = {
+#     'reach': 0,
+#     'place': 1,
+#     'grasp': 2,
+#     # 'push': 3,
+#     'atomic': 3
+# }
+
 DELTA_XYZ_SCALE = np.array([0.4, 0.4, 0.01])
 
-ID_TO_PRIMITIVE = [
-    'reach',
-    # 'place',
-    'grasp',
-    'push',
-    'atomic'
-   ]
+# ID_TO_PRIMITIVE = [
+#     'reach',
+#     'place',
+#     'grasp',
+#     # 'push',
+#     'atomic'
+#    ]
 
-NON_ATOMIC_PRIMITIVES = [
-    'reach',
-    # 'place',
-    'grasp',
-    'push'
-]
+# NON_ATOMIC_PRIMITIVES = [
+#     'reach',
+#     'place',
+#     'grasp',
+#     # 'push'
+# ]
 # GLOBAL_XYZ_BOUNDS = np.array([
 #                 [-0.32, -0.26, 0.80],
 #                 [0.20, 0.26, 1.0]
@@ -54,17 +62,18 @@ class SkillController:
 
     def __init__(self,
                  env,
+                 primitive_set=None,
                  controller_type=None,
                  image_obs_in_info=False,
                  aff_type='sparse',
                  render=False,
                  reach_use_gripper=False,
                  env_idx=None,
-                 output_mode=None,
-                 skill_names=None):
+                 output_mode=None):
 
         self._env = env
         self._env_idx = env_idx
+        self.primitive_set = primitive_set
         self.output_mode = output_mode
         if controller_type == 'OSC_POSE':
             _use_ori_params = True
@@ -138,7 +147,7 @@ class SkillController:
 
         self.name_to_skill = OrderedDict(
             atomic=self.atomic,
-            # place=self.place,
+            place=self.place,
             reach=self.reach,
             grasp=self.grasp,
             push=self.push
@@ -158,7 +167,7 @@ class SkillController:
         self.primitive_dim_info = {}
         if self.output_mode == 'concat':
             start_idx = 0
-            for _p_name in PRIMITIVE_TO_ID:
+            for _p_name in primitive_set:
                 _param_dim = self.name_to_skill[_p_name].get_param_dim()
                 self.primitive_dim_info[_p_name] = dict(
                     start_idx=start_idx,
@@ -167,7 +176,7 @@ class SkillController:
                 self.output_dim += _param_dim
                 start_idx += _param_dim
         elif self.output_mode == 'max':
-            for _p_name in PRIMITIVE_TO_ID:
+            for _p_name in primitive_set:
                 _param_dim = self.name_to_skill[_p_name].get_param_dim()
                 self.primitive_dim_info[_p_name] = dict(
                     start_idx=0,
