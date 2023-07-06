@@ -68,7 +68,7 @@ def collect_human_trajectory(env, device, arm, env_configuration, only_yaw):
         # If action is none, then this a reset so we should break
         if action is None:
             break
-
+        assert not (only_yaw and args.controller == 'OSC_POSITION_YAW')
         if only_yaw:
             action_copy = action.copy()
             action[3:5] = np.array([0, 0])
@@ -88,6 +88,9 @@ def collect_human_trajectory(env, device, arm, env_configuration, only_yaw):
                 assert np.linalg.norm(action[:3] - action_copy[:3]) < 1e-4
             except:
                 print(np.linalg.norm(action[:3] - action_copy[:3]))
+
+        if args.controller == 'OSC_POSITION_YAW':
+            action = np.concatenate([action[:3], action[5:]])
 
         # TODO: limit xyz bound
 
