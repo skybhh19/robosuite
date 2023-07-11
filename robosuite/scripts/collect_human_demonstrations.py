@@ -98,7 +98,13 @@ def collect_human_trajectory(env, device, arm, env_configuration, only_yaw):
         eef_pos = get_eef_pos(obs)
         # obj_pos = obs['obj_pos'].reshape(-1, 3)
         # print(env.objs[2].size - np.abs(eef_pos - obj_pos[2]))
-        # # print(eef_pos[2])
+        # print(env.nuts[0].name)
+        # print(env.sim.data.body_xpos[env.obj_body_id[env.nuts[0].name]])
+        # info = env._get_skill_info()
+        # print("grasp", eef_pos - info['grasp_pos'])
+        # print(T.quat2axisangle(T.convert_quat(env.sim.data.body_xquat[env.obj_body_id[env.nuts[0].name]], to="xyzw"))[2] / np.pi)
+        # print("reach", eef_pos - info['reach_pos'])
+        # print("place", eef_pos - info['place_pos'])
         # print(np.linalg.norm(env.robots[0].ee_force))
 
         for pos_i in range(3):

@@ -212,12 +212,12 @@ class NutAssembly(SingleArmEnv):
 
         self.eef_bounds = np.array([
             [-0.26, -0.01, 0.80],
-            [0.225, 0.28, 1.00]
+            [0.23, 0.29, 1.00]
         ])
 
         self.data_eef_bounds = np.array([
             [-0.24, -0., 0.80],
-            [0.22, 0.27, 1.00]
+            [0.23, 0.29, 1.0]
         ])
 
         super().__init__(
@@ -581,38 +581,6 @@ class NutAssembly(SingleArmEnv):
 
         return observables
 
-    def _get_skill_info(self):
-        nut = self.nuts[1]
-        nut_pos = np.array(self.sim.data.body_xpos[self.obj_body_id[nut.name]])
-        peg_pos = np.array(self.sim.data.body_xpos[self.peg2_body_id])
-        peg_pos[2] = 0.85
-        lift_pos = peg_pos.copy()
-        lift_pos[2] = 0.95
-
-        # info['src_pos'] = [nut_pos]
-        # info['lift_pos'] = [lift_pos]
-        # info['target_pos'] = [peg_pos]
-
-        pos_info = {}
-
-        pos_info['interact'] = [nut_pos, peg_pos, lift_pos]  # interaction positions
-        pos_info['obj'] = [nut_pos, peg_pos]  # object positions
-
-        pos_info['grasp'] = [nut_pos]  # grasp target positions
-        pos_info['push'] = []  # push target positions
-        pos_info['reach'] = [lift_pos]  # reach target positions
-
-        info = {}
-        for k in pos_info:
-            info[k + '_pos'] = pos_info[k]
-
-        info['grasped_obj'] = [
-            self._check_grasp(gripper=self.robots[0].gripper, object_geoms=[g for g in nut.contact_geoms])]
-
-        info['gripper_contact'] = self._has_gripper_contact
-
-        return info
-
     def _create_nut_sensors(self, nut_name, modality="object"):
         """
         Helper function to create sensors for a given nut. This is abstracted in a separate function call so that we
@@ -777,6 +745,40 @@ class NutAssemblySquare(NutAssembly):
         assert "single_object_mode" not in kwargs and "nut_type" not in kwargs, "invalid set of arguments"
         super().__init__(single_object_mode=2, nut_type="square", **kwargs)
 
+    def _get_skill_info(self):
+        nut = self.nuts[0]
+        nut_axis_angle = T.quat2axisangle(T.convert_quat(self.sim.data.body_xquat[self.obj_body_id[self.nuts[0].name]], to="xyzw"))[2]
+        offset_len = 0.06
+        offset_pos = np.array([offset_len * np.cos(nut_axis_angle), offset_len * np.sin(nut_axis_angle), 0.])
+        nut_pos = np.array(self.sim.data.body_xpos[self.obj_body_id[nut.name]]) + offset_pos
+        peg_pos = np.array(self.sim.data.body_xpos[self.peg1_body_id]) + offset_pos
+        peg_pos[2] = 0.85
+        lift_pos = peg_pos.copy()
+        lift_pos[2] = 0.95
+
+        # info['src_pos'] = [nut_pos]
+        # info['lift_pos'] = [lift_pos]
+        # info['target_pos'] = [peg_pos]
+
+        pos_info = {}
+
+        pos_info['interact'] = [nut_pos, peg_pos, lift_pos]  # interaction positions
+        pos_info['obj'] = [nut_pos, peg_pos]  # object positions
+
+        pos_info['grasp'] = [nut_pos]  # grasp target positions
+        pos_info['push'] = []  # push target positions
+        pos_info['reach'] = [lift_pos, peg_pos]  # reach target positions
+
+        info = {}
+        for k in pos_info:
+            info[k + '_pos'] = pos_info[k]
+
+        info['grasped_obj'] = [
+            self._check_grasp(gripper=self.robots[0].gripper, object_geoms=[g for g in nut.contact_geoms])]
+
+        info['gripper_contact'] = self._has_gripper_contact
+
+        return info
 
 class NutAssemblyRound(NutAssembly):
     """
