@@ -257,8 +257,9 @@ class AtomicSkill(BaseSkill):
         # return 7
         if self._config['controller_type'] == 'OSC_POSITION':
             return 4
-        elif self._config['controller_type'] == 'OSC_POSE':
+        elif self._config['controller_type'] in ['OSC_POSE', 'OSC_POSITION_YAW']:
             return 7
+        raise NotImplementedError
         # else:
         #     raise NotImplementedError
         # if self._config['use_ori_params']:
@@ -377,7 +378,9 @@ class GripperSkill(BaseSkill):
         super()._get_action()
         gripper_action = self._get_gripper_ac()
         if self._config['use_ori_params']:
-            return np.concatenate([[0, 0, 0, 0, 0, 0], gripper_action])
+            if self._config['controller_type'] == 'OSC_POSE':
+                return np.concatenate([[0, 0, 0, 0, 0, 0], gripper_action])
+            return np.concatenate([[0, 0, 0, 0], gripper_action])
         return np.concatenate([[0, 0, 0], gripper_action])
 
     def check_interesting_interaction(self):
@@ -535,7 +538,11 @@ class ReachSkill(BaseSkill):
                 target_quat = T.mat2quat(T.euler2mat(target_euler))
                 cur_quat = get_eef_quat(obs)
                 ori_action = get_axisangle_error(cur_quat, target_quat)
-            action = np.concatenate([pos_action, ori_action, gripper_action])
+
+            if self._config['controller_type'] == 'OSC_POSE':
+                action = np.concatenate([pos_action, ori_action, gripper_action])
+            else:
+                action = np.concatenate([pos_action, ori_action[2:], gripper_action])
         else:
             action = np.concatenate([pos_action, gripper_action])
 
@@ -717,7 +724,10 @@ class GraspSkill(BaseSkill):
                 target_quat = T.mat2quat(T.euler2mat(target_euler))
                 cur_quat = get_eef_quat(obs)
                 ori_action = get_axisangle_error(cur_quat, target_quat)
-            action = np.concatenate([pos_action, ori_action, gripper_action])
+            if self._config['controller_type'] == 'OSC_POSE':
+                action = np.concatenate([pos_action, ori_action, gripper_action])
+            else:
+                action = np.concatenate([pos_action, ori_action[2:], gripper_action])
         else:
             action = np.concatenate([pos_action, gripper_action])
 
@@ -929,7 +939,10 @@ class PlaceSkill(BaseSkill):
                 target_quat = T.mat2quat(T.euler2mat(target_euler))
                 cur_quat = get_eef_quat(obs)
                 ori_action = get_axisangle_error(cur_quat, target_quat)
-            action = np.concatenate([pos_action, ori_action, gripper_action])
+            if self._config['controller_type'] == 'OSC_POSE':
+                action = np.concatenate([pos_action, ori_action, gripper_action])
+            else:
+                action = np.concatenate([pos_action, ori_action[2:], gripper_action])
         else:
             action = np.concatenate([pos_action, gripper_action])
 
@@ -1147,7 +1160,10 @@ class PushSkill(BaseSkill):
                 target_quat = T.mat2quat(T.euler2mat(target_euler))
                 cur_quat = get_eef_quat(obs)
                 ori_action = get_axisangle_error(cur_quat, target_quat)
-            action = np.concatenate([pos_action, ori_action, gripper_action])
+            if self._config['controller_type'] == 'OSC_POSE':
+                action = np.concatenate([pos_action, ori_action, gripper_action])
+            else:
+                action = np.concatenate([pos_action, ori_action[2:], gripper_action])
         else:
             action = np.concatenate([pos_action, gripper_action])
         action = unscale_action(self._env, action)

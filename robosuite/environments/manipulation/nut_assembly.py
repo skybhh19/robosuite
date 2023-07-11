@@ -410,7 +410,8 @@ class NutAssembly(SingleArmEnv):
 
         # define nuts
         self.nuts = []
-        self.objs = self.nuts
+        self.pnp_objs = self.objs = self.nuts
+        self.push_objs = []
         nut_names = ("SquareNut", "RoundNut")
 
         # Create default (SequentialCompositeSampler) sampler if it has not already been specified

@@ -75,7 +75,7 @@ class SkillController:
         self._env_idx = env_idx
         self.primitive_set = primitive_set
         self.output_mode = output_mode
-        if controller_type == 'OSC_POSE':
+        if controller_type in ['OSC_POSE', 'OSC_POSITION_YAW']:
             _use_ori_params = True
         elif controller_type == 'OSC_POSITION':
             _use_ori_params = False
