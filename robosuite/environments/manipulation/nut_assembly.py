@@ -423,7 +423,7 @@ class NutAssembly(SingleArmEnv):
                         name=f"{nut_name}Sampler",
                         x_range=[-0.115, -0.11],
                         y_range=default_y_range,
-                        rotation=None,
+                        rotation=[2 * np.pi / 3, 4 * np.pi / 3],
                         rotation_axis="z",
                         ensure_object_boundary_in_range=False,
                         ensure_valid_placement=True,
@@ -756,7 +756,8 @@ class NutAssembly(SingleArmEnv):
         pos_info['grasp'] = nut_pos_list  # grasp target positions
         pos_info['push'] = []  # push target positions
         pos_info['reach'] = lift_pos_list + peg_pos_list  # reach target positions
-
+        pos_info['place'] = peg_pos_list
+        
         info = {}
         for k in pos_info:
             info[k + '_pos'] = pos_info[k]
