@@ -241,6 +241,12 @@ class BaseSkill:
         assert self.skill_done() or self._env_done
         return True
 
+    def _check_grasp(self, obj=None):
+        info = self._get_info()
+        if info is not None:
+            return info['grasped_obj']
+        return self._check_grasp(obj)
+
 class AtomicSkill(BaseSkill):
     def __init__(self,
                  use_ori_params,
@@ -397,7 +403,7 @@ class GripperSkill(BaseSkill):
 
     def _test_start_state(self):
         for obj in self._env.env.pnp_objs:
-            if self._env.env._check_grasp(gripper=self._env.env.robots[0].gripper, object_geoms=obj):
+            if self._check_grasp(obj):
                 return True
         return False
 
@@ -489,7 +495,7 @@ class ReachSkill(BaseSkill):
         super()._reset(params, norm)
         self.initial_grasped = False
         for obj in self._env.env.pnp_objs:
-            if self._env.env._check_grasp(gripper=self._env.env.robots[0].gripper, object_geoms=obj):
+            if self._check_grasp(obj):
                 self.initial_grasped = True
 
     def _get_reach_pos(self):
@@ -556,7 +562,7 @@ class ReachSkill(BaseSkill):
         super().check_interesting_interaction()
         end_grasped = False
         for obj in self._env.env.pnp_objs:
-            if self._env.env._check_grasp(gripper=self._env.env.robots[0].gripper, object_geoms=obj):
+            if self._check_grasp(obj):
                 end_grasped = True
         if (self.initial_grasped and (not end_grasped)) or ((not self.initial_grasped) and end_grasped):
             return False
@@ -743,7 +749,7 @@ class GraspSkill(BaseSkill):
                     continue
             except:
                 pass
-            if self._env.env._check_grasp(gripper=self._env.env.robots[0].gripper, object_geoms=obj):
+            if self._check_grasp(obj):
                 # end_obs = self._env.get_observation()
                 # eef_pos = get_eef_pos(end_obs)
                 # if np.all(np.abs(eef_pos - self._env.env.sim.data.body_xpos[self._env.env.obj_body_ids[obj_id]]) < obj_size):
@@ -754,7 +760,7 @@ class GraspSkill(BaseSkill):
         if len(self._env.env.pnp_objs) == 0:
             return False
         for obj in self._env.env.pnp_objs:
-            if self._env.env._check_grasp(gripper=self._env.env.robots[0].gripper, object_geoms=obj):
+            if self._check_grasp(obj):
                 return False
         return True
 
@@ -835,7 +841,7 @@ class PlaceSkill(BaseSkill):
             grasped_flag = False
             for obj_id in range(len(self._env.env.pnp_objs)):
                 obj = self._env.env.pnp_objs[obj_id]
-                if self._env.env._check_grasp(gripper=self._env.env.robots[0].gripper, object_geoms=obj):
+                if self._check_grasp(obj):
                     grasped_flag = True
                     break
             if not grasped_flag:
@@ -846,7 +852,7 @@ class PlaceSkill(BaseSkill):
             grasped_flag = False
             for obj_id in range(len(self._env.env.pnp_objs)):
                 obj = self._env.env.pnp_objs[obj_id]
-                if self._env.env._check_grasp(gripper=self._env.env.robots[0].gripper, object_geoms=obj):
+                if self._check_grasp(obj):
                     grasped_flag = True
                     break
             if not grasped_flag:
@@ -857,7 +863,7 @@ class PlaceSkill(BaseSkill):
             grasped_flag = False
             for obj_id in range(len(self._env.env.pnp_objs)):
                 obj = self._env.env.pnp_objs[obj_id]
-                if self._env.env._check_grasp(gripper=self._env.env.robots[0].gripper, object_geoms=obj):
+                if self._check_grasp(obj):
                     grasped_flag = True
                     break
             # if not grasped_flag:
@@ -954,7 +960,7 @@ class PlaceSkill(BaseSkill):
         end_obs = self._env.get_observation()
         eef_pos = get_eef_pos(end_obs)
         for obj in self._env.env.pnp_objs:
-            if self._env.env._check_grasp(gripper=self._env.env.robots[0].gripper, object_geoms=obj):
+            if self._check_grasp(obj):
                 return False
         if not self._skill_is_interesting:
             return False
@@ -965,7 +971,7 @@ class PlaceSkill(BaseSkill):
 
     def _test_start_state(self):
         for obj in self._env.env.pnp_objs:
-            if self._env.env._check_grasp(gripper=self._env.env.robots[0].gripper, object_geoms=obj):
+            if self._check_grasp(obj):
                 return True
         return False
 
@@ -1190,7 +1196,7 @@ class PushSkill(BaseSkill):
         if len(self._env.env.push_objs) == 0:
             return False
         for obj in self._env.env.pnp_objs:
-            if self._env.env._check_grasp(gripper=self._env.env.robots[0].gripper, object_geoms=obj):
+            if self._check_grasp(obj):
                 return False
         return True
 

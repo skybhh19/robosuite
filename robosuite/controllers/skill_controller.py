@@ -152,6 +152,7 @@ class SkillController:
             grasp=self.grasp,
             push=self.push
         )
+
         # if 'atomic' in skill_names:
         #     self.name_to_skill['atomic'] = self.atomic
         # if 'place' in skill_names:
@@ -183,6 +184,8 @@ class SkillController:
                     param_dim=_param_dim
                 )
                 self.output_dim = max(self.output_dim, _param_dim)
+        else:
+            raise NotImplementedError
 
     def get_skill(self, p_name):
         return self.name_to_skill[p_name]
