@@ -736,7 +736,12 @@ class NutAssembly(SingleArmEnv):
             offset_len = 0.065
             offset_pos = np.array([offset_len * np.cos(nut_axis_angle), offset_len * np.sin(nut_axis_angle), 0.])
             nut_pos = np.array(self.sim.data.body_xpos[self.obj_body_id[nut.name]]) + offset_pos
-            peg_pos = np.array(self.sim.data.body_xpos[self.peg1_body_id]) + offset_pos
+            if nut.name == 'SquareNut':
+                peg_pos = np.array(self.sim.data.body_xpos[self.peg1_body_id]) + offset_pos
+            elif nut.name == 'RoundNut':
+                peg_pos = np.array(self.sim.data.body_xpos[self.peg2_body_id]) + offset_pos
+            else:
+                raise NotImplementedError
             peg_pos[2] = 0.85
             lift_pos = peg_pos.copy()
             lift_pos[2] = 0.95

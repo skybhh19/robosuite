@@ -116,10 +116,12 @@ def collect_human_trajectory(env, device, arm, env_configuration, only_yaw):
         # Run environment step
         obs, _, _, _ = env.step(action)
         step_cnt += 1
-        euler_orn = T.mat2euler(T.quat2mat(obs['robot0_eef_quat']))
+        # euler_orn = T.mat2euler(T.quat2mat(obs['robot0_eef_quat']))
         # eef_pos = get_eef_pos(obs)
         # skill_info = env._get_skill_info()
-        # grasp_pos = skill_info['grasp_pos'][0]
+        # grasp_pos = skill_info['reach_pos']
+        # print(grasp_pos)
+        # input()
         # print(np.linalg.norm(eef_pos - grasp_pos))
         # for i in range(3):
         #     if euler_orn[i] > np.pi:
