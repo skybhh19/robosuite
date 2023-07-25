@@ -733,7 +733,7 @@ class NutAssembly(SingleArmEnv):
         lift_pos_list = []
         for nut in nuts:
             nut_axis_angle = T.quat2axisangle(T.convert_quat(self.sim.data.body_xquat[self.obj_body_id[nut.name]], to="xyzw"))[2]
-            offset_len = 0.055
+            offset_len = 0.065
             offset_pos = np.array([offset_len * np.cos(nut_axis_angle), offset_len * np.sin(nut_axis_angle), 0.])
             nut_pos = np.array(self.sim.data.body_xpos[self.obj_body_id[nut.name]]) + offset_pos
             peg_pos = np.array(self.sim.data.body_xpos[self.peg1_body_id]) + offset_pos
