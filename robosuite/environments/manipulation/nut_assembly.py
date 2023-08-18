@@ -735,9 +735,9 @@ class NutAssembly(SingleArmEnv):
         nut_pos_list = []
         peg_pos_list = []
         lift_pos_list = []
+        offset_len = 0.065
         for nut in nuts:
             nut_axis_angle = T.quat2axisangle(T.convert_quat(self.sim.data.body_xquat[self.obj_body_id[nut.name]], to="xyzw"))[2]
-            offset_len = 0.065
             offset_pos = np.array([offset_len * np.cos(nut_axis_angle), offset_len * np.sin(nut_axis_angle), 0.])
             nut_pos = np.array(self.sim.data.body_xpos[self.obj_body_id[nut.name]]) + offset_pos
             if nut.name == 'SquareNut':
@@ -772,9 +772,12 @@ class NutAssembly(SingleArmEnv):
             info[k + '_pos'] = pos_info[k]
 
         info['grasped_obj'] = False
-        for nut in nuts:
+        for nut_id in range(len(nuts)):
+            nut = nuts[nut_id]
             if self._check_grasp(gripper=self.robots[0].gripper, object_geoms=[g for g in nut.contact_geoms]):
-                info['grasped_obj'] = True
+                eef_pos = np.array(self.robots[0].sim.data.site_xpos[self.robots[0].eef_site_id])
+                if np.linalg.norm(eef_pos - nut_pos_list[nut_id]) < 0.015:
+                    info['grasped_obj'] = True
 
         info['gripper_contact'] = self._has_gripper_contact
 
