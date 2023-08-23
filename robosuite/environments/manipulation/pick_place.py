@@ -815,6 +815,9 @@ class PickPlaceCan(PickPlace):
     def __init__(self, **kwargs):
         assert "single_object_mode" not in kwargs and "object_type" not in kwargs, "invalid set of arguments"
 
-        self.eef_bounds = np.array([[-0.08, -0.43, 0.86],
+        self.eef_bounds = np.array([[-0.08, -0.44, 0.86],
                                     [ 0.30, 0.42, 1.23]])
+
+        self.data_eef_bounds = np.array([[-0.08, -0.44, 0.86],
+                                    [0.30, 0.42, 1.23]])
         super().__init__(single_object_mode=2, object_type="can", **kwargs)
