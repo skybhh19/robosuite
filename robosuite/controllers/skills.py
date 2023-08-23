@@ -244,8 +244,8 @@ class BaseSkill:
     def _check_grasp(self, obj=None):
         info = self._get_info()
         if info is not None:
-            return info['grasped_obj']
-        return self._check_grasp(obj)
+            return np.any(info['grasped_obj'])
+        return self._env._check_grasp(gripper=self._env.robots[0].gripper, object_geoms=obj)
 
 class AtomicSkill(BaseSkill):
     def __init__(self,

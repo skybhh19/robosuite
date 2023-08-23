@@ -906,7 +906,7 @@ class NutAssemblyRound(NutAssembly):
     def _get_skill_info(self):
         nut = self.nuts[1]
         nut_axis_angle = T.quat2axisangle(T.convert_quat(self.sim.data.body_xquat[self.obj_body_id[nut.name]], to="xyzw"))[2]
-        offset_len = 0.06
+        offset_len = 0.065
         offset_pos = np.array([offset_len * np.cos(nut_axis_angle), offset_len * np.sin(nut_axis_angle), 0.])
         nut_pos = np.array(self.sim.data.body_xpos[self.obj_body_id[nut.name]]) + offset_pos
         peg_pos = np.array(self.sim.data.body_xpos[self.peg2_body_id]) + offset_pos
@@ -926,6 +926,7 @@ class NutAssemblyRound(NutAssembly):
         pos_info['grasp'] = [nut_pos]  # grasp target positions
         pos_info['push'] = []  # push target positions
         pos_info['reach'] = [lift_pos, peg_pos]  # reach target positions
+        pos_info['place'] = [peg_pos]
 
         info = {}
         for k in pos_info:
