@@ -938,6 +938,31 @@ class NutAssemblyRound(NutAssembly):
 
         return info
 
+
+class NutAssemblyRoundSmallInit(NutAssemblyRound):
+    """
+    Easier version of task - place one round nut into its peg.
+    """
+
+    def _initialize_objects(self, nut_names):
+        # Create default (SequentialCompositeSampler) sampler if it has not already been specified
+        if self.placement_initializer is None:
+            self.placement_initializer = SequentialCompositeSampler(name="ObjectSampler")
+            for nut_name, default_y_range in zip(nut_names, ([0.11, 0.225], [-0.225, -0.11])):
+                self.placement_initializer.append_sampler(
+                    sampler=UniformRandomSampler(
+                        name=f"{nut_name}Sampler",
+                        x_range=[-0.115, -0.11],
+                        y_range=default_y_range,
+                        rotation=[np.pi / 2, np.pi / 2 * 3],
+                        rotation_axis="z",
+                        ensure_object_boundary_in_range=False,
+                        ensure_valid_placement=True,
+                        reference_pos=self.table_offset,
+                        z_offset=0.02,
+                    )
+                )
+
 class NutAssemblySquareTmp(NutAssembly):
     """
     Easier version of task - place one square nut into its peg.
