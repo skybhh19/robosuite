@@ -194,6 +194,7 @@ class PickPlace(SingleArmEnv):
         renderer="mujoco",
         renderer_config=None,
     ):
+        self.table_offset = np.array((0, 0, table_full_size[-1]))
         # task settings
         self.single_object_mode = single_object_mode
         self.object_to_id = {"milk": 0, "bread": 1, "cereal": 2, "can": 3}
@@ -488,7 +489,8 @@ class PickPlace(SingleArmEnv):
         # store some arena attributes
         self.bin_size = mujoco_arena.table_full_size
 
-        self.objects = []
+        self.pnp_objs = self.objects = []
+        self.push_objs = []
         self.visual_objects = []
         for vis_obj_cls, obj_name in zip(
             (MilkVisualObject, BreadVisualObject, CerealVisualObject, CanVisualObject),
@@ -765,6 +767,10 @@ class PickPlace(SingleArmEnv):
                 target_type="body",
             )
 
+    @property
+    def _has_gripper_contact(self):
+        return np.linalg.norm(self.robots[0].ee_force) > 20
+
 
 class PickPlaceSingle(PickPlace):
     """
@@ -821,3 +827,27 @@ class PickPlaceCan(PickPlace):
         self.data_eef_bounds = np.array([[-0.08, -0.44, 0.86],
                                     [0.30, 0.42, 1.23]])
         super().__init__(single_object_mode=2, object_type="can", **kwargs)
+
+    def _get_skill_info(self):
+        pnp_obj_pos_list = [self.sim.data.body_xpos[[self.obj_body_id[active_obj.name]]] + [0, 0, 0.01] for active_obj in self.pnp_objs]
+
+        pos_info = {}
+
+        # pos_info['interact'] = [nut_pos, peg_pos, lift_pos]  # interaction positions
+        # pos_info['obj'] = [nut_pos, peg_pos]  # object positions
+
+        pos_info['grasp'] = pnp_obj_pos_list  # grasp target positions
+        pos_info['push'] = []  # push target positions
+        pos_info['reach'] = None
+        pos_info['place'] = None
+
+        info = {}
+        for k in pos_info:
+            info[k + '_pos'] = pos_info[k]
+
+        info['grasped_obj'] = [
+            self._check_grasp(gripper=self.robots[0].gripper, object_geoms=[g for g in obj.contact_geoms]) for obj in self.pnp_objs]
+
+        info['gripper_contact'] = self._has_gripper_contact
+
+        return info

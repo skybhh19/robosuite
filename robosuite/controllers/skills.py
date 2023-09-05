@@ -525,7 +525,9 @@ class ReachSkill(BaseSkill):
         info = self._get_info()
         if info is None:
             return None
-        aff_centers = info.get('reach_pos', [])
+        aff_centers = info.get('reach_pos', None)
+        if aff_centers is None:
+            return None
         return np.array(aff_centers, copy=True)
 
     def _get_action(self):
@@ -698,7 +700,7 @@ class GraspSkill(BaseSkill):
     def _get_aff_centers(self):
         info = self._get_info()
         if info is not None:
-            aff_centers = info.get('grasp_pos', [])
+            aff_centers = info.get('grasp_pos', None)
         else:
             aff_centers = []
             for obj_id in range(len(self._env.env.pnp_objs)):
@@ -710,8 +712,8 @@ class GraspSkill(BaseSkill):
                     pass
                 obj_pos = self._env.env.sim.data.body_xpos[self._env.env.pnp_obj_body_ids[obj_id]].copy()
                 aff_centers.append(obj_pos)
-            if aff_centers is None:
-                return None
+        if aff_centers is None:
+            return None
         return np.array(aff_centers, copy=True)
 
     def _get_action(self):
@@ -920,7 +922,9 @@ class PlaceSkill(BaseSkill):
     def _get_aff_centers(self):
         info = self._get_info()
         if info is not None:
-            aff_centers = info.get('place_pos', [])
+            aff_centers = info.get('place_pos', None)
+            if aff_centers is None:
+                return None
             return np.array(aff_centers, copy=True)
         else:
             return None
@@ -1134,14 +1138,14 @@ class PushSkill(BaseSkill):
     def _get_aff_centers(self):
         info = self._get_info()
         if info is not None:
-            aff_centers = info.get('push_pos', [])
+            aff_centers = info.get('push_pos', None)
         else:
             aff_centers = []
             for obj_id in range(len(self._env.env.push_objs)):
                 obj_pos = self._env.env.sim.data.body_xpos[self._env.env.push_obj_body_ids[obj_id]].copy()
                 aff_centers.append(obj_pos)
-            if aff_centers is None:
-                return None
+        if aff_centers is None:
+            return None
         return np.array(aff_centers, copy=True)
 
     def _get_action(self):
