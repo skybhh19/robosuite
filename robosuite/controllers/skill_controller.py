@@ -107,6 +107,11 @@ class SkillController:
             controller_type=controller_type
         )
 
+        try:
+            base_config["lift_height"] = self._env.lift_height
+        except:
+            pass
+
         self.atomic = AtomicSkill(
             max_ac_calls=1,
             **base_config

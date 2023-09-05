@@ -222,6 +222,14 @@ class PickPlace(SingleArmEnv):
         # whether to use ground-truth object states
         self.use_object_obs = use_object_obs
 
+        self.eef_bounds = np.array([[-0.08, -0.44, 0.82],
+                                    [0.30, 0.42, 1.08]])
+
+        self.data_eef_bounds = np.array([[-0.08, -0.44, 0.82],
+                                         [0.30, 0.42, 1.08]])
+
+        self.lift_height = 1.05
+
         super().__init__(
             robots=robots,
             env_configuration=env_configuration,
@@ -770,6 +778,42 @@ class PickPlace(SingleArmEnv):
     @property
     def _has_gripper_contact(self):
         return np.linalg.norm(self.robots[0].ee_force) > 20
+
+    def _get_skill_info(self):
+        pnp_obj_pos_list = []
+        for obj in self.pnp_objs:
+            print(obj.name)
+            if obj.name == "Milk":
+                pnp_obj_pos_list.append(self.sim.data.body_xpos[[self.obj_body_id[obj.name]]] + [0, 0, 0.055])
+            elif obj.name == "Bread":
+                pnp_obj_pos_list.append(self.sim.data.body_xpos[[self.obj_body_id[obj.name]]] + [0, 0, 0])
+            elif obj.name == 'Can':
+                pnp_obj_pos_list.append(self.sim.data.body_xpos[[self.obj_body_id[obj.name]]] + [0, 0, 0.01])
+            elif obj.name == 'Cereal':
+                pnp_obj_pos_list.append(self.sim.data.body_xpos[[self.obj_body_id[obj.name]]] + [0, 0, 0.05])
+            else:
+                raise NotImplementedError
+
+        pos_info = {}
+
+        # pos_info['interact'] = [nut_pos, peg_pos, lift_pos]  # interaction positions
+        # pos_info['obj'] = [nut_pos, peg_pos]  # object positions
+
+        pos_info['grasp'] = pnp_obj_pos_list  # grasp target positions
+        pos_info['push'] = []  # push target positions
+        pos_info['reach'] = None
+        pos_info['place'] = None
+
+        info = {}
+        for k in pos_info:
+            info[k + '_pos'] = pos_info[k]
+
+        info['grasped_obj'] = [
+            self._check_grasp(gripper=self.robots[0].gripper, object_geoms=[g for g in obj.contact_geoms]) for obj in self.pnp_objs]
+
+        info['gripper_contact'] = self._has_gripper_contact
+
+        return info
 
 
 class PickPlaceSingle(PickPlace):
