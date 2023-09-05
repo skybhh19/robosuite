@@ -787,12 +787,26 @@ class PickPlace(SingleArmEnv):
                 pnp_obj_pos_list.append(self.sim.data.body_xpos[[self.obj_body_id[obj.name]]] + [0, 0, 0.055])
             elif obj.name == "Bread":
                 pnp_obj_pos_list.append(self.sim.data.body_xpos[[self.obj_body_id[obj.name]]] + [0, 0, 0])
-            elif obj.name == 'Can':
-                pnp_obj_pos_list.append(self.sim.data.body_xpos[[self.obj_body_id[obj.name]]] + [0, 0, 0.01])
             elif obj.name == 'Cereal':
                 pnp_obj_pos_list.append(self.sim.data.body_xpos[[self.obj_body_id[obj.name]]] + [0, 0, 0.05])
+            elif obj.name == 'Can':
+                pnp_obj_pos_list.append(self.sim.data.body_xpos[[self.obj_body_id[obj.name]]] + [0, 0, 0.01])
             else:
                 raise NotImplementedError
+
+        place_pos_list = []
+        for bin_id in range(4):
+            bin_x = self.bin2_pos[0]
+            bin_y = self.bin2_pos[1]
+            if bin_id == 0 or bin_id == 2:
+                bin_x -= self.bin_size[0] / 4
+            else:
+                bin_x += self.bin_size[0] / 4
+            if bin_id < 2:
+                bin_y -= self.bin_size[1] / 4
+            else:
+                bin_y += self.bin_size[1] / 4
+            place_pos_list.append(np.array([bin_x, bin_y, 0.98]))
 
         pos_info = {}
 
@@ -802,7 +816,7 @@ class PickPlace(SingleArmEnv):
         pos_info['grasp'] = pnp_obj_pos_list  # grasp target positions
         pos_info['push'] = []  # push target positions
         pos_info['reach'] = None
-        pos_info['place'] = None
+        pos_info['place'] = place_pos_list
 
         info = {}
         for k in pos_info:
