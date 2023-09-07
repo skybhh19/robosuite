@@ -849,6 +849,32 @@ class PickPlaceMilk(PickPlace):
         assert "single_object_mode" not in kwargs and "object_type" not in kwargs, "invalid set of arguments"
         super().__init__(single_object_mode=2, object_type="milk", **kwargs)
 
+    def _get_skill_info(self):
+        pnp_obj_pos_list = [self.sim.data.body_xpos[[self.obj_body_id[active_obj.name]]] + [0, 0, 0.055] for active_obj in self.pnp_objs]
+
+        pos_info = {}
+
+        # pos_info['interact'] = [nut_pos, peg_pos, lift_pos]  # interaction positions
+        # pos_info['obj'] = [nut_pos, peg_pos]  # object positions
+
+        place_pos_list = [np.array([self.bin2_pos[0] - self.bin_size[0] / 4, self.bin2_pos[1] - self.bin_size[1] / 4, 0.98])]
+
+        pos_info['grasp'] = pnp_obj_pos_list  # grasp target positions
+        pos_info['push'] = []  # push target positions
+        pos_info['reach'] = None
+        pos_info['place'] = place_pos_list
+
+        info = {}
+        for k in pos_info:
+            info[k + '_pos'] = pos_info[k]
+
+        info['grasped_obj'] = [
+            self._check_grasp(gripper=self.robots[0].gripper, object_geoms=[g for g in obj.contact_geoms]) for obj in self.pnp_objs]
+
+        info['gripper_contact'] = self._has_gripper_contact
+
+        return info
+
 
 class PickPlaceBread(PickPlace):
     """
