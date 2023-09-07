@@ -782,7 +782,6 @@ class PickPlace(SingleArmEnv):
     def _get_skill_info(self):
         pnp_obj_pos_list = []
         for obj in self.pnp_objs:
-            print(obj.name)
             if obj.name == "Milk":
                 pnp_obj_pos_list.append(self.sim.data.body_xpos[[self.obj_body_id[obj.name]]] + [0, 0, 0.055])
             elif obj.name == "Bread":
