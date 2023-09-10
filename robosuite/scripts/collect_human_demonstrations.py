@@ -101,7 +101,7 @@ def collect_human_trajectory(env, device, arm, env_configuration, only_yaw):
         # print(env.nuts[0].name)
         # print(env.sim.data.body_xpos[env.obj_body_id[env.nuts[0].name]])
         info = env._get_skill_info()
-        print("grasp", eef_pos - info['place_pos'][0])
+        # print("grasp", eef_pos - info['push_pos'][1 ])
         # print(T.quat2axisangle(T.convert_quat(env.sim.data.body_xquat[env.obj_body_id[env.nuts[0].name]], to="xyzw"))[2] / np.pi)
         # print("reach", eef_pos - info['reach_pos'])
         # print("place", eef_pos - info['place_pos'])
@@ -118,7 +118,7 @@ def collect_human_trajectory(env, device, arm, env_configuration, only_yaw):
         step_cnt += 1
         # euler_orn = T.mat2euler(T.quat2mat(obs['robot0_eef_quat']))
         # eef_pos = get_eef_pos(obs)
-        # skill_info = env._get_skill_info()
+        # # skill_info = env._get_skill_info()
         # grasp_pos = skill_info['reach_pos']
         # print(grasp_pos)
         # input()

@@ -531,7 +531,11 @@ class CleanUpMedium(SingleArmEnv):
         pos_info['grasp'] = pnp_obj_pos_list  # grasp target positions
         pos_info['push'] = push_obj_pos_list  # push target positions
         pos_info['reach'] = None
-        pos_info['place'] = [np.array(self.sim.data.body_xpos[self.bins_body_id[0]]), np.array(self.sim.data.body_xpos[self.bins_body_id[1]])]
+        pos_info['place'] = []
+        for bin_id in range(2):
+            _place_pos = [0., 0., 0.95]
+            _place_pos[:2] = np.array(self.sim.data.body_xpos[self.bins_body_id[bin_id]])[:2]
+            pos_info['place'].append(_place_pos)
 
         info = {}
         for k in pos_info:
