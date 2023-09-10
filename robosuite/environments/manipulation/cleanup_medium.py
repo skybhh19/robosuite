@@ -198,6 +198,10 @@ class CleanUpMedium(SingleArmEnv):
 	    num_objs=3,
         table_class_name=None,
     ):
+        self.num_pnp_objs = 2
+        self.num_push_objs = 1
+        assert self.num_pnp_objs + self.num_push_objs == num_objs
+
         # settings for table top
         self.table_full_size = table_full_size
         self.table_friction = table_friction
@@ -331,11 +335,19 @@ class CleanUpMedium(SingleArmEnv):
 
         self.table_body_id = self.sim.model.body_name2id("table")
 
-        self.pnp_obj_body_ids = self.push_obj_body_ids = self.obj_body_ids = []
+        self.pnp_obj_body_ids, self.push_obj_body_ids, self.obj_body_ids = [], [], []
         for i in range(self.num_objs):
             obj = self.objs[i]
             id = self.sim.model.body_name2id(obj.root_body)
             self.obj_body_ids.append(id)
+
+        for pnp_obj in self.pnp_objs:
+            id = self.sim.model.body_name2id(pnp_obj.root_body)
+            self.pnp_obj_body_ids.append(id)
+
+        for push_obj in self.push_objs:
+            id = self.sim.model.body_name2id(push_obj.root_body)
+            self.push_obj_body_ids.append(id)
 
         self.bins_body_id = [self.sim.model.body_name2id("bin0"), self.sim.model.body_name2id("bin1")]
 
@@ -481,24 +493,6 @@ class CleanUpMedium(SingleArmEnv):
             return False
         return True
 
-    def _get_skill_info(self):
-        return None
-        # pos_info = dict(
-        #     grasp=[],
-        #     push=[],
-        #     reach=[],
-        # )
-        #
-        # obj_positions = self.obj_positions
-        #
-        # # pos_info['obj_pos'] += obj_positions
-        #
-        # info = {}
-        # for k in pos_info:
-        #     info[k + '_pos'] = pos_info[k]
-        #
-        # return info
-
     def _get_env_info(self, action):
         env_info = {}
         # env_info['success_pnp'] = self._check_success_pnp()
@@ -527,6 +521,28 @@ class CleanUpMedium(SingleArmEnv):
     @property
     def _has_gripper_contact(self):
         return np.linalg.norm(self.robots[0].ee_force) > 20
+
+    def _get_skill_info(self):
+        pnp_obj_pos_list = [self.sim.data.body_xpos[self.pnp_obj_body_ids[i]].copy() for i in range(self.num_pnp_objs)]
+        push_obj_pos_list = [self.sim.data.body_xpos[self.push_obj_body_ids[i]].copy() for i in range(self.num_push_objs)]
+
+        pos_info = {}
+
+        pos_info['grasp'] = pnp_obj_pos_list  # grasp target positions
+        pos_info['push'] = push_obj_pos_list  # push target positions
+        pos_info['reach'] = None
+        pos_info['place'] = [np.array(self.sim.data.body_xpos[self.bins_body_id[0]]), np.array(self.sim.data.body_xpos[self.bins_body_id[1]])]
+
+        info = {}
+        for k in pos_info:
+            info[k + '_pos'] = pos_info[k]
+
+        info['grasped_obj'] = [
+            self._check_grasp(gripper=self.robots[0].gripper, object_geoms=obj) for obj in self.objs]
+
+        info['gripper_contact'] = self._has_gripper_contact
+
+        return info
 
 class CleanUpMediumSmallInit(CleanUpMedium):
 
@@ -563,7 +579,7 @@ class CleanUpMediumSmallInit(CleanUpMedium):
             np.array([0.0350, 0.0425, 0.02]) * 1.2
         ]
         assert len(obj_texture_lst) == len(obj_size_list) == len(obj_material_list) == MAX_OBJ_NUMS
-        self.pnp_objs = self.push_objs = self.objs = []
+        self.pnp_objs, self.push_objs, self.objs = [], [], []
         for i in self.objs_idx:
             if self.num_objs > 1:
                 color = 0.25 + 0.75 * i / (self.num_objs - 1)
@@ -579,6 +595,10 @@ class CleanUpMediumSmallInit(CleanUpMedium):
                 # solimp=[0.998, 0.998, 0.001],
             )
             self.objs.append(obj)
+            if i < self.num_pnp_objs:
+                self.pnp_objs.append(obj)
+            else:
+                self.push_objs.append(obj)
 
     def _get_placement_initializer(self):
         self.placement_initializer = SequentialCompositeSampler(name="ObjectSampler")

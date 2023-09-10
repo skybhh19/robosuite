@@ -108,7 +108,7 @@ class SkillController:
         )
 
         try:
-            base_config["lift_height"] = self._env.lift_height
+            base_config["lift_height"] = self._env.env.lift_height
         except:
             pass
 

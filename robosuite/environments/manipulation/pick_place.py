@@ -850,7 +850,7 @@ class PickPlaceMilk(PickPlace):
         super().__init__(single_object_mode=2, object_type="milk", **kwargs)
 
     def _get_skill_info(self):
-        pnp_obj_pos_list = [self.sim.data.body_xpos[[self.obj_body_id[active_obj.name]]] + [0, 0, 0.055] for active_obj in self.pnp_objs]
+        pnp_obj_pos_list = [self.sim.data.body_xpos[[self.obj_body_id[active_obj.name]]] + [0, 0, 0.045] for active_obj in self.pnp_objs]
 
         pos_info = {}
 

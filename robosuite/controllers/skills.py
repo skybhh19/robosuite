@@ -245,7 +245,7 @@ class BaseSkill:
         info = self._get_info()
         if info is not None:
             return np.any(info['grasped_obj'])
-        return self._env._check_grasp(gripper=self._env.robots[0].gripper, object_geoms=obj)
+        return self._env.env._check_grasp(gripper=self._env.env.robots[0].gripper, object_geoms=obj)
 
 class AtomicSkill(BaseSkill):
     def __init__(self,
@@ -900,8 +900,8 @@ class PlaceSkill(BaseSkill):
     def _get_ori_ac(self):
         self._check_params_dim()
         assert self._config['use_ori_params']
-        # if self._state == 'INIT':
-        #     return None
+        if self._state == 'INIT':
+            return None
         param_y = self._params[3:4].copy()
         ori_y = self._get_unnormalized_params(param_y, self._config['yaw_bounds'])
         return ori_y
@@ -939,6 +939,8 @@ class PlaceSkill(BaseSkill):
         cur_pos = get_eef_pos(obs)
         pos = self._get_pos_ac()
         pos_action = pos - cur_pos
+        if self._num_ac_calls < 4:
+            pos_action *= 0.
         gripper_action = self._get_gripper_ac()
         if self._config['use_ori_params']:
             target_y = self._get_ori_ac()
