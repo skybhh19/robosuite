@@ -12,50 +12,9 @@ from robosuite.controllers.skills import (
     PlaceSkill,
 )
 
-# PRIMITIVE_TO_ID = {
-#     'reach': 0,
-#     # 'place': 1,
-#     'grasp': 1,
-#     'push': 2,
-#     'atomic': 3
-# }
 
-# PRIMITIVE_TO_ID = {
-#     'reach': 0,
-#     'place': 1,
-#     'grasp': 2,
-#     'push': 3,
-#     'atomic': 4
-# }
-
-# PRIMITIVE_TO_ID = {
-#     'reach': 0,
-#     'place': 1,
-#     'grasp': 2,
-#     # 'push': 3,
-#     'atomic': 3
-# }
 
 DELTA_XYZ_SCALE = np.array([0.4, 0.4, 0.01])
-
-# ID_TO_PRIMITIVE = [
-#     'reach',
-#     'place',
-#     'grasp',
-#     # 'push',
-#     'atomic'
-#    ]
-
-# NON_ATOMIC_PRIMITIVES = [
-#     'reach',
-#     'place',
-#     'grasp',
-#     # 'push'
-# ]
-# GLOBAL_XYZ_BOUNDS = np.array([
-#                 [-0.32, -0.26, 0.80],
-#                 [0.20, 0.26, 1.0]
-#             ])
 
 
 class SkillController:
@@ -117,11 +76,11 @@ class SkillController:
             **base_config
         )
 
-        # self.gripper_release = GripperSkill(
-        #     max_ac_calls=10,
-        #     skill_type='open',
-        #     **base_config
-        # )
+        self.gripper_release = GripperSkill(
+            max_ac_calls=10,
+            skill_type='open',
+            **base_config
+        )
 
         self.place = PlaceSkill(
             max_ac_calls=80,
@@ -150,24 +109,21 @@ class SkillController:
             **base_config
         )
 
-        self.name_to_skill = OrderedDict(
-            atomic=self.atomic,
-            place=self.place,
-            reach=self.reach,
-            grasp=self.grasp,
-            push=self.push
-        )
+        self.name_to_skill = OrderedDict()
 
-        # if 'atomic' in skill_names:
-        #     self.name_to_skill['atomic'] = self.atomic
-        # if 'place' in skill_names:
-        #     self.name_to_skill['place'] = self.atomic
-        # if 'reach' in skill_names:
-        #     self.name_to_skill['reach'] = self.atomic
-        # if 'grasp' in skill_names:
-        #     self.name_to_skill['grasp'] = self.atomic
-        # if 'push' in skill_names:
-        #     self.name_to_skill['push'] = self.atomic
+        if 'atomic' in primitive_set:
+            self.name_to_skill['atomic'] = self.atomic
+        if 'place' in primitive_set:
+            self.name_to_skill['place'] = self.place
+        if 'reach' in primitive_set:
+            self.name_to_skill['reach'] = self.reach
+        if 'grasp' in primitive_set:
+            self.name_to_skill['grasp'] = self.grasp
+        if 'push' in primitive_set:
+            self.name_to_skill['push'] = self.push
+        if 'gripper_release' in primitive_set:
+            self.name_to_skill['gripper_release'] = self.gripper_release
+
 
         self.output_dim = 0
         self.primitive_dim_info = {}
