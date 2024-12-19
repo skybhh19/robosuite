@@ -1,7 +1,7 @@
 import numpy as np
 import robosuite.utils.transform_utils as T
 from utils.env_utils import get_obs, get_eef_pos, get_eef_quat, get_axisangle_error
-from utils.primitive_utils import unscale_action
+from utils.primitive_utils import inverse_scale_action
 
 class BaseSkill:
     def __init__(self,
@@ -143,12 +143,6 @@ class BaseSkill:
 
     def get_max_ac_calls(self):
         return self._config['max_ac_calls']
-
-    # def get_aff_reward(self):
-    #     return self._aff_reward
-    #
-    # def get_aff_success(self):
-    #     return self._aff_success
 
     def _get_unnormalized_params(self, params, bounds):
         params = params.copy()
@@ -554,7 +548,7 @@ class ReachSkill(BaseSkill):
         else:
             action = np.concatenate([pos_action, gripper_action])
 
-        action = unscale_action(self._env, action)
+        action = inverse_scale_action(self._env, action)
         return action
 
     def _test_start_state(self):
@@ -739,7 +733,7 @@ class GraspSkill(BaseSkill):
         else:
             action = np.concatenate([pos_action, gripper_action])
 
-        action = unscale_action(self._env, action)
+        action = inverse_scale_action(self._env, action)
         return action
 
     def check_interesting_interaction(self):
@@ -958,7 +952,7 @@ class PlaceSkill(BaseSkill):
         else:
             action = np.concatenate([pos_action, gripper_action])
 
-        action = unscale_action(self._env, action)
+        action = inverse_scale_action(self._env, action)
         return action
 
     def check_interesting_interaction(self):
@@ -1178,7 +1172,7 @@ class PushSkill(BaseSkill):
                 action = np.concatenate([pos_action, ori_action[2:], gripper_action])
         else:
             action = np.concatenate([pos_action, gripper_action])
-        action = unscale_action(self._env, action)
+        action = inverse_scale_action(self._env, action)
         return action
 
     def check_interesting_interaction(self):

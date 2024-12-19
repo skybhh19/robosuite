@@ -101,15 +101,14 @@ class Controller(object, metaclass=abc.ABCMeta):
         """
         self.new_update = True
 
-    def unscale_action(self, action):
+    def inverse_scale_action(self, action):
         if self.action_scale is None:
             self.action_scale = abs(
-                self.output_max - self.output_min) / abs(
-                self.input_max - self.input_min)
+                self.output_max - self.output_min) / abs(self.input_max - self.input_min)
             self.action_output_transform = (self.output_max + self.output_min) / 2.0
             self.action_input_transform = (self.input_max + self.input_min) / 2.0
-        unscaled_action = (action - self.action_output_transform) / self.action_scale + self.action_input_transform
-        return unscaled_action
+        original_action = (action - self.action_output_transform) / self.action_scale + self.action_input_transform
+        return original_action
 
     def scale_action(self, action):
         """

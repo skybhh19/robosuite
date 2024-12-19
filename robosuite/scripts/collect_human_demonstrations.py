@@ -26,7 +26,7 @@ from robosuite.wrappers import DataCollectionWrapper, VisualizationWrapper
 import robosuite.utils.transform_utils as T
 
 from utils.env_utils import get_eef_quat, get_obs, get_target_quat, get_axisangle_error, get_eef_pos
-from utils.primitive_utils import unscale_action, scale_action
+from utils.primitive_utils import inverse_scale_action, scale_action
 
 def collect_human_trajectory(env, device, arm, env_configuration, only_yaw):
     """
@@ -81,7 +81,7 @@ def collect_human_trajectory(env, device, arm, env_configuration, only_yaw):
             target_quat = T.mat2quat(T.euler2mat(target_euler))
             axisangle_error = get_axisangle_error(cur_quat, target_quat)
             scaled_action = np.concatenate((scaled_action[:3], axisangle_error, scaled_action[-1:]))
-            action = unscale_action(env, scaled_action)
+            action = inverse_scale_action(env, scaled_action)
             # print(action_debug[:3])
             # print(action[:3], action_copy[:3])
             try:
