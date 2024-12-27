@@ -1,6 +1,6 @@
 import numpy as np
 import robosuite.utils.transform_utils as T
-from utils.env_utils import get_obs, get_eef_pos, get_eef_quat, get_axisangle_error
+from utils.env_utils import get_eef_pos, get_eef_quat, get_axisangle_error
 from utils.primitive_utils import inverse_scale_action
 
 class BaseSkill:
@@ -18,7 +18,6 @@ class BaseSkill:
                  push_thres,
                  aff_thres,
                  yaw_thres,
-                 aff_tanh_scaling,
                  binary_gripper,
                  controller_type,
                  **config
@@ -31,8 +30,6 @@ class BaseSkill:
         self._normalize_pos_params = None
         self.skill_obs_list = []
         self.skill_image_obs_list = []
-        # self._aff_reward = None
-        # self._aff_success = None
 
         self._config = dict(
             global_xyz_bounds=global_xyz_bounds,
@@ -46,7 +43,6 @@ class BaseSkill:
             aff_thres=aff_thres,
             aff_type=aff_type,
             binary_gripper=binary_gripper,
-            aff_tanh_scaling=aff_tanh_scaling,
             image_obs_in_info=image_obs_in_info,
             render=render,
             controller_type=controller_type,
@@ -78,44 +74,14 @@ class BaseSkill:
     def _update_state(self):
         raise NotImplementedError
 
-    def _get_aff_centers(self):
+    def get_aff_centers(self):
         raise NotImplementedError
+
+    def get_aff_noise_scale(self):
+        return self._config['aff_noise_scale'] if 'aff_noise_scale' in self._config else None
 
     def _get_reach_pos(self):
         raise NotImplementedError
-
-    def get_aff_reward_and_success(self, params, norm):
-        self._reset(params, norm)
-        assert self._num_ac_calls is None or self._num_ac_calls == 0
-
-        if self._config['aff_type'] is None:
-            return 1.0, True
-
-        aff_centers = self._get_aff_centers()
-
-        if aff_centers is None:
-            return 1.0, True
-
-        reach_pos = self._get_reach_pos()
-
-        if not len(aff_centers):
-            return 0.0, False
-
-        thres = self._config['aff_thres']
-        within_thres = (np.abs(aff_centers - reach_pos) <= thres)
-        aff_success = np.any(np.all(within_thres, axis=1))  # close to one of the key points
-
-        if self._config['aff_type'] == 'dense':
-            if aff_success:
-                aff_reward = 1.0
-            else:
-                dist = np.clip(np.abs(aff_centers - reach_pos) - thres, 0, None)
-                min_dist = np.min(np.sum(dist, axis=1))
-                aff_reward = 1.0 - np.tanh(self._config['aff_tanh_scaling'] * min_dist)
-        else:
-            aff_reward = float(aff_success)
-
-        return aff_reward, aff_success
 
     def _reset(self, params, norm):
         self._params = np.array(params).copy()
@@ -270,17 +236,6 @@ class AtomicSkill(BaseSkill):
     def _update_state(self):
         self._state = None
 
-    # def _get_pos_ac(self):
-    #     self._check_params_dim()
-    #     pos = self._params[:3].copy()
-    #     return pos
-    #
-    # def _get_ori_ac(self):
-    #     self._check_params_dim()
-    #     assert self._config['use_ori_params']
-    #     ori_y = self._params[3:4].copy()
-    #     return ori_y
-
     def _get_gripper_ac(self):
         self._check_params_dim()
         gripper_action = self._params[-1:].copy()
@@ -288,24 +243,13 @@ class AtomicSkill(BaseSkill):
             gripper_action = self._get_binary_gripper_ac(gripper_action)
         return gripper_action
 
-    def get_aff_reward_and_success(self, params, norm):
-        reward, success = 1.0, True
-        return reward, success
-
     def is_success(self):
         return True
 
     def _get_action(self):
         self._check_params_dim()
         super()._get_action()
-        # pos = self._get_pos_ac()
         gripper_action = self._get_gripper_ac()
-        # if self._config['use_ori_params']:
-        #     ori_rp = np.array([0, 0])
-        #     ori_y = self._get_ori_ac()
-        #     return np.concatenate([pos, ori_rp, ori_y, gripper_action])
-        # else:
-        #     return np.concatenate([pos, gripper_action])
         return np.concatenate([self._params[:-1], gripper_action])
 
     def check_interesting_interaction(self):
@@ -366,13 +310,8 @@ class GripperSkill(BaseSkill):
     def is_success(self):
         return self._num_ac_calls >= self._config['max_ac_calls']
 
-    def _get_aff_centers(self):
+    def get_aff_centers(self):
         return None
-        # info = self._get_info()
-        # aff_centers = info.get('grasp_pos', [])
-        # if aff_centers is None:
-        #     return None
-        # return np.array(aff_centers, copy=True)
 
     def _get_action(self):
         super()._get_action()
@@ -386,14 +325,6 @@ class GripperSkill(BaseSkill):
     def check_interesting_interaction(self):
         super().check_interesting_interaction()
         return True
-        # for obj_id in range(len(self._env.grasp_objs)):
-        #     obj = self._env.env.grasp_objs[obj_id]
-        #     obj_pos = self._env.env.sim.data.body_xpos[self._env.env.obj_body_ids[obj_id]]
-        #     obs = get_obs(self._env)
-        #     eef_pos = get_eef_pos(obs)
-        #     if np.linalg.norm(obj_pos - eef_pos) < 0.1 and not self._env.env._check_grasp(gripper=self._env.env.robots[0].gripper, object_geoms=obj):
-        #         return True
-        # return False
 
     def _test_start_state(self):
         for obj in self._env.env.pnp_objs:
@@ -515,7 +446,7 @@ class ReachSkill(BaseSkill):
     def is_success(self):
         return self._state == 'REACHED'
 
-    def _get_aff_centers(self):
+    def get_aff_centers(self):
         info = self._get_info()
         if info is None:
             return None
@@ -691,7 +622,7 @@ class GraspSkill(BaseSkill):
     def is_success(self):
         return self._skill_is_success and self._state == 'GRASPED'
 
-    def _get_aff_centers(self):
+    def get_aff_centers(self):
         info = self._get_info()
         if info is not None:
             aff_centers = info.get('grasp_pos', None)
@@ -913,7 +844,7 @@ class PlaceSkill(BaseSkill):
     def is_success(self):
         return self._skill_is_success and self._state == 'PLACED'
 
-    def _get_aff_centers(self):
+    def get_aff_centers(self):
         info = self._get_info()
         if info is not None:
             aff_centers = info.get('place_pos', None)
@@ -922,10 +853,6 @@ class PlaceSkill(BaseSkill):
             return np.array(aff_centers, copy=True)
         else:
             return None
-        # aff_centers = info.get('reach_pos', [])
-        # if aff_centers is None:
-        #     return None
-        # return np.array(aff_centers, copy=True)
 
     def _get_action(self):
         super()._get_action()
@@ -976,9 +903,7 @@ class PlaceSkill(BaseSkill):
         return False
 
 class PushSkill(BaseSkill):
-    """
-    params: reach_pos (3) + reach ori (1) + push_delta_pos (3)
-    """
+
     STATES = ['INIT', 'LIFTED', 'HOVERING', 'REACHED', 'PUSHED']
 
     def __init__(self,
@@ -1131,7 +1056,7 @@ class PushSkill(BaseSkill):
     def is_success(self):
         return self._state == 'PUSHED' and self._skill_is_success
 
-    def _get_aff_centers(self):
+    def get_aff_centers(self):
         info = self._get_info()
         if info is not None:
             aff_centers = info.get('push_pos', None)

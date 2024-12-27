@@ -59,7 +59,6 @@ class SkillController:
             aff_thres=0.08,
             yaw_thres=0.20,
             grasp_thres=0.03,
-            aff_tanh_scaling=10.0,
             binary_gripper=False,
             env_idx=env_idx,
             push_height_thres=None,
@@ -86,12 +85,14 @@ class SkillController:
             max_ac_calls=80,
             max_reach_steps=70,
             max_place_steps=10,
+            aff_noise_scale=np.array([0.01, 0.01, 0.1]),
             **base_config
         )
 
         self.reach = ReachSkill(
             max_ac_calls=70,
             use_gripper_params=reach_use_gripper,
+            aff_noise_scale=np.array([0.005, 0.005, 0.01]),
             **base_config
         )
 
@@ -99,6 +100,7 @@ class SkillController:
             max_ac_calls=80,
             max_reach_steps=70,
             max_grasp_steps=10,
+            aff_noise_scale=np.array([0.001, 0.001, 0.001]),
             **base_config
         )
 
@@ -106,6 +108,7 @@ class SkillController:
             max_ac_calls=120,
             max_reach_steps=70,
             max_push_steps=50,
+            aff_noise_scale=np.array([0.1, 0.1, 0.005]),
             **base_config
         )
 
