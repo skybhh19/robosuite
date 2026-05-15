@@ -1,4 +1,5 @@
 import random
+import xml.etree.ElementTree as ET
 from collections import OrderedDict
 
 import numpy as np
@@ -8,6 +9,7 @@ from robosuite.environments.manipulation.manipulation_env import ManipulationEnv
 from robosuite.models.arenas import PegsArena
 from robosuite.models.objects import RoundNutObject, SquareNutObject
 from robosuite.models.tasks import ManipulationTask
+from robosuite.utils.mjcf_utils import array_to_string
 from robosuite.utils.observables import Observable, sensor
 from robosuite.utils.placement_samplers import SequentialCompositeSampler, UniformRandomSampler
 
@@ -246,6 +248,28 @@ class NutAssembly(ManipulationEnv):
             seed=seed,
         )
 
+    def edit_model_xml(self, xml_str):
+        """
+        Preserve compatibility with older NutAssembly demos whose stored model XML
+        predates the left_close_low camera.
+        """
+        xml_str = super().edit_model_xml(xml_str)
+        root = ET.fromstring(xml_str)
+        worldbody = root.find("worldbody")
+        if worldbody is not None and worldbody.find("./camera[@name='left_close_low']") is None:
+            worldbody.append(
+                ET.Element(
+                    "camera",
+                    attrib={
+                        "mode": "fixed",
+                        "name": "left_close_low",
+                        "pos": "0.42205740 -0.23999999 1.15230719",
+                        "quat": "0.81392215 0.36066498 0.18452251 0.41641680",
+                    },
+                )
+            )
+        return ET.tostring(root, encoding="utf8").decode("utf8")
+
     def reward(self, action=None):
         """
         Reward function for the task.
@@ -406,6 +430,15 @@ class NutAssembly(ManipulationEnv):
 
         # Arena always gets set to zero origin
         mujoco_arena.set_origin([0, 0, 0])
+        if getattr(self, "peg1_x_range", None) is not None:
+            peg1_pos = np.array(
+                [
+                    self.rng.uniform(*self.peg1_x_range),
+                    self.rng.uniform(*self.peg1_y_range),
+                    self.peg1_z,
+                ]
+            )
+            mujoco_arena.peg1_body.set("pos", array_to_string(peg1_pos))
 
         # define nuts
         self.nuts = []
@@ -698,6 +731,24 @@ class NutAssemblySquare(NutAssembly):
     def __init__(self, **kwargs):
         assert "single_object_mode" not in kwargs and "nut_type" not in kwargs, "invalid set of arguments"
         super().__init__(single_object_mode=2, nut_type="square", **kwargs)
+
+
+class NutAssemblySquareRandomPost(NutAssemblySquare):
+    """
+    Square nut assembly with randomized square peg (peg1) position on reset.
+    """
+
+    def __init__(
+        self,
+        peg1_x_range=(0.13, 0.33),
+        peg1_y_range=(0.0, 0.2),
+        peg1_z=0.85,
+        **kwargs,
+    ):
+        self.peg1_x_range = peg1_x_range
+        self.peg1_y_range = peg1_y_range
+        self.peg1_z = peg1_z
+        super().__init__(**kwargs)
 
 
 class NutAssemblyRound(NutAssembly):
