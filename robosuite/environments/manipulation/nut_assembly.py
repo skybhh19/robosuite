@@ -14,6 +14,33 @@ from robosuite.utils.observables import Observable, sensor
 from robosuite.utils.placement_samplers import SequentialCompositeSampler, UniformRandomSampler
 
 
+SQUARE_CAMERA_SPECS = OrderedDict(
+    [
+        ("right_high", ([0.38670969, 0.14000000, 1.31701634], [0.51681232, 0.14121050, 0.22255296, 0.81451517])),
+        ("randomview_1", ([0.51416129, -0.22000000, 1.20412296], [0.78302687, 0.34174746, 0.20787925, 0.47630221])),
+        ("randomview_2", ([0.42919356, -0.22000000, 1.11938522], [0.80113947, 0.36038002, 0.19601583, 0.43575147])),
+        ("randomview_3", ([0.38670969, -0.22000000, 1.07701634], [0.79114199, 0.41407457, 0.20874166, 0.39882755])),
+        ("randomview_4", ([0.42919356, -0.14000000, 1.27938522], [0.77401787, 0.30221370, 0.20236117, 0.51827919])),
+        ("randomview_5", ([0.42919356, -0.14000000, 1.35938522], [0.79399014, 0.24498269, 0.16403949, 0.53165251])),
+        ("randomview_6", ([0.38670969, -0.14000000, 1.23701634], [0.78650820, 0.30719623, 0.19491696, 0.49904186])),
+        ("randomview_7", ([0.51416129, -0.06000000, 1.28412296], [0.70293522, 0.27532381, 0.23917222, 0.61063534])),
+        ("randomview_8", ([0.51416129, -0.06000000, 1.36412296], [0.71320128, 0.24751824, 0.21501756, 0.61955345])),
+        ("randomview_9", ([0.47167742, -0.06000000, 1.24175409], [0.71678805, 0.25244278, 0.21591783, 0.61307961])),
+        ("randomview_10", ([0.38670969, -0.06000000, 1.15701634], [0.73299104, 0.24821392, 0.20313644, 0.59987456])),
+        ("randomview_11", ([0.42919356, 0.06000000, 1.19938522], [0.58882642, 0.25760204, 0.30706203, 0.70188159])),
+        ("randomview_12", ([0.38670969, 0.14000000, 1.07701634], [0.49302921, 0.20966054, 0.33043301, 0.77703214])),
+        ("randomview_13", ([0.38670969, 0.14000000, 1.31701634], [0.51681232, 0.14121050, 0.22255296, 0.81451517])),
+        ("randomview_14", ([0.51416129, 0.22000000, 1.36412296], [0.49078768, 0.17089480, 0.28094596, 0.80684048])),
+        ("randomview_15", ([0.51416129, 0.22000000, 1.44412296], [0.49566025, 0.15620041, 0.25678867, 0.81485081])),
+        ("randomview_16", ([0.38670969, 0.22000000, 1.15701634], [0.41170970, 0.18202119, 0.36106980, 0.81669581])),
+        ("randomview_17", ([0.38670969, 0.22000000, 1.23701634], [0.42080697, 0.15986858, 0.31712627, 0.83474201])),
+        ("randomview_18", ([0.42919356, 0.30000000, 1.19938522], [0.37865585, 0.16043170, 0.35560185, 0.83930260])),
+        ("randomview_19", ([0.38670969, 0.30000000, 1.07701634], [0.32096827, 0.20465310, 0.49714875, 0.77970475])),
+        ("randomview_20", ([0.38670969, 0.30000000, 1.15701634], [0.34934509, 0.15120050, 0.36730009, 0.84863836])),
+    ]
+)
+
+
 class NutAssembly(ManipulationEnv):
     """
     This class corresponds to the nut assembly task for a single robot arm.
@@ -268,6 +295,20 @@ class NutAssembly(ManipulationEnv):
                     },
                 )
             )
+        if worldbody is not None and self.single_object_mode == 2 and self.nut_id == self.nut_to_id["square"]:
+            for camera_name, (pos, quat) in SQUARE_CAMERA_SPECS.items():
+                if worldbody.find("./camera[@name='{}']".format(camera_name)) is None:
+                    worldbody.append(
+                        ET.Element(
+                            "camera",
+                            attrib={
+                                "mode": "fixed",
+                                "name": camera_name,
+                                "pos": array_to_string(pos),
+                                "quat": array_to_string(quat),
+                            },
+                        )
+                    )
         return ET.tostring(root, encoding="utf8").decode("utf8")
 
     def reward(self, action=None):
@@ -430,6 +471,14 @@ class NutAssembly(ManipulationEnv):
 
         # Arena always gets set to zero origin
         mujoco_arena.set_origin([0, 0, 0])
+        if self.single_object_mode == 2 and self.nut_id == self.nut_to_id["square"]:
+            for camera_name, (pos, quat) in SQUARE_CAMERA_SPECS.items():
+                mujoco_arena.set_camera(
+                    camera_name=camera_name,
+                    pos=pos,
+                    quat=quat,
+                    camera_attribs={"mode": "fixed"},
+                )
         if getattr(self, "peg1_x_range", None) is not None:
             peg1_pos = np.array(
                 [

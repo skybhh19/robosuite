@@ -323,6 +323,16 @@ class TwoArmTransport(TwoArmEnv):
             pos=[-0.40900713993039983, 0.9613722572245062, 1.3084072951772754],
             quat=[0.15484197437763214, 0.12077208608388901, -0.5476858019828796, -0.8133130073547363],
         )
+        mujoco_arena.set_camera(
+            camera_name="shouldercamera0_randomview6",
+            pos=[0.53090359, -1.05271819, 1.39209263],
+            quat=[0.83644916, 0.49136112, 0.12294401, 0.20928887],
+        )
+        mujoco_arena.set_camera(
+            camera_name="shouldercamera1_randomview6",
+            pos=[-0.44163169, 0.91721496, 1.34016649],
+            quat=[-0.19105282, -0.10298015, 0.46316663, 0.85928493],
+        )
 
         # Add relevant materials
         # Textures to use
