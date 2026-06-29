@@ -130,7 +130,7 @@ class Threading(ManipulationEnv):
             "needle": {
                 "x": (-0.2, -0.05),
                 "y": (0.15, 0.25),
-                "z_rot": (-2.0 * np.pi / 3.0, -np.pi / 3.0),
+                "z_rot": (-2.0 * np.pi / 3.0 + np.pi, -np.pi / 3.0 + np.pi),
                 "reference": self.table_offset,
             },
             "tripod": {
