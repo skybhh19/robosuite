@@ -199,7 +199,7 @@ def calibrate_gripper_axes(base_eef_mat, needle):
 def construct_grasp_mat(base_eef_mat, needle, grasp_angle_deg, axes):
     """Construct EEF rotation with a real target grasp angle and stable jaw axis."""
     desired_approach = (
-        np.cos(np.deg2rad(grasp_angle_deg)) * needle["yaxis"]
+        -np.cos(np.deg2rad(grasp_angle_deg)) * needle["yaxis"]
         + np.sin(np.deg2rad(grasp_angle_deg)) * np.array([0.0, 0.0, 1.0])
     )
     desired_approach = unit(desired_approach)
@@ -513,7 +513,7 @@ class ThreadingScriptedPolicy:
         stats["failure_reason"] = "none" if not failed else ",".join(failed)
         return not failed
 
-    def rollout(self, env, render=False, max_fr=None, motion_style=None, target_grasp_angle=None):
+    def rollout(self, env, render=False, max_fr=None, motion_style=None, target_grasp_angle=None, full_quality_mode=False):
         env.reset()
         _, eef_quat = get_eef_pose(env)
         base_eef_mat = T.quat2mat(eef_quat)
@@ -524,8 +524,8 @@ class ThreadingScriptedPolicy:
         grasp_angle = float(target_grasp_angle) if target_grasp_angle is not None else self.rng.uniform(*self.grasp_angle_range)
         grasp_tilt_x = 0.0
         grasp_tilt_y = 0.0
-        grasp_offset_along = self.rng.uniform(-0.004, 0.004)
-        grasp_offset_lateral = self.rng.uniform(-0.0006, 0.0006)
+        grasp_offset_along = self.rng.uniform(-0.0022, 0.0022)
+        grasp_offset_lateral = self.rng.uniform(-0.0003, 0.0003)
         grasp_offset_vertical = self.rng.uniform(0.0008, 0.0022)
         grasp_offset = (
             grasp_offset_along * needle["yaxis"]
@@ -533,12 +533,20 @@ class ThreadingScriptedPolicy:
             + grasp_offset_vertical * needle["zaxis"]
         )
         grasp_pos = needle["handle_center"] + grasp_offset
-        grasp_to_gripper_axis = visual_angle_axis(needle, grasp_angle)
-        grasp_mat = base_eef_mat
+        grasp_mat, grasp_to_gripper_axis, grasp_jaw_axis = construct_grasp_mat(
+            base_eef_mat,
+            needle,
+            grasp_angle,
+            gripper_axes,
+        )
         grasp_quat = T.mat2quat(grasp_mat)
         measured_grasp_angle_value = visual_grasp_angle_from_axis(grasp_to_gripper_axis, needle)
-        pregrasp_height = self.rng.uniform(0.105, 0.135)
-        descend_height = self.rng.uniform(0.032, 0.044)
+        if full_quality_mode:
+            pregrasp_height = self.rng.uniform(0.088, 0.115)
+            descend_height = self.rng.uniform(0.026, 0.036)
+        else:
+            pregrasp_height = self.rng.uniform(0.105, 0.135)
+            descend_height = self.rng.uniform(0.032, 0.044)
         close_height = float(self.rng.uniform(0.0035, 0.0065))
         close_pos = grasp_pos + np.array([0.0, 0.0, close_height])
         descend_pos = close_pos + grasp_to_gripper_axis * descend_height
@@ -635,8 +643,12 @@ class ThreadingScriptedPolicy:
             control_side = self.rng.uniform(-0.012, 0.012)
             control_z_frac = self.rng.uniform(0.35, 0.55)
             lift_progress_power = self.rng.uniform(0.7, 0.95)
-        close_lift_rise = self.rng.uniform(0.003, 0.006)
-        close_lift_forward = self.rng.uniform(0.0, 0.002) * toward_ring
+        if full_quality_mode:
+            close_lift_rise = self.rng.uniform(0.006, 0.010)
+            close_lift_forward = self.rng.uniform(0.002, 0.006) * toward_ring
+        else:
+            close_lift_rise = self.rng.uniform(0.003, 0.006)
+            close_lift_forward = self.rng.uniform(0.0, 0.002) * toward_ring
         close_lift_end_pos = close_pos + close_lift_forward + np.array([0.0, 0.0, close_lift_rise])
         lift_jitter = np.array([self.rng.uniform(-0.012, 0.012), self.rng.uniform(-0.012, 0.012), 0.0])
         lift_xy = lift_toward + lift_lateral + lift_jitter
@@ -695,11 +707,11 @@ class ThreadingScriptedPolicy:
         lift_prealign_fraction = float(self.rng.uniform(0.28, 0.55))
         durations = {
             "aim_approach": int(self.rng.randint(42, 58)),
-            "aim_descend": int(self.rng.randint(42, 58)),
-            "close_gripper": int(self.rng.randint(16, 23)),
+            "aim_descend": int(self.rng.randint(36, 50) if full_quality_mode else self.rng.randint(42, 58)),
+            "close_gripper": int(self.rng.randint(10, 16) if full_quality_mode else self.rng.randint(16, 23)),
             "lift_arc": int(self.rng.randint(38, 70)),
             "align": int(self.rng.randint(48, 72)),
-            "pre_insert": int(self.rng.randint(8, 16)),
+            "pre_insert": int(self.rng.randint(4, 9) if full_quality_mode else self.rng.randint(8, 16)),
             "insert_through": int(self.rng.randint(78, 112)),
             "hold_after_insert": int(self.rng.randint(8, 14)),
         }
@@ -750,6 +762,8 @@ class ThreadingScriptedPolicy:
             "grasp_approach_angle_deg": float(measured_grasp_angle_value),
             "gripper_approach_axis_name": gripper_axes["approach_axis_name"],
             "gripper_jaw_axis_name": gripper_axes["jaw_axis_name"],
+            "planned_grasp_approach_axis": grasp_to_gripper_axis.tolist(),
+            "planned_grasp_jaw_axis": grasp_jaw_axis.tolist(),
             "grasp_tilt_x_deg": float(np.rad2deg(grasp_tilt_x)),
             "grasp_tilt_y_deg": float(np.rad2deg(grasp_tilt_y)),
             "grasp_offset_along": float(grasp_offset_along),
@@ -799,6 +813,7 @@ class ThreadingScriptedPolicy:
                 "insert_start": insert_start_offset,
                 "insert_end": insert_end_offset,
             },
+            "full_quality_mode": bool(full_quality_mode),
         }
 
         # aim: approach and descend along the randomized front/back grasp angle.
@@ -1034,8 +1049,20 @@ def parse_args():
         action="store_true",
         help="Keep only successful demos until both insert-angle buckets are full.",
     )
+    parser.add_argument(
+        "--collect-insert-angle-range",
+        action="store_true",
+        help="Keep only successful demos whose actual insert angle is inside [--insert-angle-min, --insert-angle-max].",
+    )
+    parser.add_argument(
+        "--full-quality-mode",
+        action="store_true",
+        help="For full-only insert-angle-range collection, reduce extreme approach / pause artifacts without changing success filters.",
+    )
     parser.add_argument("--insert-angle-threshold", type=float, default=95.0)
     parser.add_argument("--insert-angle-per-bin", type=int, default=25)
+    parser.add_argument("--insert-angle-min", type=float, default=105.0)
+    parser.add_argument("--insert-angle-max", type=float, default=130.0)
     parser.add_argument(
         "--split-use-geometric-success",
         action="store_true",
@@ -1068,7 +1095,11 @@ def choose_split_target_angle(rng, split_counts, per_bin):
     high_deficit = max(0, per_bin - split_counts["ge"])
     if low_deficit <= 0 and high_deficit <= 0:
         return None
-    if low_deficit > 0 and high_deficit > 0:
+    if split_counts["lt"] + 5 < split_counts["ge"] and low_deficit > 0:
+        desired_high = rng.rand() < 0.12
+    elif split_counts["ge"] + 5 < split_counts["lt"] and high_deficit > 0:
+        desired_high = rng.rand() < 0.88
+    elif low_deficit > 0 and high_deficit > 0:
         desired_high = rng.rand() < high_deficit / float(low_deficit + high_deficit)
     else:
         desired_high = high_deficit > 0
@@ -1077,35 +1108,91 @@ def choose_split_target_angle(rng, split_counts, per_bin):
     # spread out so the accepted insert angles do not collapse to one value.
     if desired_high:
         return float(rng.choice([98.0, 104.0, 110.0, 118.0, 126.0, 134.0]))
-    if high_deficit <= 0:
-        # Once the high bucket is full, aggressively exploit the band that tends
-        # to produce successful low insert angles, with a small amount of
-        # exploration left for diversity.
-        candidates = np.array([84.0, 88.0, 90.0, 92.0, 93.0, 94.0, 96.0])
-        weights = np.array([0.05, 0.08, 0.14, 0.22, 0.25, 0.18, 0.08])
-        return float(rng.choice(candidates, p=weights / weights.sum()))
-    return float(rng.choice([72.0, 78.0, 84.0, 89.0, 93.0]))
+    candidates = np.array([84.0, 88.0, 89.0, 90.0, 91.0, 92.0, 93.0, 94.0], dtype=float)
+    weights = np.array([0.04, 0.10, 0.18, 0.17, 0.14, 0.15, 0.15, 0.07], dtype=float)
+    return float(rng.choice(candidates, p=weights / weights.sum()))
+
+
+def choose_large_insert_target_angle(rng):
+    # These are target grasp approach angles, not the measured insert angles.
+    # Higher targets bias the wrist camera / gripper pose toward larger measured
+    # insert angles, but the final acceptance gate still uses actual_insert_angle_deg.
+    candidates = np.array([104.0, 110.0, 118.0, 126.0, 134.0, 142.0], dtype=float)
+    weights = np.array([0.08, 0.16, 0.25, 0.25, 0.18, 0.08], dtype=float)
+    return float(rng.choice(candidates, p=weights / weights.sum()))
+
+
+def choose_full_quality_target_angle(rng):
+    # Softer full-only target distribution: still biased toward actual insert
+    # angle >= 95, but avoids making every accepted trajectory an extreme slanted grasp.
+    candidates = np.array([96.0, 98.0, 100.0, 104.0, 110.0, 118.0], dtype=float)
+    weights = np.array([0.12, 0.20, 0.22, 0.20, 0.16, 0.10], dtype=float)
+    return float(rng.choice(candidates, p=weights / weights.sum()))
+
+
+def choose_large_insert_motion_style(rng):
+    styles = np.array(
+        [
+            "high_arc",
+            "vertical_first",
+            "side_sweep",
+            "shallow_sweep",
+            "early_approach",
+            "low_s_curve",
+            "direct_low",
+            "short_direct",
+            "delayed_approach",
+            "over_then_back",
+        ],
+        dtype=object,
+    )
+    weights = np.array([0.18, 0.17, 0.16, 0.13, 0.11, 0.10, 0.06, 0.04, 0.03, 0.02])
+    return str(rng.choice(styles, p=weights / weights.sum()))
+
+
+def choose_full_quality_motion_style(rng):
+    # Keep the same style vocabulary as the main policy, but avoid over-sampling
+    # the high-arc / vertical-first modes that made full demos look samey.
+    styles = np.array(
+        [
+            "direct_low",
+            "short_direct",
+            "low_s_curve",
+            "shallow_sweep",
+            "early_approach",
+            "delayed_approach",
+            "side_sweep",
+            "over_then_back",
+            "vertical_first",
+            "high_arc",
+        ],
+        dtype=object,
+    )
+    weights = np.array([0.15, 0.15, 0.14, 0.13, 0.12, 0.11, 0.09, 0.06, 0.03, 0.02])
+    return str(rng.choice(styles, p=weights / weights.sum()))
 
 
 def choose_split_motion_style(rng, split_counts, per_bin):
-    if split_counts["ge"] >= per_bin and split_counts["lt"] < per_bin:
+    if split_counts["lt"] + 5 < split_counts["ge"] and split_counts["lt"] < per_bin:
         styles = np.array(
             [
-                "vertical_first",
+                "short_direct",
+                "over_then_back",
+                "delayed_approach",
+                "direct_low",
                 "low_s_curve",
-                "side_sweep",
+                "vertical_first",
                 "shallow_sweep",
+                "side_sweep",
                 "high_arc",
                 "early_approach",
-                "direct_low",
-                "short_direct",
-                "delayed_approach",
-                "over_then_back",
             ],
             dtype=object,
         )
-        weights = np.array([0.20, 0.18, 0.16, 0.14, 0.12, 0.07, 0.05, 0.04, 0.02, 0.02])
+        weights = np.array([0.22, 0.18, 0.14, 0.13, 0.10, 0.08, 0.06, 0.04, 0.03, 0.02])
         return str(rng.choice(styles, p=weights / weights.sum()))
+    if split_counts["ge"] + 5 < split_counts["lt"] and split_counts["ge"] < per_bin:
+        return choose_large_insert_motion_style(rng)
     return str(rng.choice(MOTION_STYLES))
 
 
@@ -1115,6 +1202,12 @@ def insert_angle_bucket(angle, threshold):
     if angle < 0.0 or angle > 180.0:
         return None
     return "lt" if angle < threshold else "ge"
+
+
+def insert_angle_in_range(angle, min_angle, max_angle):
+    if angle is None or not np.isfinite(angle):
+        return False
+    return min_angle <= float(angle) <= max_angle
 
 
 def insert_angle_subbin(angle, threshold):
@@ -1195,6 +1288,8 @@ def smooth_collection_success(stats, args):
 
 def main():
     args = parse_args()
+    if args.collect_insert_angle_split and args.collect_insert_angle_range:
+        raise ValueError("--collect-insert-angle-split and --collect-insert-angle-range are mutually exclusive")
     rng = np.random.RandomState(args.seed)
     controller_config = suite.load_composite_controller_config(robot=args.robots[0])
 
@@ -1236,10 +1331,22 @@ def main():
         attempts += 1
         if args.collect_insert_angle_split:
             target_motion_style = choose_split_motion_style(rng, split_counts, args.insert_angle_per_bin)
+        elif args.collect_insert_angle_range:
+            target_motion_style = (
+                choose_full_quality_motion_style(rng)
+                if args.full_quality_mode
+                else choose_large_insert_motion_style(rng)
+            )
         else:
             target_motion_style = motion_style_plan[kept] if motion_style_plan is not None else None
         if args.collect_insert_angle_split:
             target_grasp_angle = choose_split_target_angle(rng, split_counts, args.insert_angle_per_bin)
+        elif args.collect_insert_angle_range:
+            target_grasp_angle = (
+                choose_full_quality_target_angle(rng)
+                if args.full_quality_mode
+                else choose_large_insert_target_angle(rng)
+            )
         else:
             target_grasp_angle = args.grasp_angle_list[kept % len(args.grasp_angle_list)] if args.grasp_angle_list else None
         success = policy.rollout(
@@ -1248,6 +1355,7 @@ def main():
             max_fr=args.max_fr,
             motion_style=target_motion_style,
             target_grasp_angle=target_grasp_angle,
+            full_quality_mode=bool(args.full_quality_mode and args.collect_insert_angle_range),
         )
         stats = policy.stats[-1]
         insert_angle = stats.get("actual_insert_angle_deg")
@@ -1272,6 +1380,19 @@ def main():
                 and accepted_bucket is not None
                 and split_counts[accepted_bucket] < args.insert_angle_per_bin
             )
+        elif args.collect_insert_angle_range:
+            smooth_success = smooth_collection_success(stats, args) if args.smooth_filter else True
+            if not args.smooth_filter:
+                stats["smooth_filter"] = {"enabled": False, "passed": True, "failure_reasons": []}
+            angle_in_range = insert_angle_in_range(insert_angle, args.insert_angle_min, args.insert_angle_max)
+            stats["collection_success"] = bool(success and smooth_success and angle_in_range)
+            stats["collection_success_source"] = "policy_success_insert_angle_range" if stats["collection_success"] else "failed"
+            stats["insert_angle_range"] = {
+                "min": float(args.insert_angle_min),
+                "max": float(args.insert_angle_max),
+                "passed": bool(angle_in_range),
+            }
+            keep_episode = bool(stats["collection_success"])
         else:
             smooth_success = smooth_collection_success(stats, args) if args.smooth_filter else True
             if not args.smooth_filter:
@@ -1319,6 +1440,8 @@ def main():
     if args.collect_insert_angle_split:
         print(f"insert_angle_split_counts={split_counts}")
         print(f"insert_angle_subbins={split_subbins}")
+    if args.collect_insert_angle_range:
+        print(f"insert_angle_range=({args.insert_angle_min}, {args.insert_angle_max}) kept={kept}")
 
 
 if __name__ == "__main__":
