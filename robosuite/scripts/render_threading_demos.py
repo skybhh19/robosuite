@@ -1,0 +1,253 @@
+"""Render saved Threading demonstration states to mp4 videos.
+
+Example:
+    $ python robosuite/scripts/render_threading_demos.py --limit 3
+    $ python robosuite/scripts/render_threading_demos.py --separate
+"""
+
+import argparse
+import html
+import os
+import sys
+import time
+from glob import glob
+from pathlib import Path
+
+import imageio
+import numpy as np
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+import robosuite as suite
+import robosuite.macros as macros
+
+
+macros.IMAGE_CONVENTION = "opencv"
+
+
+def episode_dirs(dataset_dir):
+    return sorted(path for path in glob(os.path.join(dataset_dir, "ep_*")) if os.path.isdir(path))
+
+
+def render_episode(env, ep_dir, output_path, cameras, width, height, fps, skip_frame, separate=False, flip_vertical=True):
+    xml_path = os.path.join(ep_dir, "model.xml")
+    state_paths = sorted(glob(os.path.join(ep_dir, "state_*.npz")))
+    if not os.path.exists(xml_path):
+        raise FileNotFoundError(f"Missing model.xml in {ep_dir}")
+    if not state_paths:
+        raise FileNotFoundError(f"Missing state_*.npz in {ep_dir}")
+
+    with open(xml_path, "r") as f:
+        env.reset_from_xml_string(f.read())
+
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    writers = {}
+    if separate:
+        base, ext = os.path.splitext(output_path)
+        for camera in cameras:
+            writers[camera] = imageio.get_writer(f"{base}_{camera}{ext}", fps=fps)
+    else:
+        writers["side_by_side"] = imageio.get_writer(output_path, fps=fps)
+    frame_count = 0
+    try:
+        state_index = 0
+        for state_path in state_paths:
+            data = np.load(state_path, allow_pickle=True)
+            for state in data["states"]:
+                env.sim.set_state_from_flattened(state)
+                env.sim.forward()
+                if state_index % skip_frame == 0:
+                    frames = [
+                        env.sim.render(
+                            camera_name=camera,
+                            width=width,
+                            height=height,
+                            depth=False,
+                        )
+                        for camera in cameras
+                    ]
+                    if flip_vertical:
+                        frames = [np.flipud(frame) for frame in frames]
+                    if separate:
+                        for camera, frame in zip(cameras, frames):
+                            writers[camera].append_data(frame)
+                    else:
+                        writers["side_by_side"].append_data(np.concatenate(frames, axis=1))
+                    frame_count += 1
+                state_index += 1
+    finally:
+        for writer in writers.values():
+            writer.close()
+    return frame_count
+
+
+def write_html_index(output_dir, rendered_videos):
+    index_path = os.path.join(output_dir, "index.html")
+    cards = []
+    for video_path, frame_count in rendered_videos:
+        name = os.path.basename(video_path)
+        rel_path = os.path.relpath(video_path, output_dir)
+        cards.append(
+            f"""
+            <section class="card">
+              <div class="title">{html.escape(name)}</div>
+              <video src="{html.escape(rel_path)}" autoplay muted loop controls playsinline></video>
+              <div class="meta">{frame_count} frames</div>
+            </section>
+            """
+        )
+    body = "\n".join(cards)
+    with open(index_path, "w") as f:
+        f.write(
+            f"""<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Threading Demo Review</title>
+  <style>
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0;
+      background: #111;
+      color: #eee;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }}
+    header {{
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      padding: 14px 18px;
+      background: rgba(17, 17, 17, 0.92);
+      border-bottom: 1px solid #333;
+    }}
+    h1 {{
+      margin: 0;
+      font-size: 18px;
+      font-weight: 600;
+    }}
+    main {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(460px, 1fr));
+      gap: 14px;
+      padding: 14px;
+    }}
+    .card {{
+      border: 1px solid #333;
+      background: #181818;
+      border-radius: 6px;
+      overflow: hidden;
+    }}
+    .title, .meta {{
+      padding: 8px 10px;
+      font-size: 12px;
+      color: #bbb;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }}
+    video {{
+      display: block;
+      width: 100%;
+      background: #000;
+    }}
+  </style>
+</head>
+<body>
+  <header><h1>Threading Demo Review</h1></header>
+  <main>
+{body}
+  </main>
+</body>
+</html>
+"""
+        )
+    return index_path
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dataset-dir", type=str, default=str(REPO_ROOT / "threading_scripted_demos"))
+    parser.add_argument("--output-dir", type=str, default=None)
+    parser.add_argument("--environment", type=str, default="Threading")
+    parser.add_argument("--robots", nargs="+", type=str, default=["Panda"])
+    parser.add_argument("--cameras", nargs="+", type=str, default=["agentview", "robot0_eye_in_hand"])
+    parser.add_argument("--width", type=int, default=256)
+    parser.add_argument("--height", type=int, default=256)
+    parser.add_argument("--fps", type=int, default=120)
+    parser.add_argument("--skip-frame", type=int, default=1)
+    parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--oldest-first", action="store_true")
+    parser.add_argument("--no-html", action="store_true")
+    parser.add_argument("--separate", action="store_true")
+    parser.add_argument(
+        "--no-flip-vertical",
+        action="store_true",
+        help="Disable the default vertical flip used to match the reference annotation videos.",
+    )
+    return parser.parse_args()
+
+
+def main():
+    args = parse_args()
+    dataset_dir = os.path.abspath(os.path.expanduser(args.dataset_dir))
+    output_dir = args.output_dir
+    if output_dir is None:
+        run_name = time.strftime("render_%Y%m%d_%H%M%S")
+        output_dir = os.path.join(dataset_dir, "videos", run_name)
+    output_dir = os.path.abspath(os.path.expanduser(output_dir))
+
+    eps = episode_dirs(dataset_dir)
+    if not args.oldest_first:
+        eps = list(reversed(eps))
+    if args.limit is not None:
+        eps = eps[: args.limit]
+    if not eps:
+        raise RuntimeError(f"No ep_* directories found in {dataset_dir}")
+
+    controller_config = suite.load_composite_controller_config(robot=args.robots[0])
+    env = suite.make(
+        args.environment,
+        robots=args.robots,
+        controller_configs=controller_config,
+        ignore_done=True,
+        use_camera_obs=False,
+        has_renderer=False,
+        has_offscreen_renderer=True,
+        camera_names=args.cameras,
+        camera_heights=[args.height] * len(args.cameras),
+        camera_widths=[args.width] * len(args.cameras),
+    )
+
+    try:
+        rendered_videos = []
+        for ep_dir in eps:
+            ep_name = os.path.basename(ep_dir)
+            suffix = "_".join(args.cameras) if args.separate else "agentview_wrist"
+            output_path = os.path.join(output_dir, f"{ep_name}_{suffix}.mp4")
+            frames = render_episode(
+                env=env,
+                ep_dir=ep_dir,
+                output_path=output_path,
+                cameras=args.cameras,
+                width=args.width,
+                height=args.height,
+                fps=args.fps,
+                skip_frame=args.skip_frame,
+                separate=args.separate,
+                flip_vertical=not args.no_flip_vertical,
+            )
+            if not args.separate:
+                rendered_videos.append((output_path, frames))
+            print(f"rendered {frames} frames -> {output_path}")
+        if rendered_videos and not args.no_html:
+            index_path = write_html_index(output_dir, rendered_videos)
+            print(f"wrote review html -> {index_path}")
+    finally:
+        env.close()
+
+
+if __name__ == "__main__":
+    main()

@@ -254,15 +254,18 @@ class Threading(ManipulationEnv):
         return sensors, names
 
     def _check_success(self):
-        """Check whether the needle tip center is inside the tripod ring radius."""
+        """Check whether the needle shaft passes through the tripod ring."""
         needle_pos = np.array(self.sim.data.geom_xpos[self.sim.model.geom_name2id("needle_obj_needle")])
+        needle_mat = np.array(self.sim.data.geom_xmat[self.sim.model.geom_name2id("needle_obj_needle")]).reshape(3, 3)
+        needle_axis = needle_mat[:, 1]
 
         ring_pos = np.zeros(3)
         for i in range(self.tripod.num_ring_geoms):
             ring_pos += np.array(self.sim.data.geom_xpos[self.sim.model.geom_name2id(f"tripod_obj_ring_{i}")])
         ring_pos /= self.tripod.num_ring_geoms
 
-        return np.linalg.norm(needle_pos - ring_pos) < self.tripod.ring_size[1]
+        shaft_points = needle_pos + np.linspace(-0.06, 0.06, 13)[:, None] * needle_axis[None, :]
+        return np.any(np.linalg.norm(shaft_points - ring_pos[None, :], axis=1) < self.tripod.ring_size[1])
 
     def visualize(self, vis_settings):
         super().visualize(vis_settings=vis_settings)

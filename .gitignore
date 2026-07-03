@@ -126,3 +126,7 @@ MUJOCO_LOG.TXT
 
 # private demonstration files
 robosuite/models/assets/demonstrations_private
+
+# scripted data collection outputs
+/threading_scripted_demos/
+/threading_scripted_demos_*/
