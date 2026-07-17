@@ -188,7 +188,9 @@ class Threading(ManipulationEnv):
             object_placements = self.placement_initializer.sample()
             for obj_pos, obj_quat, obj in object_placements.values():
                 self.sim.data.set_joint_qpos(obj.joints[0], np.concatenate([np.array(obj_pos), np.array(obj_quat)]))
-        self._threading_initial_tripod_pos = np.array(self.sim.data.body_xpos[self.obj_body_id["tripod"]])
+        # Object poses are not forward-updated yet. Initialize the baseline on
+        # the first success check, before the scripted policy reaches tripod.
+        self._threading_initial_tripod_pos = None
         self._threading_max_insert_progress = -np.inf
 
     def _setup_observables(self):
@@ -273,7 +275,10 @@ class Threading(ManipulationEnv):
         ring_pos /= self.tripod.num_ring_geoms
 
         ring_normal = self._unit_vector(ring_mat[:, 0], fallback=np.array([1.0, 0.0, 0.0]))
-        if np.dot(ring_normal, ring_pos - needle_pos) < 0:
+        # D0 / D1 insertion always proceeds toward world -Y. Do not choose the
+        # insertion side from the instantaneous randomized needle position.
+        preferred_y = 1.0 if self.__class__.__name__ == "Threading_D2" else -1.0
+        if ring_normal[1] * preferred_y < 0:
             ring_normal = -ring_normal
         ring_normal[2] = 0.0
         ring_normal = self._unit_vector(ring_normal, fallback=np.array([1.0, 0.0, 0.0]))
@@ -289,14 +294,21 @@ class Threading(ManipulationEnv):
         )
 
         current_tripod_pos = np.array(self.sim.data.body_xpos[self.obj_body_id["tripod"]])
-        if float(self.sim.data.time) <= 1e-8:
-            self._threading_initial_tripod_pos = current_tripod_pos.copy()
-            self._threading_max_insert_progress = insert_progress
         initial_tripod_pos = getattr(self, "_threading_initial_tripod_pos", None)
         if initial_tripod_pos is None:
             initial_tripod_pos = current_tripod_pos.copy()
             self._threading_initial_tripod_pos = initial_tripod_pos
+            self._threading_max_insert_progress = insert_progress
         tripod_displacement = float(np.linalg.norm(current_tripod_pos - initial_tripod_pos))
+
+        self._threading_success_debug = {
+            "shaft_ring_distance": shaft_ring_distance,
+            "max_insert_progress": float(self._threading_max_insert_progress),
+            "insert_progress": insert_progress,
+            "tripod_displacement": tripod_displacement,
+            "initial_tripod_pos": initial_tripod_pos.tolist(),
+            "current_tripod_pos": current_tripod_pos.tolist(),
+        }
 
         return bool(
             shaft_ring_distance < 0.018
@@ -331,7 +343,9 @@ class Threading_D1(Threading_D0):
             "needle": {
                 "x": (-0.2, 0.05),
                 "y": (0.15, 0.25),
-                "z_rot": (-7.0 * np.pi / 6.0, np.pi / 6.0),
+                # Match D0's flipped needle orientation. D1 keeps its wider
+                # position and tripod randomization without backward grasps.
+                "z_rot": (-2.0 * np.pi / 3.0 + np.pi, -np.pi / 3.0 + np.pi),
                 "reference": self.table_offset,
             },
             "tripod": {

@@ -139,8 +139,11 @@ def ring_state(env):
             ring_mat = mat
     ring_pos /= env.tripod.num_ring_geoms
     normal = unit(ring_mat[:, 0], fallback=[1.0, 0.0, 0.0])
-    needle_center, _ = geom_pose(env, "needle_obj_needle")
-    if np.dot(normal, ring_pos - needle_center) < 0:
+    # Match D0's fixed insertion convention: approach from world +Y and pass
+    # through the ring toward world -Y, never from the back side.
+    env_name = env.unwrapped.__class__.__name__ if hasattr(env, "unwrapped") else env.__class__.__name__
+    preferred_y = 1.0 if env_name == "Threading_D2" else -1.0
+    if normal[1] * preferred_y < 0:
         normal = -normal
     normal[2] = 0.0
     normal = unit(normal, fallback=[1.0, 0.0, 0.0])
@@ -444,6 +447,67 @@ class ThreadingScriptedPolicy:
     def _fixed_target(self, target_pos, target_quat):
         return lambda: (np.array(target_pos), np.array(target_quat))
 
+    def _two_stage_orientation(self, start_quat, midpoint_quat, final_quat, progress):
+        """Interpolate through a 50% orientation waypoint without stopping there."""
+        progress = float(np.clip(progress, 0.0, 1.0))
+        if progress <= 0.5:
+            return T.quat_slerp(start_quat, midpoint_quat, 2.0 * progress)
+        return T.quat_slerp(midpoint_quat, final_quat, 2.0 * progress - 1.0)
+
+    def _settle_at_grasp(
+        self,
+        env,
+        target_pos,
+        target_quat,
+        policy_state,
+        stats,
+        render=False,
+        max_fr=None,
+        max_steps=6,
+        required_stable_steps=2,
+    ):
+        """Require a genuinely stable grasp pose before closing the fingers."""
+        stable_steps = 0
+        previous_pos, _ = get_eef_pose(env)
+        best_pos_err = float("inf")
+        best_ori_err = float("inf")
+        max_stable_speed = 0.003
+        for _ in range(max_steps):
+            self._track_target(
+                env,
+                self._fixed_target(target_pos, target_quat),
+                -1.0,
+                1,
+                policy_state,
+                stats,
+                "grasp_settle",
+                render,
+                max_fr,
+                stop_on_reach=False,
+            )
+            eef_pos, _ = get_eef_pose(env)
+            step_motion = float(np.linalg.norm(eef_pos - previous_pos))
+            previous_pos = eef_pos
+            pos_err, ori_err = self._pose_error(env, target_pos, target_quat)
+            best_pos_err = min(best_pos_err, pos_err)
+            best_ori_err = min(best_ori_err, ori_err)
+            if pos_err < 0.002 and ori_err < np.deg2rad(2.0) and step_motion < max_stable_speed:
+                stable_steps += 1
+                if stable_steps >= required_stable_steps:
+                    break
+            else:
+                stable_steps = 0
+
+        settled = stable_steps >= required_stable_steps
+        stats["grasp_settle"] = {
+            "passed": bool(settled),
+            "stable_steps": int(stable_steps),
+            "required_stable_steps": int(required_stable_steps),
+            "best_position_error": float(best_pos_err),
+            "best_orientation_error_deg": float(np.rad2deg(best_ori_err)),
+        }
+        return settled
+
     def _alignment_target(
         self,
         offset,
@@ -499,14 +563,19 @@ class ThreadingScriptedPolicy:
         ring = ring_state(env)
         stats["final_ring_distance"] = shaft_ring_distance(needle, ring)
         stats["final_insert_progress"] = insertion_progress(needle, ring)
+        env_success_now = bool(env._check_success())
+        stats["env_success_debug"] = dict(getattr(env, "_threading_success_debug", {}))
         checks = {
-            "env_success": bool(stats["env_success"] or env._check_success()),
+            "env_success": bool(stats["env_success"] or env_success_now),
             "ring_crossed": stats["min_ring_distance"] < 0.018,
             "inserted_past_ring": stats["max_insert_progress"] > 0.026,
             "final_still_inserted": stats["final_insert_progress"] > 0.014,
             "tripod_stable": stats["tripod_displacement"] < 0.035,
             "hold_complete": bool(stats["hold_complete"]),
             "gripper_closed": bool(stats["gripper_closed"]),
+            "grasp_settled": bool(stats.get("grasp_settled", False)),
+            "grasp_axis_perpendicular": stats.get("grasp_jaw_needle_axis_abs_dot", 1.0) < 1e-4,
+            "insert_direction_valid": bool(stats.get("insert_direction_valid", False)),
         }
         stats["policy_checks"] = checks
         failed = [name for name, passed in checks.items() if not passed]
@@ -524,9 +593,19 @@ class ThreadingScriptedPolicy:
         grasp_angle = float(target_grasp_angle) if target_grasp_angle is not None else self.rng.uniform(*self.grasp_angle_range)
         grasp_tilt_x = 0.0
         grasp_tilt_y = 0.0
-        grasp_offset_along = self.rng.uniform(-0.0022, 0.0022)
+        # Keep the nominal contact well inside the handle. Small variation is
+        # retained for data diversity, but controller tracking error must not be
+        # compounded by a target that is already displaced toward an edge.
+        # Keep most grasps near the geometric center, while allowing a smaller
+        # population on the shaft / visually lower side of the handle. Both
+        # modes retain a generous margin from the handle boundary.
+        grasp_location_mode = "center" if self.rng.rand() < 0.7 else "lower"
+        if grasp_location_mode == "center":
+            grasp_offset_along = self.rng.uniform(-0.0015, 0.0015)
+        else:
+            grasp_offset_along = self.rng.uniform(-0.0040, -0.0015)
         grasp_offset_lateral = self.rng.uniform(-0.0003, 0.0003)
-        grasp_offset_vertical = self.rng.uniform(0.0008, 0.0022)
+        grasp_offset_vertical = self.rng.uniform(-0.0003, 0.0003)
         grasp_offset = (
             grasp_offset_along * needle["yaxis"]
             + grasp_offset_lateral * needle["xaxis"]
@@ -547,8 +626,11 @@ class ThreadingScriptedPolicy:
         else:
             pregrasp_height = self.rng.uniform(0.105, 0.135)
             descend_height = self.rng.uniform(0.032, 0.044)
-        close_height = float(self.rng.uniform(0.0035, 0.0065))
-        close_pos = grasp_pos + np.array([0.0, 0.0, close_height])
+        # The Panda grip_site already represents the center between the fingers.
+        # Adding a world-Z offset here systematically moves contact toward the
+        # upper handle edge, especially for oblique grasps.
+        close_height = 0.0
+        close_pos = grasp_pos.copy()
         descend_pos = close_pos + grasp_to_gripper_axis * descend_height
         pregrasp_pos = close_pos + grasp_to_gripper_axis * pregrasp_height
         planned_needle_to_eef = {
@@ -751,6 +833,7 @@ class ThreadingScriptedPolicy:
             "initial_tripod_pos": tripod_position(env),
             "gripper_closed": False,
             "hold_complete": False,
+            "grasp_settled": False,
             "grasp_angle_deg": float(grasp_angle),
             "target_grasp_angle_deg": float(grasp_angle),
             "planned_grasp_angle_deg": float(measured_grasp_angle_value),
@@ -764,9 +847,14 @@ class ThreadingScriptedPolicy:
             "gripper_jaw_axis_name": gripper_axes["jaw_axis_name"],
             "planned_grasp_approach_axis": grasp_to_gripper_axis.tolist(),
             "planned_grasp_jaw_axis": grasp_jaw_axis.tolist(),
+            "grasp_jaw_needle_axis_abs_dot": float(abs(np.dot(grasp_jaw_axis, needle["yaxis"]))),
+            "planned_insert_normal": ring["normal"].tolist(),
+            "insert_direction_preferred_y": -1.0,
+            "insert_direction_valid": bool(ring["normal"][1] < 0.0),
             "grasp_tilt_x_deg": float(np.rad2deg(grasp_tilt_x)),
             "grasp_tilt_y_deg": float(np.rad2deg(grasp_tilt_y)),
             "grasp_offset_along": float(grasp_offset_along),
+            "grasp_location_mode": grasp_location_mode,
             "grasp_offset_lateral": float(grasp_offset_lateral),
             "grasp_offset_vertical": float(grasp_offset_vertical),
             "grasp_pos": grasp_pos.tolist(),
@@ -816,26 +904,38 @@ class ThreadingScriptedPolicy:
             "full_quality_mode": bool(full_quality_mode),
         }
 
-        # aim: approach and descend along the randomized front/back grasp angle.
-        self._track_target(
+        # Follow one continuous approach curve instead of stopping at a
+        # pregrasp waypoint and starting a second descend phase from rest.
+        approach_start_pos, approach_start_quat = get_eef_pose(env)
+        approach_steps = durations["aim_approach"] + durations["aim_descend"]
+        for i in range(approach_steps):
+            progress = (i + 1) / approach_steps
+            # Do not ease to zero velocity at the former pregrasp boundary or
+            # before the short final verification window.
+            path_t = progress
+            target_pos = quadratic_bezier(approach_start_pos, pregrasp_pos, close_pos, path_t)
+            target_quat = T.quat_slerp(approach_start_quat, grasp_quat, smoothstep(min(1.0, progress / 0.7)))
+            self._track_target(
+                env,
+                self._fixed_target(target_pos, target_quat),
+                -1.0,
+                1,
+                policy_state,
+                stats,
+                "aim_continuous",
+                render,
+                max_fr,
+                stop_on_reach=False,
+            )
+
+        # Closing is allowed only after the actual EEF pose has remained within
+        # a tight tolerance for several consecutive control steps.
+        stats["grasp_settled"] = self._settle_at_grasp(
             env,
-            self._fixed_target(pregrasp_pos, grasp_quat),
-            -1.0,
-            durations["aim_approach"],
+            close_pos,
+            grasp_quat,
             policy_state,
             stats,
-            "aim_approach",
-            render,
-            max_fr,
-        )
-        self._track_target(
-            env,
-            self._fixed_target(descend_pos, grasp_quat),
-            -1.0,
-            durations["aim_descend"],
-            policy_state,
-            stats,
-            "aim_descend",
             render,
             max_fr,
         )
@@ -891,17 +991,37 @@ class ThreadingScriptedPolicy:
         stats["actual_lift_angle_deg"] = float(actual_lift_angle)
         stats["lift_angle_error_deg"] = float(actual_lift_angle - grasp_angle)
 
-        # align: move forward while gradually rotating toward the ring normal, with smooth low-frequency variation.
+        # align: freeze a start / halfway / final orientation plan. The global
+        # progress remains continuous through the halfway waypoint, so angular
+        # velocity is not reset and the robot does not pause there.
         align_end_offset = pre_insert_offset - 0.012
+        align_start_quat = T.mat2quat(get_eef_mat(env))
+        align_start_needle = needle_state(env)
+        align_start_ring = ring_state(env)
+        align_full_rot = rotation_between(-align_start_needle["yaxis"], align_start_ring["normal"])
+        align_final_quat = T.mat2quat(align_full_rot.dot(get_eef_mat(env)))
+        align_midpoint_quat = T.quat_slerp(align_start_quat, align_final_quat, 0.5)
+        stats["align_orientation_waypoint"] = {
+            "fraction": 0.5,
+            "start_quat": align_start_quat.tolist(),
+            "midpoint_quat": align_midpoint_quat.tolist(),
+            "final_quat": align_final_quat.tolist(),
+        }
         for i, offset in enumerate(np.linspace(align_offset, align_end_offset, durations["align"])):
             progress = i / max(1, durations["align"] - 1)
+            rotation_progress = smoothstep((progress - align_curve["rotation_delay"]) / align_curve["rotation_span"])
+            waypoint_quat = self._two_stage_orientation(
+                align_start_quat,
+                align_midpoint_quat,
+                align_final_quat,
+                rotation_progress,
+            )
             self._track_target(
                 env,
-                lambda offset=offset, progress=progress: self._curved_alignment_target(
-                    offset,
-                    progress,
-                    align_curve,
-                )(env),
+                lambda offset=offset, progress=progress, waypoint_quat=waypoint_quat: (
+                    self._curved_alignment_target(offset, progress, align_curve)(env)[0],
+                    waypoint_quat,
+                ),
                 1.0,
                 1,
                 policy_state,
@@ -912,11 +1032,10 @@ class ThreadingScriptedPolicy:
             )
         self._track_target(
             env,
-            lambda: self._curved_alignment_target(
-                pre_insert_offset,
-                1.0,
-                align_curve,
-            )(env),
+            lambda: (
+                self._curved_alignment_target(pre_insert_offset, 1.0, align_curve)(env)[0],
+                align_final_quat,
+            ),
             1.0,
             durations["pre_insert"],
             policy_state,
@@ -1064,6 +1183,19 @@ def parse_args():
     parser.add_argument("--insert-angle-min", type=float, default=105.0)
     parser.add_argument("--insert-angle-max", type=float, default=130.0)
     parser.add_argument(
+        "--balanced-insert-angle-range",
+        action="store_true",
+        help="For --collect-insert-angle-range, fill evenly spaced actual insert-angle bins instead of accepting the first in-range demos.",
+    )
+    parser.add_argument("--insert-angle-num-bins", type=int, default=5)
+    parser.add_argument(
+        "--insert-angle-edges",
+        nargs="+",
+        type=float,
+        default=None,
+        help="Custom balanced actual-angle bin edges, e.g. 90 97 100. Overrides min/max/num-bins.",
+    )
+    parser.add_argument(
         "--split-use-geometric-success",
         action="store_true",
         help="For insert-angle split collection, keep demos that pass geometric insertion checks even if env sparse success is false.",
@@ -1210,6 +1342,63 @@ def insert_angle_in_range(angle, min_angle, max_angle):
     return min_angle <= float(angle) <= max_angle
 
 
+def make_range_angle_edges(min_angle, max_angle, num_bins):
+    if num_bins <= 0:
+        raise ValueError("--insert-angle-num-bins must be positive")
+    if max_angle <= min_angle:
+        raise ValueError("--insert-angle-max must be greater than --insert-angle-min")
+    return np.linspace(float(min_angle), float(max_angle), int(num_bins) + 1)
+
+
+def range_angle_bucket(angle, edges):
+    if angle is None or not np.isfinite(angle):
+        return None
+    angle = float(angle)
+    if angle < edges[0] or angle > edges[-1]:
+        return None
+    for idx, (low, high) in enumerate(zip(edges[:-1], edges[1:])):
+        if low <= angle < high or (idx == len(edges) - 2 and angle <= high):
+            return idx
+    return None
+
+
+def range_angle_counts_label(edges, counts):
+    return {
+        f"{edges[idx]:.1f}_{edges[idx + 1]:.1f}": int(counts.get(idx, 0))
+        for idx in range(len(edges) - 1)
+    }
+
+
+def choose_balanced_range_bin(rng, counts, per_bin, num_bins):
+    deficits = np.array([max(0, per_bin - counts.get(idx, 0)) for idx in range(num_bins)], dtype=float)
+    if deficits.sum() <= 0:
+        return None
+    return int(rng.choice(np.arange(num_bins), p=deficits / deficits.sum()))
+
+
+def choose_balanced_range_target_angle(rng, edges, target_bin):
+    low = float(edges[target_bin])
+    high = float(edges[target_bin + 1])
+    center = 0.5 * (low + high)
+    if high <= 105.0:
+        # Around the near-vertical regime, the measured insert angle is
+        # consistently about 1--2 degrees above the commanded grasp angle.
+        # Sample across the accepted interval with that calibration offset.
+        margin = min(0.35, 0.1 * (high - low))
+        return float(rng.uniform(low + margin - 1.5, high - margin - 1.5))
+    if target_bin == len(edges) - 2 and low >= 110.0:
+        # Empirically, aiming the gripper too steeply for the highest accepted
+        # insert-angle bin often flips the actual insert angle back to ~70-85 deg
+        # or overshoots beyond the accepted range. A moderate 115-119 deg target
+        # produces the cleanest 116-123 deg full-quality candidates.
+        return float(rng.uniform(max(low - 1.5, 114.5), min(high - 3.5, 119.5)))
+    # Target grasp angle is only a bias for the measured insert angle, so use a
+    # slightly higher target for high bins and keep the lower bins less extreme.
+    bias = np.interp(center, [edges[0], edges[-1]], [0.5, 7.0])
+    jitter = rng.uniform(-0.35, 0.35) * (high - low)
+    return float(np.clip(center + bias + jitter, 92.0, 142.0))
+
+
 def insert_angle_subbin(angle, threshold):
     if angle < threshold:
         edges = [0.0, 70.0, 80.0, 90.0, threshold]
@@ -1246,6 +1435,28 @@ def prune_and_count_existing_split(directory, threshold, per_bin):
         if not keep:
             shutil.rmtree(ep_dir, ignore_errors=True)
     return counts, subbins, counts["lt"] + counts["ge"]
+
+
+def prune_and_count_existing_range(directory, edges, per_bin):
+    counts = {idx: 0 for idx in range(len(edges) - 1)}
+    directory = Path(os.path.abspath(os.path.expanduser(directory)))
+    if not directory.exists():
+        return counts, 0
+
+    for ep_dir in sorted(directory.glob("ep_*")):
+        stats_path = ep_dir / "policy_stats.json"
+        keep = False
+        if stats_path.exists():
+            with open(stats_path, "r") as f:
+                stats = json.load(f)
+            bucket = range_angle_bucket(stats.get("actual_insert_angle_deg"), edges)
+            collection_success = bool(stats.get("collection_success") or stats.get("success"))
+            if collection_success and bucket is not None and counts[bucket] < per_bin:
+                keep = True
+                counts[bucket] += 1
+        if not keep:
+            shutil.rmtree(ep_dir, ignore_errors=True)
+    return counts, sum(counts.values())
 
 
 def geometric_collection_success(stats):
@@ -1295,6 +1506,9 @@ def main():
 
     split_counts = {"lt": 0, "ge": 0}
     split_subbins = {}
+    range_edges = None
+    range_counts = {}
+    range_per_bin = None
     kept = 0
     if args.collect_insert_angle_split:
         split_counts, split_subbins, kept = prune_and_count_existing_split(
@@ -1303,6 +1517,28 @@ def main():
             args.insert_angle_per_bin,
         )
         print(f"resume_insert_angle_split_counts={split_counts} kept={kept}")
+    if args.collect_insert_angle_range and args.balanced_insert_angle_range:
+        if args.insert_angle_edges is not None:
+            range_edges = np.asarray(args.insert_angle_edges, dtype=float)
+            if len(range_edges) < 2 or not np.all(np.diff(range_edges) > 0):
+                raise ValueError("--insert-angle-edges must contain at least two strictly increasing values")
+            args.insert_angle_min = float(range_edges[0])
+            args.insert_angle_max = float(range_edges[-1])
+            args.insert_angle_num_bins = len(range_edges) - 1
+        else:
+            range_edges = make_range_angle_edges(args.insert_angle_min, args.insert_angle_max, args.insert_angle_num_bins)
+        if args.num_demos % args.insert_angle_num_bins != 0:
+            raise ValueError("--num-demos must be divisible by --insert-angle-num-bins for balanced range collection")
+        range_per_bin = args.num_demos // args.insert_angle_num_bins
+        range_counts, kept = prune_and_count_existing_range(args.directory, range_edges, range_per_bin)
+        print(
+            "balanced_insert_angle_range_edges={} per_bin={} resume_counts={} kept={}".format(
+                [round(float(v), 2) for v in range_edges],
+                range_per_bin,
+                range_angle_counts_label(range_edges, range_counts),
+                kept,
+            )
+        )
 
     env = suite.make(
         args.environment,
@@ -1342,12 +1578,23 @@ def main():
         if args.collect_insert_angle_split:
             target_grasp_angle = choose_split_target_angle(rng, split_counts, args.insert_angle_per_bin)
         elif args.collect_insert_angle_range:
-            target_grasp_angle = (
-                choose_full_quality_target_angle(rng)
-                if args.full_quality_mode
-                else choose_large_insert_target_angle(rng)
-            )
+            if args.balanced_insert_angle_range:
+                target_range_bin = choose_balanced_range_bin(
+                    rng,
+                    range_counts,
+                    range_per_bin,
+                    args.insert_angle_num_bins,
+                )
+                target_grasp_angle = choose_balanced_range_target_angle(rng, range_edges, target_range_bin)
+            else:
+                target_range_bin = None
+                target_grasp_angle = (
+                    choose_full_quality_target_angle(rng)
+                    if args.full_quality_mode
+                    else choose_large_insert_target_angle(rng)
+                )
         else:
+            target_range_bin = None
             target_grasp_angle = args.grasp_angle_list[kept % len(args.grasp_angle_list)] if args.grasp_angle_list else None
         success = policy.rollout(
             env,
@@ -1381,18 +1628,39 @@ def main():
                 and split_counts[accepted_bucket] < args.insert_angle_per_bin
             )
         elif args.collect_insert_angle_range:
+            collection_success = bool(success)
+            if args.split_use_geometric_success:
+                collection_success = bool(collection_success or geometric_collection_success(stats))
             smooth_success = smooth_collection_success(stats, args) if args.smooth_filter else True
             if not args.smooth_filter:
                 stats["smooth_filter"] = {"enabled": False, "passed": True, "failure_reasons": []}
             angle_in_range = insert_angle_in_range(insert_angle, args.insert_angle_min, args.insert_angle_max)
-            stats["collection_success"] = bool(success and smooth_success and angle_in_range)
-            stats["collection_success_source"] = "policy_success_insert_angle_range" if stats["collection_success"] else "failed"
+            if args.balanced_insert_angle_range:
+                accepted_bucket = range_angle_bucket(insert_angle, range_edges) if angle_in_range else None
+                bucket_has_capacity = accepted_bucket is not None and range_counts[accepted_bucket] < range_per_bin
+            else:
+                accepted_bucket = None
+                bucket_has_capacity = True
+            stats["collection_success"] = bool((collection_success or args.allow_failures) and smooth_success and angle_in_range)
+            stats["collection_success_source"] = (
+                "policy_success_insert_angle_range"
+                if success and stats["collection_success"]
+                else (
+                    "geometric_success_insert_angle_range"
+                    if collection_success and stats["collection_success"]
+                    else ("angle_range_smooth_candidate" if stats["collection_success"] else "failed")
+                )
+            )
             stats["insert_angle_range"] = {
                 "min": float(args.insert_angle_min),
                 "max": float(args.insert_angle_max),
                 "passed": bool(angle_in_range),
             }
-            keep_episode = bool(stats["collection_success"])
+            if args.balanced_insert_angle_range:
+                stats["insert_angle_range"]["balanced_bins"] = range_angle_counts_label(range_edges, range_counts)
+                stats["insert_angle_range"]["accepted_bin"] = None if accepted_bucket is None else int(accepted_bucket)
+                stats["insert_angle_range"]["target_bin"] = None if target_range_bin is None else int(target_range_bin)
+            keep_episode = bool(stats["collection_success"] and bucket_has_capacity)
         else:
             smooth_success = smooth_collection_success(stats, args) if args.smooth_filter else True
             if not args.smooth_filter:
@@ -1414,6 +1682,8 @@ def main():
                 split_counts[accepted_bucket] += 1
                 subbin = insert_angle_subbin(insert_angle, args.insert_angle_threshold)
                 split_subbins[subbin] = split_subbins.get(subbin, 0) + 1
+            elif args.collect_insert_angle_range and args.balanced_insert_angle_range:
+                range_counts[accepted_bucket] += 1
         print(
             "attempt={} success={} kept={}/{} successes={} style={} variant={} target_angle={} insert_angle={} bucket={} split={} steps={} ep_dir={}".format(
                 attempts,
@@ -1426,7 +1696,11 @@ def main():
                 None if target_grasp_angle is None else round(float(target_grasp_angle), 1),
                 None if insert_angle is None else round(float(insert_angle), 1),
                 accepted_bucket,
-                dict(split_counts) if args.collect_insert_angle_split else None,
+                dict(split_counts) if args.collect_insert_angle_split else (
+                    range_angle_counts_label(range_edges, range_counts)
+                    if args.collect_insert_angle_range and args.balanced_insert_angle_range
+                    else None
+                ),
                 stats["steps"],
                 ep_dir,
             )
@@ -1442,6 +1716,8 @@ def main():
         print(f"insert_angle_subbins={split_subbins}")
     if args.collect_insert_angle_range:
         print(f"insert_angle_range=({args.insert_angle_min}, {args.insert_angle_max}) kept={kept}")
+        if args.balanced_insert_angle_range:
+            print(f"insert_angle_range_bins={range_angle_counts_label(range_edges, range_counts)}")
 
 
 if __name__ == "__main__":
