@@ -188,6 +188,10 @@ class Threading(ManipulationEnv):
             object_placements = self.placement_initializer.sample()
             for obj_pos, obj_quat, obj in object_placements.values():
                 self.sim.data.set_joint_qpos(obj.joints[0], np.concatenate([np.array(obj_pos), np.array(obj_quat)]))
+        # Object poses are not forward-updated yet. Initialize the baseline on
+        # the first success check, before the scripted policy reaches tripod.
+        self._threading_initial_tripod_pos = None
+        self._threading_max_insert_progress = -np.inf
 
     def _setup_observables(self):
         observables = super()._setup_observables()
@@ -254,18 +258,72 @@ class Threading(ManipulationEnv):
         return sensors, names
 
     def _check_success(self):
-        """Check whether the needle shaft passes through the tripod ring."""
-        needle_pos = np.array(self.sim.data.geom_xpos[self.sim.model.geom_name2id("needle_obj_needle")])
-        needle_mat = np.array(self.sim.data.geom_xmat[self.sim.model.geom_name2id("needle_obj_needle")]).reshape(3, 3)
-        needle_axis = needle_mat[:, 1]
+        """Check whether the needle has cleanly crossed through the tripod ring."""
+        needle_id = self.sim.model.geom_name2id("needle_obj_needle")
+        needle_pos = np.array(self.sim.data.geom_xpos[needle_id])
+        needle_mat = np.array(self.sim.data.geom_xmat[needle_id]).reshape(3, 3)
+        needle_axis = self._unit_vector(needle_mat[:, 1])
+        needle_tip = needle_pos - 0.06 * needle_axis
 
         ring_pos = np.zeros(3)
+        ring_mat = None
         for i in range(self.tripod.num_ring_geoms):
-            ring_pos += np.array(self.sim.data.geom_xpos[self.sim.model.geom_name2id(f"tripod_obj_ring_{i}")])
+            ring_id = self.sim.model.geom_name2id(f"tripod_obj_ring_{i}")
+            ring_pos += np.array(self.sim.data.geom_xpos[ring_id])
+            if ring_mat is None:
+                ring_mat = np.array(self.sim.data.geom_xmat[ring_id]).reshape(3, 3)
         ring_pos /= self.tripod.num_ring_geoms
 
-        shaft_points = needle_pos + np.linspace(-0.06, 0.06, 13)[:, None] * needle_axis[None, :]
-        return np.any(np.linalg.norm(shaft_points - ring_pos[None, :], axis=1) < self.tripod.ring_size[1])
+        ring_normal = self._unit_vector(ring_mat[:, 0], fallback=np.array([1.0, 0.0, 0.0]))
+        # D0 / D1 insertion always proceeds toward world -Y. Do not choose the
+        # insertion side from the instantaneous randomized needle position.
+        preferred_y = 1.0 if self.__class__.__name__ == "Threading_D2" else -1.0
+        if ring_normal[1] * preferred_y < 0:
+            ring_normal = -ring_normal
+        ring_normal[2] = 0.0
+        ring_normal = self._unit_vector(ring_normal, fallback=np.array([1.0, 0.0, 0.0]))
+
+        rel = ring_pos - needle_pos
+        t = np.clip(np.dot(rel, needle_axis), -0.06, 0.06)
+        closest = needle_pos + t * needle_axis
+        shaft_ring_distance = float(np.linalg.norm(closest - ring_pos))
+        insert_progress = float(np.dot(needle_tip - ring_pos, ring_normal))
+        self._threading_max_insert_progress = max(
+            float(getattr(self, "_threading_max_insert_progress", -np.inf)),
+            insert_progress,
+        )
+
+        current_tripod_pos = np.array(self.sim.data.body_xpos[self.obj_body_id["tripod"]])
+        initial_tripod_pos = getattr(self, "_threading_initial_tripod_pos", None)
+        if initial_tripod_pos is None:
+            initial_tripod_pos = current_tripod_pos.copy()
+            self._threading_initial_tripod_pos = initial_tripod_pos
+            self._threading_max_insert_progress = insert_progress
+        tripod_displacement = float(np.linalg.norm(current_tripod_pos - initial_tripod_pos))
+
+        self._threading_success_debug = {
+            "shaft_ring_distance": shaft_ring_distance,
+            "max_insert_progress": float(self._threading_max_insert_progress),
+            "insert_progress": insert_progress,
+            "tripod_displacement": tripod_displacement,
+            "initial_tripod_pos": initial_tripod_pos.tolist(),
+            "current_tripod_pos": current_tripod_pos.tolist(),
+        }
+
+        return bool(
+            shaft_ring_distance < 0.018
+            and self._threading_max_insert_progress > 0.026
+            and insert_progress > 0.014
+            and tripod_displacement < 0.035
+        )
+
+    @staticmethod
+    def _unit_vector(vec, fallback=None):
+        vec = np.array(vec, dtype=float)
+        norm = np.linalg.norm(vec)
+        if norm < 1e-8:
+            return np.array(fallback if fallback is not None else np.zeros_like(vec), dtype=float)
+        return vec / norm
 
     def visualize(self, vis_settings):
         super().visualize(vis_settings=vis_settings)
@@ -285,7 +343,9 @@ class Threading_D1(Threading_D0):
             "needle": {
                 "x": (-0.2, 0.05),
                 "y": (0.15, 0.25),
-                "z_rot": (-7.0 * np.pi / 6.0, np.pi / 6.0),
+                # Match D0's flipped needle orientation. D1 keeps its wider
+                # position and tripod randomization without backward grasps.
+                "z_rot": (-2.0 * np.pi / 3.0 + np.pi, -np.pi / 3.0 + np.pi),
                 "reference": self.table_offset,
             },
             "tripod": {
