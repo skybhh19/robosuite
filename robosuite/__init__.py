@@ -8,7 +8,13 @@ from robosuite.environments.manipulation.pick_place import PickPlace
 from robosuite.environments.manipulation.door import Door
 from robosuite.environments.manipulation.wipe import Wipe
 from robosuite.environments.manipulation.tool_hang import ToolHang
-from robosuite.environments.manipulation.threading import Threading, Threading_D0, Threading_D1, Threading_D2
+from robosuite.environments.manipulation.threading import (
+    Threading,
+    Threading_D0,
+    Threading_D05,
+    Threading_D1,
+    Threading_D2,
+)
 from robosuite.environments.manipulation.two_arm_lift import TwoArmLift
 from robosuite.environments.manipulation.two_arm_peg_in_hole import TwoArmPegInHole
 from robosuite.environments.manipulation.two_arm_handover import TwoArmHandover

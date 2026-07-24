@@ -283,10 +283,13 @@ class Threading(ManipulationEnv):
         ring_normal[2] = 0.0
         ring_normal = self._unit_vector(ring_normal, fallback=np.array([1.0, 0.0, 0.0]))
 
-        rel = ring_pos - needle_pos
-        t = np.clip(np.dot(rel, needle_axis), -0.06, 0.06)
-        closest = needle_pos + t * needle_axis
-        shaft_ring_distance = float(np.linalg.norm(closest - ring_pos))
+        aperture = self._aperture_intersection_metrics(
+            needle_pos=needle_pos,
+            needle_mat=needle_mat,
+            ring_pos=ring_pos,
+            ring_mat=ring_mat,
+            ring_normal=ring_normal,
+        )
         insert_progress = float(np.dot(needle_tip - ring_pos, ring_normal))
         self._threading_max_insert_progress = max(
             float(getattr(self, "_threading_max_insert_progress", -np.inf)),
@@ -302,7 +305,7 @@ class Threading(ManipulationEnv):
         tripod_displacement = float(np.linalg.norm(current_tripod_pos - initial_tripod_pos))
 
         self._threading_success_debug = {
-            "shaft_ring_distance": shaft_ring_distance,
+            **aperture,
             "max_insert_progress": float(self._threading_max_insert_progress),
             "insert_progress": insert_progress,
             "tripod_displacement": tripod_displacement,
@@ -311,11 +314,71 @@ class Threading(ManipulationEnv):
         }
 
         return bool(
-            shaft_ring_distance < 0.018
+            aperture["clean_aperture"]
             and self._threading_max_insert_progress > 0.026
             and insert_progress > 0.014
             and tripod_displacement < 0.035
         )
+
+    @classmethod
+    def _aperture_intersection_metrics(
+        cls,
+        needle_pos,
+        needle_mat,
+        ring_pos,
+        ring_mat,
+        ring_normal,
+        needle_half_length=0.06,
+        aperture_half_extent=0.008,
+    ):
+        """Evaluate whether the finite needle centerline intersects the ring opening.
+
+        This deliberately tests the ring-plane intersection instead of using a
+        distance-to-ring-center threshold. The latter produced false positives
+        when the needle passed beside the ring.
+        """
+        needle_pos = np.asarray(needle_pos, dtype=float)
+        needle_mat = np.asarray(needle_mat, dtype=float).reshape(3, 3)
+        ring_pos = np.asarray(ring_pos, dtype=float)
+        ring_mat = np.asarray(ring_mat, dtype=float).reshape(3, 3)
+        ring_normal = cls._unit_vector(ring_normal)
+        needle_axis = cls._unit_vector(needle_mat[:, 1])
+        ring_tangent = cls._unit_vector(ring_mat[:, 1])
+        ring_vertical = cls._unit_vector(ring_mat[:, 2])
+
+        rel = ring_pos - needle_pos
+        closest_t = np.clip(np.dot(rel, needle_axis), -needle_half_length, needle_half_length)
+        closest = needle_pos + closest_t * needle_axis
+        shaft_ring_distance = float(np.linalg.norm(closest - ring_pos))
+
+        denominator = float(np.dot(needle_axis, ring_normal))
+        plane_t = np.inf
+        tangent_offset = np.inf
+        vertical_offset = np.inf
+        margin = -np.inf
+        finite_shaft_crosses_plane = False
+        if abs(denominator) >= 1e-6:
+            plane_t = float(np.dot(ring_pos - needle_pos, ring_normal) / denominator)
+            finite_shaft_crosses_plane = abs(plane_t) <= needle_half_length
+            if finite_shaft_crosses_plane:
+                intersection = needle_pos + plane_t * needle_axis
+                aperture_rel = intersection - ring_pos
+                tangent_offset = abs(float(np.dot(aperture_rel, ring_tangent)))
+                vertical_offset = abs(float(np.dot(aperture_rel, ring_vertical)))
+                margin = min(
+                    aperture_half_extent - tangent_offset,
+                    aperture_half_extent - vertical_offset,
+                )
+
+        return {
+            "shaft_ring_distance": shaft_ring_distance,
+            "finite_shaft_crosses_ring_plane": bool(finite_shaft_crosses_plane),
+            "clean_aperture": bool(finite_shaft_crosses_plane and margin >= 0.0),
+            "clean_aperture_margin": float(margin),
+            "aperture_plane_t": float(plane_t),
+            "aperture_tangent_offset": float(tangent_offset),
+            "aperture_vertical_offset": float(vertical_offset),
+        }
 
     @staticmethod
     def _unit_vector(vec, fallback=None):
@@ -333,6 +396,20 @@ class Threading(ManipulationEnv):
 
 class Threading_D0(Threading):
     """D0 shell: fixed tripod, needle in a modest region with limited top-down rotation."""
+
+
+class Threading_D05(Threading_D0):
+    """D0.5: D0 needle distribution with modest tripod pose variation."""
+
+    def _get_initial_placement_bounds(self):
+        bounds = super()._get_initial_placement_bounds()
+        bounds["tripod"] = {
+            "x": (-0.02, 0.02),
+            "y": (-0.17, -0.13),
+            "z_rot": (np.pi / 3.0, 2.0 * np.pi / 3.0),
+            "reference": self.table_offset,
+        }
+        return bounds
 
 
 class Threading_D1(Threading_D0):
