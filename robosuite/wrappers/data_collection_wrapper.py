@@ -14,7 +14,17 @@ from robosuite.wrappers import Wrapper
 
 
 class DataCollectionWrapper(Wrapper):
-    def __init__(self, env, directory, collect_freq=1, flush_freq=100, use_env_xml_for_reset=False):
+    def __init__(
+        self,
+        env,
+        directory,
+        collect_freq=1,
+        flush_freq=100,
+        use_env_xml_for_reset=False,
+        record_joint_position_fields=False,
+        joint_delta_scale=0.05,
+        joint_position_observation_key="robot0_joint_pos",
+    ):
         """
         Initializes the data collection wrapper.
 
@@ -25,12 +35,22 @@ class DataCollectionWrapper(Wrapper):
             flush_freq (int): How frequently to dump data to disk, in terms of environment steps.
             use_env_xml_for_reset (bool): Whether to use the robosuite env XML string or the xml
                                           string from self.sim for resetting the environment.
+            record_joint_position_fields (bool): Whether to save absolute joint targets, the
+                                                 current joint-position observation, and normalized
+                                                 joint-delta labels in every action info.
+            joint_delta_scale (float): Joint delta in radians represented by a normalized delta of 1.
+            joint_position_observation_key (str): Observation key used for current joint positions.
         """
         super().__init__(env)
 
         # the base directory for all logging
         self.directory = directory
         self.use_env_xml_for_reset = use_env_xml_for_reset
+        self.record_joint_position_fields = record_joint_position_fields
+        self.joint_delta_scale = float(joint_delta_scale)
+        self.joint_position_observation_key = joint_position_observation_key
+        if self.record_joint_position_fields and self.joint_delta_scale <= 0:
+            raise ValueError("joint_delta_scale must be positive")
 
         # in-memory cache for simulation states and action info
         self.states = []
@@ -174,6 +194,34 @@ class DataCollectionWrapper(Wrapper):
                 - (bool) whether the current episode is completed or not
                 - (dict) misc information
         """
+        joint_fields = None
+        if self.record_joint_position_fields:
+            observation = self.env._get_observations(force_update=True)
+            if self.joint_position_observation_key not in observation:
+                raise KeyError(
+                    f"Missing joint-position observation {self.joint_position_observation_key!r}; "
+                    f"available keys are {sorted(observation)}"
+                )
+            joint_position = np.asarray(observation[self.joint_position_observation_key], dtype=float).copy()
+            absolute_joint_target = np.asarray(action[: len(joint_position)], dtype=float).copy()
+            joint_delta = absolute_joint_target - joint_position
+            reference_scaled_joint_delta = joint_delta / self.joint_delta_scale
+            joint_fields = {
+                "robot0_joint_pos": joint_position,
+                "joint_position": joint_position,
+                "absolute_joint_target": absolute_joint_target,
+                "joint_delta": joint_delta,
+                "joint_delta_scale": self.joint_delta_scale,
+                "joint_delta_reference_scaled": reference_scaled_joint_delta,
+                "joint_delta_exceeds_reference_scale": bool(
+                    np.any(np.abs(joint_delta) > self.joint_delta_scale)
+                ),
+                "actions_absolute_joint_position": np.asarray(action, dtype=float).copy(),
+                "actions_joint_delta": np.concatenate(
+                    [joint_delta, np.asarray(action[-1:], dtype=float)]
+                ),
+            }
+
         ret = super().step(action)
         self.t += 1
 
@@ -193,6 +241,8 @@ class DataCollectionWrapper(Wrapper):
             step_info = ret[3]
             if "action_abs" in step_info.keys():
                 info["actions_abs"] = np.array(step_info["action_abs"])
+            if joint_fields is not None:
+                info.update(joint_fields)
 
             self.action_infos.append(info)
 
