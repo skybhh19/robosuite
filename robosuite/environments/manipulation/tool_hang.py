@@ -270,6 +270,15 @@ class ToolHang(ManipulationEnv):
             quat=[0.39713290333747864, 0.27807527780532837, 0.5016612410545349, 0.7164464592933655],
         )
 
+        # Preserve the canonical Square / Threading external view under a
+        # distinct name so ToolHang's custom agentview and the standard view
+        # can be trained and evaluated concurrently.
+        mujoco_arena.set_camera(
+            camera_name="standard_agentview",
+            pos=[0.5, 0.0, 1.35],
+            quat=[0.653, 0.271, 0.271, 0.653],
+        )
+
         # Add sideview
         mujoco_arena.set_camera(
             camera_name="sideview",
@@ -339,6 +348,7 @@ class ToolHang(ManipulationEnv):
                 getattr(self, "tool_grip_half_length", (8.0 / 200.0)),
             ),  # default: 8 cm full length, 3 cm thick
             grip_density=getattr(self, "tool_grip_density", 2000.0),
+            grip_friction=getattr(self, "tool_grip_friction", (1.0, 0.005, 0.0001)),
             density=2000.0,
             solref=(0.02, 1.0),
             solimp=(0.998, 0.998, 0.001),

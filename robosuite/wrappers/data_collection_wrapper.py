@@ -24,6 +24,7 @@ class DataCollectionWrapper(Wrapper):
         record_joint_position_fields=False,
         joint_delta_scale=0.05,
         joint_position_observation_key="robot0_joint_pos",
+        reload_from_xml_on_episode_start=True,
     ):
         """
         Initializes the data collection wrapper.
@@ -40,6 +41,10 @@ class DataCollectionWrapper(Wrapper):
                                                  joint-delta labels in every action info.
             joint_delta_scale (float): Joint delta in radians represented by a normalized delta of 1.
             joint_position_observation_key (str): Observation key used for current joint positions.
+            reload_from_xml_on_episode_start (bool): Whether to rebuild the simulator from its XML
+                                                     after reset before recording. Disable when an
+                                                     environment configures runtime anchors or other
+                                                     post-reset simulator state that must remain live.
         """
         super().__init__(env)
 
@@ -49,6 +54,7 @@ class DataCollectionWrapper(Wrapper):
         self.record_joint_position_fields = record_joint_position_fields
         self.joint_delta_scale = float(joint_delta_scale)
         self.joint_position_observation_key = joint_position_observation_key
+        self.reload_from_xml_on_episode_start = bool(reload_from_xml_on_episode_start)
         if self.record_joint_position_fields and self.joint_delta_scale <= 0:
             raise ValueError("joint_delta_scale must be positive")
 
@@ -72,6 +78,12 @@ class DataCollectionWrapper(Wrapper):
 
         # remember whether any environment interaction has occurred
         self.has_interaction = False
+
+        # Callers may temporarily execute validation-only simulation steps
+        # without adding self-loop actions to the demonstration. Recording is
+        # enabled by default, so existing users retain identical behavior.
+        self.recording_enabled = True
+        self.unrecorded_steps = 0
 
         # some variables for remembering the current episode's initial state and model xml
         self._current_task_instance_state = None
@@ -104,13 +116,17 @@ class DataCollectionWrapper(Wrapper):
             self._current_task_instance_xml = self.env.sim.model.get_xml()
         self._current_task_instance_state = np.array(self.env.sim.get_state().flatten())
 
-        # trick for ensuring that we can play MuJoCo demonstrations back
-        # deterministically by using the recorded actions open loop
+        # Trick for ensuring that we can play MuJoCo demonstrations back
+        # deterministically by using the recorded actions open loop. Some
+        # environments intentionally configure runtime anchors after reset;
+        # those collectors can save the same XML and state without performing
+        # this second simulator rebuild.
         self.env.set_ep_meta(self.env.get_ep_meta())
-        self.env.reset_from_xml_string(self._current_task_instance_xml)
-        self.env.sim.reset()
-        self.env.sim.set_state_from_flattened(self._current_task_instance_state)
-        self.env.sim.forward()
+        if self.reload_from_xml_on_episode_start:
+            self.env.reset_from_xml_string(self._current_task_instance_xml)
+            self.env.sim.reset()
+            self.env.sim.set_state_from_flattened(self._current_task_instance_state)
+            self.env.sim.forward()
 
     def _on_first_interaction(self):
         """
@@ -175,9 +191,30 @@ class DataCollectionWrapper(Wrapper):
             OrderedDict: Environment observation space after reset occurs
         """
         self.env.unset_ep_meta()  # unset any episode meta data that was previously set
+        self.recording_enabled = True
+        self.unrecorded_steps = 0
         ret = super().reset()
         self._start_new_episode()
         return ret
+
+    def set_recording_enabled(self, enabled):
+        """Pause or resume trajectory recording without pausing simulation.
+
+        On resume, the latest recorded state is synchronized to the current
+        simulator state. This removes validation-only self-loop actions while
+        preserving the invariant that every retained action has a pre-state
+        and post-state (``len(states) == len(action_infos) + 1``).
+        """
+        enabled = bool(enabled)
+        if enabled == self.recording_enabled:
+            return
+        if enabled:
+            state = np.asarray(self.env.sim.get_state().flatten()).copy()
+            if self.has_interaction and self.states:
+                self.states[-1] = state
+            elif not self.has_interaction:
+                self._current_task_instance_state = state
+        self.recording_enabled = enabled
 
     def step(self, action):
         """
@@ -195,8 +232,15 @@ class DataCollectionWrapper(Wrapper):
                 - (dict) misc information
         """
         joint_fields = None
+        # Read the same cached joint observation on recorded and masked steps
+        # so enabling the mask cannot change controller execution cadence.
         if self.record_joint_position_fields:
-            observation = self.env._get_observations(force_update=True)
+            # Environment.step() and reset() already refresh active
+            # observables. Reading the cached value here keeps collection
+            # behavior identical to an unwrapped rollout; forcing another
+            # update can advance delayed / sampled observables and alter the
+            # controller trajectory merely because data logging is enabled.
+            observation = self.env._get_observations(force_update=False)
             if self.joint_position_observation_key not in observation:
                 raise KeyError(
                     f"Missing joint-position observation {self.joint_position_observation_key!r}; "
@@ -225,12 +269,15 @@ class DataCollectionWrapper(Wrapper):
         ret = super().step(action)
         self.t += 1
 
+        if not self.recording_enabled:
+            self.unrecorded_steps += 1
+
         # on the first time step, make directories for logging
-        if not self.has_interaction:
+        if self.recording_enabled and not self.has_interaction:
             self._on_first_interaction()
 
         # collect the current simulation state if necessary
-        if self.t % self.collect_freq == 0:
+        if self.recording_enabled and self.t % self.collect_freq == 0:
             state = self.env.sim.get_state().flatten()
             self.states.append(state)
 
@@ -251,7 +298,7 @@ class DataCollectionWrapper(Wrapper):
             self.successful = True
 
         # flush collected data to disk if necessary
-        if self.t % self.flush_freq == 0:
+        if self.recording_enabled and self.has_interaction and self.t % self.flush_freq == 0:
             self._flush()
 
         return ret

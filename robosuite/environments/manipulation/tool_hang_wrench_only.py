@@ -73,12 +73,30 @@ class ToolHangWrenchOnly(ToolHang):
     # handle almost edge-to-edge with black material.
     EXTENDED_HANDLE_HALF_LENGTH = 0.1025  # 20.5 cm full silver handle
     EXTENDED_GRIP_HALF_LENGTH = 0.080
+    # ToolHang's long opaque handle lies directly between the stock centered
+    # Panda wrist camera and the hook during pre-insertion. Use a task-local
+    # side-mounted camera baseline (and a modestly wider lens) so the full
+    # regime can observe both the ring and hook without changing arm motion.
+    WRIST_CAMERA_POS = np.array([0.05, 0.06, 0.0])
+    # Keep Panda's native 75 degree lens. The lateral baseline reveals the
+    # hook, while the narrower field preserves the intended full / partial
+    # distinction as the ring moves farther from the camera.
+    WRIST_CAMERA_FOVY_DEG = 75.0
+    RESET_CONTROLLER_SETTLE_STEPS = 10
 
     def _load_model(self):
         self.tool_handle_half_length = self.EXTENDED_HANDLE_HALF_LENGTH
         self.tool_grip_half_length = self.EXTENDED_GRIP_HALF_LENGTH
         self.tool_grip_density = 2000.0 * (0.040 / self.EXTENDED_GRIP_HALF_LENGTH)
+        self.tool_grip_friction = (2.0, 0.01, 0.0001)
         super()._load_model()
+
+    def _setup_references(self):
+        super()._setup_references()
+        camera_id = self.sim.model.camera_name2id("robot0_eye_in_hand")
+        self.sim.model.cam_pos[camera_id] = self.WRIST_CAMERA_POS
+        self.sim.model.cam_fovy[camera_id] = self.WRIST_CAMERA_FOVY_DEG
+        self.sim.forward()
 
     def configure_reset_variation(self, variation=None):
         """Apply one caller-provided variation on the next reset only."""
@@ -247,6 +265,21 @@ class ToolHangWrenchOnly(ToolHang):
         self._has_pending_reset_variation = False
         self.robots[0].composite_controller.update_state()
         self.robots[0].composite_controller.reset()
+        # Data collection historically discarded ten controller-settling
+        # steps before frame zero, while a normal evaluation reset exposed
+        # the freshly reset controller immediately. That made policy rollout
+        # start from different controller / velocity state than every demo.
+        # Make settling part of the registered environment reset so bare
+        # training and evaluation resets reproduce the demonstrated state.
+        settle_action = np.r_[robot_qpos, -1.0]
+        for _ in range(self.RESET_CONTROLLER_SETTLE_STEPS):
+            super().step(settle_action)
+        self.timestep = 0
+        self.cur_time = 0.0
+        self.done = False
+        self.sim_state_initial = self.sim.get_state()
+        self._anchor_fixture()
+        self._phase2_reset_settle_applied = True
         return self._get_observations(force_update=True)
 
     def load_phase2_reference_state(self, flattened_state, fixture_state=None):

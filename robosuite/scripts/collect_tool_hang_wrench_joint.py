@@ -53,6 +53,15 @@ from robosuite.wrappers import DataCollectionWrapper
 
 macros.IMAGE_CONVENTION = "opencv"
 
+
+def numpy_json_default(value):
+    """Serialize numpy scalars emitted by geometric quality checks."""
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+
 CLEAN_STAGES = (
     "reset_fixture",
     "pregrasp",
@@ -88,9 +97,27 @@ PH_STAGE_ENDS = {
 # +30 mm was selected as the conservative hidden-side boundary. Every retained
 # episode is additionally checked using the actual preinsert wrist-camera ray.
 VISIBILITY_CRITICAL_GRASP_X = 0.010
-FULL_VISIBLE_GRASP_RANGE = (-0.055, -0.010)
-PARTIAL_HIDDEN_GRASP_RANGE = (0.030, 0.060)
+# Full visibility only requires grasping at or before the calibrated +10 mm
+# wrist-occlusion boundary. The former -55..-10 mm support unnecessarily
+# excluded the stable center and coupled the full label to near-ring contact:
+# two-success qualification fell to 4.5% at -55..-46 mm. Use the continuous
+# center region and let the measured wrist ray remain the final label gate.
+FULL_VISIBLE_GRASP_RANGE = (0.0, VISIBILITY_CRITICAL_GRASP_X)
+PARTIAL_HIDDEN_GRASP_RANGE = (0.030, 0.052)
 BLACK_GRIP_EDGE_MARGIN = 0.012
+
+# A clean demonstration must mechanically seat the ring while the wrench is
+# still grasped. The native success check cannot be used before release because
+# it intentionally rejects robot-tool contact, so these gates mirror its
+# geometric conditions and add a tighter line-distance requirement.
+PRE_RELEASE_LINE_DISTANCE_MAX = 0.004
+PRE_RELEASE_INSERTION_MIN = 0.04
+PRE_RELEASE_SEATED_STEPS = 10
+INSERT_RELEASE_TRANSITION_STEPS = 20
+INSERT_RELEASE_PREOPEN_STEPS = 12
+POST_RELEASE_SUCCESS_STEPS = 20
+CLEAN_GRASP_IK_ERROR_MAX = 0.160
+CLEAN_TRANSFER_IK_ERROR_MAX = 0.420
 
 # Clean small-end grasp waypoints solved from geometric EEF targets. The lift
 # intentionally reverses the vertical descend by returning to PREGRASP_QPOS.
@@ -433,6 +460,15 @@ def tool_hang_debug(env):
     g1 = np.asarray(env.sim.data.geom_xpos[env.obj_geom_id["tool_hole1_hc_0"]]) - hook_start
     opposite = env.tool_args["ngeoms"] // 2
     g2 = np.asarray(env.sim.data.geom_xpos[env.obj_geom_id[f"tool_hole1_hc_{opposite}"]]) - hook_start
+    tool_matrix = np.asarray(env.sim.data.body_xmat[env.obj_body_id["tool"]]).reshape(3, 3)
+    ring_normal = tool_matrix[:, 2]
+    frame_contact_pairs = []
+    for contact_index in range(env.sim.data.ncon):
+        contact = env.sim.data.contact[contact_index]
+        geom1 = env.sim.model.geom_id2name(contact.geom1) or str(contact.geom1)
+        geom2 = env.sim.model.geom_id2name(contact.geom2) or str(contact.geom2)
+        if "frame" in geom1.lower() or "frame" in geom2.lower():
+            frame_contact_pairs.append([geom1, geom2])
     return {
         "native_tool_on_frame": bool(env._check_tool_on_frame()),
         "hole_frame_contact": bool(
@@ -450,6 +486,10 @@ def tool_hang_debug(env):
         "hole_straddles_hook": bool(np.dot(np.cross(g1, hook_direction), np.cross(g2, hook_direction)) < 0),
         "normalized_insertion": along / hook_length,
         "hole_center": hole_center.tolist(),
+        "ring_normal_world": ring_normal.tolist(),
+        "ring_normal_up_dot": float(np.dot(ring_normal, np.array([0.0, 0.0, 1.0]))),
+        "ring_normal_hook_dot": float(np.dot(ring_normal, hook_direction)),
+        "frame_contact_pairs": frame_contact_pairs,
     }
 
 
@@ -458,9 +498,14 @@ class VideoRecorder:
         self.path = None if path is None else Path(path)
         self.writer = None
         self.fps = fps
+        self.enabled = True
+
+    def set_recording_enabled(self, enabled):
+        """Exclude validation-only simulator steps from review videos."""
+        self.enabled = bool(enabled)
 
     def append(self, observation):
-        if self.path is None:
+        if self.path is None or not self.enabled:
             return
         if self.writer is None:
             self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -506,6 +551,8 @@ class GeometricJointPolicy:
         robot_start_indexes=None,
         motion_style=None,
         grasp_offset_local_x_override=None,
+        hang_yaw_deg=0.0,
+        grasp_yaw_deg=None,
     ):
         self.stop_after_stage = stop_after_stage
         self.seed = int(seed)
@@ -538,6 +585,8 @@ class GeometricJointPolicy:
             if grasp_offset_local_x_override is None
             else float(grasp_offset_local_x_override)
         )
+        self.hang_yaw_deg = float(hang_yaw_deg)
+        self.grasp_yaw_deg = None if grasp_yaw_deg is None else float(grasp_yaw_deg)
         self.robot_start_indexes = (
             None if robot_start_indexes is None else np.asarray(robot_start_indexes, dtype=int)
         )
@@ -911,13 +960,14 @@ class GeometricJointPolicy:
             # frame zero of the demonstration. This advances physics only: it
             # never writes wrench qpos / qvel and is deterministic per state.
             base_env = env.unwrapped if hasattr(env, "unwrapped") else env
-            settle_qpos = np.asarray(
-                base_env.sim.data.qpos[base_env.robots[0]._ref_joint_pos_indexes],
-                dtype=float,
-            ).copy()
-            for _ in range(10):
-                observation, _, _, _ = base_env.step(np.r_[settle_qpos, -1.0])
-                reset_settle_steps += 1
+            if not getattr(base_env, "_phase2_reset_settle_applied", False):
+                settle_qpos = np.asarray(
+                    base_env.sim.data.qpos[base_env.robots[0]._ref_joint_pos_indexes],
+                    dtype=float,
+                ).copy()
+                for _ in range(10):
+                    observation, _, _, _ = base_env.step(np.r_[settle_qpos, -1.0])
+                    reset_settle_steps += 1
             # Refresh the weld reference after reset-only settling so the
             # fixture drift gate measures execution drift from frame zero.
             base_env._anchor_fixture()
@@ -960,7 +1010,11 @@ class GeometricJointPolicy:
                 )
                 if sample_full:
                     grasp_visibility_regime = "full_visible"
-                    episode_grasp_profile = "normal"
+                    # Visibility categories must not select different IK
+                    # policies. Use the same robust close-pose reference as
+                    # partial_hidden; only grasp x and the measured camera-ray
+                    # label differ between balanced regimes.
+                    episode_grasp_profile = "rear"
                     default_grasp_range = FULL_VISIBLE_GRASP_RANGE
                 else:
                     grasp_visibility_regime = "partial_hidden"
@@ -1045,6 +1099,18 @@ class GeometricJointPolicy:
             )
             pregrasp_matrix = tool_rotation_delta.dot(nominal_pregrasp_matrix)
             close_matrix = tool_rotation_delta.dot(nominal_close_matrix)
+            # A small oblique grasp changes the wrist-camera baseline relative
+            # to the handle. This is independent of the final wrench yaw and
+            # is the degree of freedom that can move the hook out from behind
+            # the black grip in the wrist image.
+            episode_grasp_yaw_deg = (
+                0.0 if self.grasp_yaw_deg is None else self.grasp_yaw_deg
+            )
+            grasp_yaw_rotation = T.rotation_matrix(
+                np.deg2rad(episode_grasp_yaw_deg), initial_tool_matrix[:, 2]
+            )[:3, :3]
+            pregrasp_matrix = grasp_yaw_rotation.dot(pregrasp_matrix)
+            close_matrix = grasp_yaw_rotation.dot(close_matrix)
             desired_close_position = close_position + grasp_offset
             pregrasp_qpos, pregrasp_ik_error = self._global_ik(
                 env,
@@ -1065,7 +1131,7 @@ class GeometricJointPolicy:
             # stronger Cartesian position weight. Applying it universally
             # changes good contact geometry and lowers success. The residual
             # gate selects the hard native-yaw tail before any motion occurs.
-            if max(pregrasp_ik_error, close_ik_error) > 0.165:
+            if max(pregrasp_ik_error, close_ik_error) > CLEAN_GRASP_IK_ERROR_MAX:
                 # Candidate solvers must see the same deterministic restart
                 # sequence; otherwise merely evaluating the balanced branch
                 # changes the position-priority solution.
@@ -1087,8 +1153,67 @@ class GeometricJointPolicy:
                     position_weight=100.0,
                 )
                 grasp_ik_mode = "position_priority"
+            # Solver residuals are not comparable across the balanced
+            # (position_weight=40) and position-priority (weight=100) modes.
+            # Re-evaluate both final solutions with one canonical metric so
+            # entering the fallback cannot by itself make an otherwise better
+            # pose fail the clean-grasp gate.
+            canonical_grasp_errors = []
+            grasp_position_errors = []
+            grasp_orientation_errors = []
+            for solved_qpos, target_position, target_matrix in (
+                (pregrasp_qpos, pregrasp_position + grasp_offset, pregrasp_matrix),
+                (close_qpos, close_position + grasp_offset, close_matrix),
+            ):
+                solved_position, solved_matrix = self._joint_pose(env, solved_qpos)
+                position_error = float(np.linalg.norm(solved_position - target_position))
+                orientation_error = float(
+                    np.linalg.norm(
+                        T.quat2axisangle(
+                            T.quat_distance(
+                                T.mat2quat(target_matrix).copy(),
+                                T.mat2quat(solved_matrix).copy(),
+                            )
+                        )
+                    )
+                )
+                grasp_position_errors.append(position_error)
+                grasp_orientation_errors.append(orientation_error)
+                canonical_grasp_errors.append(
+                    float(np.hypot(40.0 * position_error, orientation_error))
+                )
             variation_params["grasp_ik_mode"] = grasp_ik_mode
-            variation_params["grasp_ik_error"] = max(pregrasp_ik_error, close_ik_error)
+            variation_params["grasp_ik_solver_error"] = float(
+                max(pregrasp_ik_error, close_ik_error)
+            )
+            variation_params["grasp_ik_position_error_m"] = float(
+                max(grasp_position_errors)
+            )
+            variation_params["grasp_ik_orientation_error_rad"] = float(
+                max(grasp_orientation_errors)
+            )
+            variation_params["grasp_ik_error"] = float(max(canonical_grasp_errors))
+            variation_params["grasp_yaw_deg"] = float(episode_grasp_yaw_deg)
+
+        # Full-visible grasps occupy local x=0..VISIBILITY_CRITICAL_GRASP_X,
+        # closer to hole1 than the partial range at x=0.030..0.052. This
+        # coordinate convention changed when the black grip was extended, but
+        # the old negative-x formula remained and silently returned zero for
+        # every demo. Restore the intended continuous clearance adjustment:
+        # the closer a full grasp is to the ring, the larger the severity.
+        near_ring_full_severity = (
+            float(
+                np.clip(
+                    (VISIBILITY_CRITICAL_GRASP_X - grasp_offset_local_x)
+                    / VISIBILITY_CRITICAL_GRASP_X,
+                    0.0,
+                    1.0,
+                )
+            )
+            if grasp_visibility_regime == "full_visible"
+            else 0.0
+        )
+        variation_params["near_ring_full_severity"] = near_ring_full_severity
         stage_checks = []
         joint_deltas, joint_jerks, eef_steps = [], [], []
         actual_joint_positions = [np.asarray(env.sim.data.qpos[indexes], dtype=float).copy()]
@@ -1203,6 +1328,25 @@ class GeometricJointPolicy:
             for _ in range(frames):
                 step(np.r_[command, gripper])
 
+        validation_only_steps = {}
+
+        def set_demo_recording(enabled):
+            if isinstance(env, DataCollectionWrapper):
+                env.set_recording_enabled(enabled)
+            recorder.set_recording_enabled(enabled)
+
+        def validation_hold(target, gripper, frames, reason):
+            """Execute a physical hold without teaching a stationary action loop."""
+            before = steps
+            set_demo_recording(False)
+            try:
+                hold(target, gripper, frames)
+            finally:
+                set_demo_recording(True)
+            validation_only_steps[reason] = validation_only_steps.get(reason, 0) + (
+                steps - before
+            )
+
         def finish_stage(name, passed, metrics=None):
             nonlocal stage_start, failure_reason, requested_stage_complete
             entry = {
@@ -1246,16 +1390,14 @@ class GeometricJointPolicy:
             # single direct joint segment reaches the overhead pregrasp.
             current_robot_qpos = np.asarray(env.sim.data.qpos[indexes], dtype=float).copy()
             if self.robot_start_mode == "threading_continuous":
-                # Synchronize the absolute controller, then take one direct
-                # segment from the non-singular randomized task home.
-                hold(current_robot_qpos, -1.0, 6)
                 # Decouple broad random resets from high-sensitivity regions:
                 # first settle onto the authored Threading-style task home,
                 # then use the validated direct task-home -> pregrasp line.
-                # This is a small purposeful departure, not a second IK solve
-                # or an object-relative detour.
-                move(THREADING_STYLE_TASK_HOME_QPOS, -1.0, 24)
-                pregrasp_frames = 56
+                # Start recording immediately after reset. The former six
+                # hidden controller-sync steps left controller history that is
+                # absent from MuJoCo state and caused replay parity drift.
+                move(THREADING_STYLE_TASK_HOME_QPOS, -1.0, 20)
+                pregrasp_frames = 50
                 move(pregrasp_qpos, -1.0, pregrasp_frames)
             else:
                 pregrasp_frames = max(
@@ -1270,8 +1412,12 @@ class GeometricJointPolicy:
                 {"eef_position": eef_position.tolist()},
             )
         if running:
-            move(close_qpos, -1.0, 20 + int(frame_offsets[1]))
-            hold(close_qpos, -1.0, 4)
+            move(
+                close_qpos,
+                -1.0,
+                24 + int(frame_offsets[1]),
+                end_slope=0.15,
+            )
             eef_position, _ = get_eef_pose(env)
             running = finish_stage(
                 "descend",
@@ -1286,16 +1432,47 @@ class GeometricJointPolicy:
             )
         if running:
             close_grasp_run = 0
-            for close_frame in range(12):
-                step(np.r_[close_qpos, 1.0])
+            # Close slowly, then begin the lift immediately after physical
+            # grasp. Holding the exact same arm target for all close frames
+            # creates a closed-gripper fixed point for feed-forward BC: the
+            # rollout can remain at the grasp pose instead of transitioning to
+            # lift. The small grasp-confirm lift below preserves stable finger
+            # closure while making close -> lift continuous and monotonic.
+            # Descend ends at gripper command -1.0. Begin closure immediately
+            # instead of duplicating that exact 8-D action at the stage
+            # boundary.
+            close_commands = np.r_[np.linspace(-0.9, 1.0, 10), np.ones(8)]
+            close_lift_target = close_qpos + 0.12 * (pregrasp_qpos - close_qpos)
+            # Do not wait for `_grasped`: that predicate only becomes true
+            # after several fully-closed frames, recreating the exact arm
+            # target run we are trying to remove. Start a sub-centimetre lift
+            # while the fingers are closing. The first four commands provide
+            # contact acquisition; every fully-closed command is therefore
+            # paired with upward arm motion.
+            close_lift_start_frame = 4
+            close_lift_frames = len(close_commands) - close_lift_start_frame
+            for close_frame, close_command in enumerate(close_commands):
+                close_lift_progress = np.clip(
+                    (close_frame + 1 - close_lift_start_frame) / close_lift_frames,
+                    0.0,
+                    1.0,
+                )
+                progress = self._hermite_progress(close_lift_progress, 0.0, 0.5)
+                close_arm_target = close_qpos + progress * (
+                    close_lift_target - close_qpos
+                )
+                step(np.r_[close_arm_target, close_command])
                 close_grasp_run = close_grasp_run + 1 if self._grasped(env) else 0
-                if close_frame + 1 >= 8 and close_grasp_run >= 2:
-                    break
             running = finish_stage("close", self._grasped(env))
         if running:
             pre_lift_z = body_pose(env, env.obj_body_id["tool"])[0][2]
-            move(pregrasp_qpos, 1.0, 18 + int(frame_offsets[2]))
-            hold(pregrasp_qpos, 1.0, 2)
+            move(
+                pregrasp_qpos,
+                1.0,
+                18 + int(frame_offsets[2]),
+                start_slope=0.09,
+                end_slope=0.15,
+            )
             lift = float(body_pose(env, env.obj_body_id["tool"])[0][2] - pre_lift_z)
             running = finish_stage(
                 "lift_verify",
@@ -1321,7 +1498,42 @@ class GeometricJointPolicy:
             world_up = np.array([0.0, 0.0, 1.0])
             side = unit(np.cross(world_up, hook_direction), fallback=(1.0, 0.0, 0.0))
             hook_basis = np.column_stack([hook_direction, side, world_up])
-            hanging_tool_matrix = hook_basis.dot(self.HANG_TOOL_IN_HOOK_BASIS)
+            # Use one reachable, downward-canted orientation for every demo.
+            # A fully horizontal ring rests on top of the horizontal hook;
+            # this modest cant gives vertical descent a component in the ring
+            # plane without requiring the unreachable fully vertical pose.
+            hang_cant_deg = -25.0
+            hang_cant = np.deg2rad(hang_cant_deg)
+            # Do not point the wrench handle directly down the hook axis. In
+            # that configuration the wrist camera looks through the black
+            # handle and the hook is geometrically occluded even for a
+            # full-visible grasp. A single modest in-plane yaw keeps the ring
+            # plane unchanged while exposing the hook beside the handle.
+            hang_yaw_deg = self.hang_yaw_deg
+            hang_yaw = np.deg2rad(hang_yaw_deg)
+            handle_horizontal = unit(
+                -np.cos(hang_yaw) * hook_direction + np.sin(hang_yaw) * side
+            )
+            hanging_tool_matrix = np.column_stack(
+                [
+                    np.cos(hang_cant) * handle_horizontal
+                    + np.sin(hang_cant) * world_up,
+                    unit(np.cross(world_up, handle_horizontal)),
+                    np.cos(hang_cant) * world_up
+                    - np.sin(hang_cant) * handle_horizontal,
+                ]
+            )
+            # The final ring center sits just below the hook axis so the upper
+            # inner rim bears the load while the gripper is still closed. The
+            # horizontal target stays on the hook axis throughout the final
+            # descent; with the ring plane leveled there is no need for a
+            # collision-dependent lateral preload.
+            seat_up_bias = -0.0030
+            seat_side_bias = 0.0
+            seat_along_fraction = 0.14
+            variation_params["hang_cant_deg"] = float(hang_cant_deg)
+            variation_params["hang_yaw_deg"] = float(hang_yaw_deg)
+            variation_params["seat_along_fraction"] = float(seat_along_fraction)
 
             def eef_for_hole(hole_position):
                 desired_tool_position = hole_position - hanging_tool_matrix.dot(local_hole)
@@ -1332,42 +1544,71 @@ class GeometricJointPolicy:
 
             high_hole = (
                 hook_start
-                + (0.08 * hook_length + transfer_along) * hook_direction
-                + (-0.017 + transfer_side) * side
-                + (0.0165 + transfer_up) * world_up
+                + (seat_along_fraction * hook_length + transfer_along)
+                * hook_direction
+                + (seat_side_bias + transfer_side) * side
+                + (0.0600 + transfer_up) * world_up
             )
             high_eef_position, high_eef_matrix = eef_for_hole(high_hole)
             lifted_hole = np.asarray(env.sim.data.site_xpos[hole_site]).copy()
-            if style == "direct_low" or not self.variation:
+            if not self.variation:
                 control_holes = []
+            elif style == "direct_low":
+                # Preserve the low, nearly straight family but solve it as two
+                # sequential Cartesian segments. The former single global IK
+                # jump was the only style shared by both failed states in the
+                # balanced pilot and frequently ended in a poor insertion
+                # joint basin.
+                control_holes = [
+                    0.5 * (lifted_hole + high_hole) + 0.005 * world_up
+                ]
             elif style == "high_arc":
                 control_holes = [
                     high_hole
-                    - (0.045 * motion_scale) * hook_direction
-                    + (0.060 * motion_scale) * world_up
+                    - (0.035 * motion_scale) * hook_direction
+                    + (0.035 * motion_scale) * world_up
                 ]
             elif style == "left_sweep":
                 control_holes = [
                     high_hole
-                    - (0.055 * motion_scale) * hook_direction
-                    + (0.040 * motion_scale) * side
-                    + (0.035 * motion_scale) * world_up
+                    - (0.035 * motion_scale) * hook_direction
+                    + (0.025 * motion_scale) * side
+                    + (0.025 * motion_scale) * world_up
                 ]
             elif style == "right_sweep":
                 control_holes = [
                     high_hole
-                    - (0.055 * motion_scale) * hook_direction
-                    - (0.045 * motion_scale) * side
-                    + (0.025 * motion_scale) * world_up
+                    - (0.035 * motion_scale) * hook_direction
+                    - (0.030 * motion_scale) * side
+                    + (0.020 * motion_scale) * world_up
                 ]
             elif style == "vertical_first":
-                # The longer 20.5 cm wrench has more rotational leverage than
-                # the original tool. A 5 cm vertical-first rise remains
-                # visually distinct while retaining the grasp through the
-                # subsequent rotation across randomized full / partial grasps.
-                control_holes = [lifted_hole + (0.050 * motion_scale) * world_up]
+                # Rise with the current wrist orientation before rotating the
+                # wrench toward the hook. The old waypoint used the final
+                # hanging orientation at the lifted XY position, forcing a
+                # large in-place rotation; that made this style account for
+                # nearly the entire full-vs-partial state-success gap.
+                vertical_rise = 0.025
+                vertical_hole = lifted_hole + (vertical_rise * motion_scale) * world_up
+                blend_hole = (
+                    0.45 * lifted_hole
+                    + 0.55 * high_hole
+                    + (0.012 * motion_scale) * world_up
+                )
+                control_holes = [vertical_hole, blend_hole]
+                control_pose_overrides = [
+                    (
+                        eef_position + (vertical_rise * motion_scale) * world_up,
+                        eef_matrix,
+                    ),
+                    None,
+                ]
+                variation_params["vertical_first_rise_m"] = float(vertical_rise)
             else:
                 raise RuntimeError(f"Unhandled ToolHang motion style: {style}")
+
+            if style != "vertical_first":
+                control_pose_overrides = [None] * len(control_holes)
 
             variation_params["transfer_control_offsets_hook_basis_m"] = [
                 hook_basis.T.dot(control - high_hole).tolist()
@@ -1376,8 +1617,13 @@ class GeometricJointPolicy:
             transfer_waypoint_joints = []
             transfer_ik_errors = []
             reference_qpos = np.asarray(env.sim.data.qpos[indexes], dtype=float).copy()
-            for control_hole in control_holes + [high_hole]:
-                control_eef_position, control_eef_matrix = eef_for_hole(control_hole)
+            for control_hole, pose_override in zip(
+                control_holes + [high_hole], control_pose_overrides + [None]
+            ):
+                if pose_override is None:
+                    control_eef_position, control_eef_matrix = eef_for_hole(control_hole)
+                else:
+                    control_eef_position, control_eef_matrix = pose_override
                 control_joints, control_error = self._global_ik(
                     env,
                     control_eef_position,
@@ -1390,30 +1636,50 @@ class GeometricJointPolicy:
                 reference_qpos = control_joints
             transfer_joints = transfer_waypoint_joints[-1]
             transfer_ik_error = max(transfer_ik_errors)
+            transfer_path = [lifted_hole] + control_holes + [high_hole]
+            transfer_path_length = float(
+                sum(
+                    np.linalg.norm(end - start)
+                    for start, end in zip(transfer_path[:-1], transfer_path[1:])
+                )
+            )
+            # The path is already rate-limited and parameterized as one
+            # continuous curve. Sixty-plus frames duplicated slow free-space
+            # motion and pushed otherwise clean Threading-reset trajectories
+            # beyond the PH phase-2 frame envelope after adding replay-complete
+            # grasp and seating dynamics.
+            transfer_frames = (54 if style == "vertical_first" else 46) + int(
+                frame_offsets[3]
+            )
+            variation_params["transfer_path_length_m"] = transfer_path_length
+            variation_params["transfer_frames"] = transfer_frames
             if control_holes:
                 move_through(
                     transfer_waypoint_joints,
                     1.0,
-                    48 + int(frame_offsets[3]),
+                    transfer_frames,
+                    start_slope=0.25,
                     end_slope=0.25,
                 )
             else:
                 move(
                     transfer_joints,
                     1.0,
-                    46 + int(frame_offsets[3]),
+                    transfer_frames,
+                    start_slope=0.25,
                     end_slope=0.25,
                 )
             transfer_debug = tool_hang_debug(env)
             running = finish_stage(
                 "transfer_rotate",
-                self._grasped(env) and transfer_debug["line_distance_m"] < 0.075,
+                self._grasped(env) and transfer_debug["line_distance_m"] < 0.100,
                 {
                     "tool_debug": transfer_debug,
                     "motion_style": style,
                     "control_holes": [control.tolist() for control in control_holes],
                     "global_ik_error": transfer_ik_error,
                     "global_ik_errors": transfer_ik_errors,
+                    "global_ik_final_error": float(transfer_ik_errors[-1]),
                 },
             )
 
@@ -1427,11 +1693,13 @@ class GeometricJointPolicy:
                     current_eef_position + high_hole - actual_hole,
                     current_eef_matrix,
                     restarts=18,
+                    position_weight=100.0,
                 )
                 move(
                     target_joints,
                     1.0,
-                    8,
+                    6,
+                    cartesian_parameterization=True,
                     start_slope=0.25,
                     end_slope=0.20 if correction_index == correction_count - 1 else 0.25,
                 )
@@ -1439,63 +1707,321 @@ class GeometricJointPolicy:
             hole = np.asarray(env.sim.data.site_xpos[hole_site])
             hook_alignment = self._wrist_alignment(env, hook_start)
             hole_alignment = self._wrist_alignment(env, hole)
+            hole_line_of_sight = self._wrist_line_of_sight(env, hole)
+            hook_line_of_sight = self._wrist_line_of_sight(env, hook_start)
+            hook_probe_visibility = {
+                f"fraction_{fraction:.2f}": self._wrist_line_of_sight(
+                    env, hook_start + fraction * hook_vector
+                )
+                for fraction in (0.0, 0.25, 0.50, 0.75, 1.0)
+            }
+            if grasp_visibility_regime is not None:
+                # Visibility is a label / acceptance property, not a physical
+                # policy stage. Applying it here changes which actions execute
+                # for full versus partial trajectories and biases their state
+                # success rates. collection_acceptance verifies the measured
+                # camera ray after the common physical trajectory completes.
+                visibility_gate = True
+            else:
+                visibility_gate = bool(
+                    episode_grasp_profile == "rear"
+                    or (hole_alignment > 0.85 and hook_alignment > 0.75)
+                )
             running = finish_stage(
                 "preinsert",
                 self._grasped(env)
-                and preinsert_debug["line_distance_m"] < 0.030
-                and (
-                    episode_grasp_profile == "rear"
-                    or (hole_alignment > 0.85 and hook_alignment > 0.75)
-                ),
+                and preinsert_debug["line_distance_m"] < 0.070
+                and visibility_gate,
                 {
                     "tool_debug": preinsert_debug,
                     "wrist_hole_alignment": hole_alignment,
                     "wrist_hook_alignment": hook_alignment,
+                    "visibility_gate": visibility_gate,
                     "wrist_visibility": {
-                        "tool_hole_center": self._wrist_line_of_sight(env, hole),
-                        "hook_start": self._wrist_line_of_sight(env, hook_start),
+                        "tool_hole_center": hole_line_of_sight,
+                        "hook_start": hook_line_of_sight,
+                        "hook_axis_probes": hook_probe_visibility,
                     },
                 },
             )
 
         if running:
-            insert_hole = (
+            # All free-space styles converge here. Approach the hook through a
+            # common three-part template, then keep the arm completely still
+            # while verifying that the ring remains seated around the hook.
+            # This replaces the former contact-only gate that released with an
+            # 8--11 mm line error and relied on gravity to finish insertion.
+            # At preinsert the ring is already aligned in hook-axis and lateral
+            # coordinates. All retained trajectories now lower it vertically;
+            # no diagonal side sweep is allowed in the precision phase.
+            canonical_holes = [
                 hook_start
-                + (0.06 * hook_length + insert_along) * hook_direction
-                + (0.0043 + insert_side) * side
-                + (0.0065 + insert_up) * world_up
-            )
+                    + (seat_along_fraction * hook_length + insert_along) * hook_direction
+                    + (seat_side_bias + insert_side) * side
+                    + (0.0350 + insert_up) * world_up,
+                hook_start
+                    + (seat_along_fraction * hook_length + insert_along) * hook_direction
+                    + (seat_side_bias + insert_side) * side
+                    + (0.0180 + insert_up) * world_up,
+                hook_start
+                    + (seat_along_fraction * hook_length + insert_along) * hook_direction
+                    + insert_side * side
+                    + (0.0080 + insert_up) * world_up,
+                hook_start
+                    + (seat_along_fraction * hook_length + insert_along) * hook_direction
+                    + insert_side * side
+                    + (seat_up_bias + insert_up) * world_up,
+            ]
             insertion_progress = []
+            insertion_debug = []
+            insertion_ik_errors = []
             target_joints = np.asarray(env.sim.data.qpos[indexes], dtype=float).copy()
-            insert_corrections = 4
-            for correction_index in range(insert_corrections):
-                actual_hole = np.asarray(env.sim.data.site_xpos[hole_site]).copy()
-                current_eef_position, current_eef_matrix = get_eef_pose(env)
-                target_joints, _ = self._global_ik(
-                    env,
-                    current_eef_position + insert_hole - actual_hole,
-                    current_eef_matrix,
-                    restarts=20,
+            for phase_index, (target_hole, phase_frames) in enumerate(
+                zip(canonical_holes, (8, 12, 10, 18))
+            ):
+                # Re-solve once halfway through the seating phase so contact
+                # tracking error is corrected without introducing a new path
+                # family or a release-dependent settling motion.
+                # Re-solve the two free-space descent targets incrementally.
+                # A single global IK solve can leave 7--12 mm of vertical
+                # tracking error for near-ring full grasps even though there
+                # is no contact. Multiple short Cartesian closes converge
+                # before the final axial insertion begins.
+                # Re-solve every free-space descent anchor after the previous
+                # segment has physically tracked. One solve per anchor left
+                # 8--20 mm of residual error on randomized grasps; once the
+                # ring touched the hook, the bounded contact correction could
+                # no longer recover. These extra short segments follow the
+                # same vertical path and add no new motion mode.
+                correction_frames = (
+                    (8, 6)
+                    if phase_index == 0
+                    else (8, 6)
+                    if phase_index == 1
+                    else (6, 6, 6)
                 )
+                for correction_index, frames in enumerate(correction_frames):
+                    actual_hole = np.asarray(env.sim.data.site_xpos[hole_site]).copy()
+                    current_eef_position, current_eef_matrix = get_eef_pose(env)
+                    target_joints, ik_error = self._global_ik(
+                        env,
+                        current_eef_position + target_hole - actual_hole,
+                        current_eef_matrix,
+                        reference_qpos=np.asarray(
+                            env.sim.data.qpos[indexes], dtype=float
+                        ).copy(),
+                        restarts=28,
+                        position_weight=100.0,
+                    )
+                    insertion_ik_errors.append(float(ik_error))
+                    move(
+                        target_joints,
+                        1.0,
+                        frames,
+                        cartesian_parameterization=True,
+                        start_slope=0.15 if phase_index == 0 and correction_index == 0 else 0.10,
+                        end_slope=0.10,
+                    )
+                    debug = tool_hang_debug(env)
+                    insertion_progress.append(debug["normalized_insertion"])
+                    insertion_debug.append(debug)
+
+            # Roll the ring edge over the hook with a small, controlled
+            # closed-gripper correction. This used to live inside the release
+            # branch for rear grasps, which hid the actual seating event from
+            # the insert gate. It is now part of the canonical insertion for
+            # every trajectory and is verified before any opening command.
+            current_eef_position, current_eef_matrix = get_eef_pose(env)
+            seat_tilt_joints, seat_tilt_ik_error = self._global_ik(
+                env,
+                current_eef_position
+                + 0.0013 * hook_direction
+                - 0.0005 * world_up,
+                current_eef_matrix,
+                reference_qpos=np.asarray(
+                    env.sim.data.qpos[indexes], dtype=float
+                ).copy(),
+                restarts=24,
+                position_weight=100.0,
+            )
+            move(
+                seat_tilt_joints,
+                1.0,
+                8,
+                cartesian_parameterization=True,
+                start_slope=0.10,
+                end_slope=0.10,
+            )
+            target_joints = seat_tilt_joints
+
+            # Contact can leave the ring a few millimetres off the hook axis.
+            # Finish with up to six bounded, slow line-error corrections while the
+            # gripper remains closed. The command acts only through the robot;
+            # the wrench qpos / qvel are never modified.
+            for _ in range(6):
+                correction_debug = tool_hang_debug(env)
+                residual = np.asarray(
+                    correction_debug["line_residual_world_m"], dtype=float
+                )
+                # Aim near the center of the clean gate. The former -3.5 mm
+                # target sat only 0.5 mm inside the <=4 mm acceptance limit,
+                # and its >=3 mm early-stop condition actively moved already
+                # well-aligned rings away from the hook axis.
+                desired_residual = -0.0015 * world_up
+                along_deficit = max(
+                    0.0,
+                    (0.065 - correction_debug["normalized_insertion"])
+                    * hook_length,
+                )
+                cartesian_correction = (
+                    -0.65 * (residual - desired_residual)
+                    + along_deficit * hook_direction
+                )
+                correction_norm = float(np.linalg.norm(cartesian_correction))
+                correction_limit = 0.004
+                if correction_norm > correction_limit:
+                    cartesian_correction *= correction_limit / correction_norm
+                current_eef_position, current_eef_matrix = get_eef_pose(env)
+                target_joints, correction_ik_error = self._global_ik(
+                    env,
+                    current_eef_position + cartesian_correction,
+                    current_eef_matrix,
+                    reference_qpos=np.asarray(
+                        env.sim.data.qpos[indexes], dtype=float
+                    ).copy(),
+                    restarts=24,
+                    position_weight=100.0,
+                )
+                insertion_ik_errors.append(float(correction_ik_error))
                 move(
                     target_joints,
                     1.0,
-                    10,
-                    start_slope=0.20 if correction_index == 0 else 0.15,
-                    end_slope=0.0 if correction_index == insert_corrections - 1 else 0.15,
+                    6,
+                    cartesian_parameterization=True,
+                    start_slope=0.10,
+                    end_slope=0.10,
                 )
-                insertion_progress.append(tool_hang_debug(env)["normalized_insertion"])
+                debug = tool_hang_debug(env)
+                insertion_progress.append(debug["normalized_insertion"])
+                insertion_debug.append(debug)
+                if (
+                    debug["hole_frame_contact"]
+                    and debug["hole_straddles_hook"]
+                    and debug["line_distance_m"] <= PRE_RELEASE_LINE_DISTANCE_MAX
+                    and debug["normalized_insertion"] > PRE_RELEASE_INSERTION_MIN
+                ):
+                    break
+
+            # Join insertion and release with one authored motion. The former
+            # implementation held a fixed arm target for up to 32 frames and
+            # then opened in place for another eight. Those repeated actions
+            # taught BC to stop immediately before release. Here the arm keeps
+            # advancing a small distance along the same seating direction
+            # while the gripper opens monotonically. The first part verifies
+            # stable seating; the remaining samples continue the exact same
+            # curve through release.
+            transition_start_joints = previous_action[:-1].copy()
+            transition_start_eef, transition_eef_matrix = get_eef_pose(env)
+            transition_target_joints, transition_ik_error = self._global_ik(
+                env,
+                transition_start_eef
+                + 0.0020 * hook_direction
+                - 0.0010 * world_up,
+                transition_eef_matrix,
+                reference_qpos=transition_start_joints,
+                restarts=24,
+                position_weight=100.0,
+            )
+            transition_progress = np.asarray(
+                [
+                    self._hermite_progress(
+                        (frame + 1) / INSERT_RELEASE_TRANSITION_STEPS,
+                        0.20,
+                        0.20,
+                    )
+                    for frame in range(INSERT_RELEASE_TRANSITION_STEPS)
+                ],
+                dtype=float,
+            )
+            transition_gripper = np.r_[
+                np.linspace(1.0, 0.75, INSERT_RELEASE_PREOPEN_STEPS),
+                np.linspace(
+                    0.75,
+                    -1.0,
+                    INSERT_RELEASE_TRANSITION_STEPS
+                    - INSERT_RELEASE_PREOPEN_STEPS
+                    + 1,
+                )[1:],
+            ]
+            transition_joint_targets = transition_start_joints[None, :] + (
+                transition_progress[:, None]
+                * (transition_target_joints - transition_start_joints)[None, :]
+            )
+            transition_arm_deltas = np.linalg.norm(
+                np.diff(
+                    np.vstack([transition_start_joints, transition_joint_targets]),
+                    axis=0,
+                ),
+                axis=1,
+            )
+            insert_release_continuous = bool(
+                np.all(np.diff(transition_progress) > 0.0)
+                and np.all(np.diff(transition_gripper) <= 1e-12)
+                and np.min(transition_arm_deltas) > 1e-7
+            )
+            pre_seated_debug = tool_hang_debug(env)
+            seated_run = 0
+            seated_debug = []
+            for target_joints, gripper_command in zip(
+                transition_joint_targets[:INSERT_RELEASE_PREOPEN_STEPS],
+                transition_gripper[:INSERT_RELEASE_PREOPEN_STEPS],
+            ):
+                step(np.r_[target_joints, gripper_command])
+                debug = tool_hang_debug(env)
+                seated_debug.append(debug)
+                insertion_progress.append(debug["normalized_insertion"])
+                insertion_debug.append(debug)
+                seated = bool(
+                    self._grasped(env)
+                    and debug["hole_frame_contact"]
+                    and debug["hole_straddles_hook"]
+                    and debug["line_distance_m"] <= PRE_RELEASE_LINE_DISTANCE_MAX
+                    and PRE_RELEASE_INSERTION_MIN
+                    < debug["normalized_insertion"]
+                    < 1.0
+                )
+                seated_run = seated_run + 1 if seated else 0
 
             insert_debug = tool_hang_debug(env)
+            seating_progress = insertion_progress[-INSERT_RELEASE_PREOPEN_STEPS:]
+            insertion_monotonic = bool(
+                len(seating_progress) < 2
+                or np.all(np.diff(seating_progress) >= -0.010)
+            )
             running = finish_stage(
                 "insert",
-                self._grasped(env)
-                and insert_debug["hole_frame_contact"]
-                and insert_debug["line_distance_m"] < 0.012
-                and insert_debug["normalized_insertion"] > 0.02,
+                seated_run >= PRE_RELEASE_SEATED_STEPS
+                and insertion_monotonic
+                and insert_release_continuous,
                 {
                     "tool_debug": insert_debug,
+                    "pre_seated_tool_debug": pre_seated_debug,
                     "insertion_progress": insertion_progress,
+                    "insertion_debug": insertion_debug,
+                    "insertion_ik_errors": insertion_ik_errors,
+                    "seat_tilt_ik_error": float(seat_tilt_ik_error),
+                    "insert_release_transition_ik_error": float(transition_ik_error),
+                    "insertion_monotonic": insertion_monotonic,
+                    "insert_release_continuous": insert_release_continuous,
+                    "insert_release_min_arm_target_delta": float(
+                        np.min(transition_arm_deltas)
+                    ),
+                    "insert_release_max_arm_target_delta": float(
+                        np.max(transition_arm_deltas)
+                    ),
+                    "pre_release_seated_required": PRE_RELEASE_SEATED_STEPS,
+                    "pre_release_seated_run": seated_run,
+                    "pre_release_seated_debug": seated_debug,
                     "wrist_visibility": {
                         "tool_hole_center": self._wrist_line_of_sight(
                             env, np.asarray(env.sim.data.site_xpos[hole_site]).copy()
@@ -1506,74 +2032,76 @@ class GeometricJointPolicy:
             )
 
         if running:
-            # Open in place and allow gravity to rotate the wrench into its
-            # native hanging state. PH releases first peel slightly downward
-            # and sideways; the large retreat happens only after the wrench is
-            # independently supported by the hook.
+            # Continue the already-started insertion-to-release curve. There
+            # is no duplicated endpoint or stationary action at the stage
+            # boundary. Then retreat along a fixed safe direction and require
+            # twenty consecutive native-success frames.
+            release_debug = []
+            for target_joints, gripper_command in zip(
+                transition_joint_targets[INSERT_RELEASE_PREOPEN_STEPS:],
+                transition_gripper[INSERT_RELEASE_PREOPEN_STEPS:],
+            ):
+                step(np.r_[target_joints, gripper_command])
+                release_debug.append(tool_hang_debug(env))
+            # Seed retreat IK from the final 7-D command, not the complete
+            # (steps, 7) transition matrix. Passing the matrix silently
+            # broadcast through the solver and could select a distant joint
+            # branch, producing a large target jump after an otherwise clean
+            # release.
+            target_joints = transition_target_joints[-1].copy()
             current_eef_position, current_eef_matrix = get_eef_pose(env)
-            peel_joints, _ = self._global_ik(
+            released_hole = np.asarray(env.sim.data.site_xpos[hole_site]).copy()
+            retreat_away_from_ring = unit(
+                current_eef_position - released_hole,
+                fallback=side,
+            )
+            retreat_joints, retreat_ik_error = self._global_ik(
                 env,
                 current_eef_position
-                + 0.0013 * hook_direction
-                + 0.0030 * side
-                - 0.0065 * world_up,
+                + 0.050 * retreat_away_from_ring
+                + 0.015 * world_up,
                 current_eef_matrix,
-                restarts=8,
+                reference_qpos=target_joints,
+                restarts=24,
             )
-            if episode_grasp_profile == "rear":
-                # Seat the long-lever rear grasp while it is still controlled,
-                # then release at the supported pose. Opening first leaves the
-                # hole 8--10 mm off axis and turns the tail of the trajectory
-                # into a long, variable gravity settle.
-                move(peel_joints, 1.0, 8)
-                hold(peel_joints, -1.0, 12)
-            else:
-                hold(target_joints, -1.0, 10)
-                move(peel_joints, -1.0, 10)
-            release_success = bool(env._check_success())
-            release_success |= bool(env._check_success())
-            native_run = 1 if release_success else 0
-            for _ in range(30):
-                if native_run >= 10:
-                    break
-                step(np.r_[peel_joints, -1.0])
+            move(
+                retreat_joints,
+                -1.0,
+                12,
+                cartesian_parameterization=True,
+            )
+            persistent_run = 0
+            persistent_history = []
+            persistent_start = steps
+            set_demo_recording(False)
+            # `move` rate-limits each joint and can legitimately stop short
+            # of the raw IK target. Re-commanding `retreat_joints` here would
+            # create one unrecorded but physically real jump before the
+            # persistence audit, and it also contaminated the smoothness
+            # metrics. Hold the final command actually issued by `move`.
+            persistent_target = previous_action[:-1].copy()
+            # Terminal audit only: never resume this episode's recording.
+            # Resuming used to overwrite the last recorded post-state with a
+            # state one second later while retaining the old action.
+            for _ in range(POST_RELEASE_SUCCESS_STEPS):
+                step(np.r_[persistent_target, -1.0])
                 native_now = bool(env._check_success())
-                release_success |= native_now
-                native_run = native_run + 1 if native_now else 0
-
-            # If the wrench is already independently supported for ten
-            # frames, the native task is complete; recording a large cosmetic
-            # retreat would only pad the training trajectory. Harder cases use
-            # the old retreat as a fallback, then receive a bounded settle.
-            persistent_success = native_run >= 10
-            if not persistent_success:
-                current_eef_position, current_eef_matrix = get_eef_pose(env)
-                retreat_joints, _ = self._global_ik(
-                    env,
-                    current_eef_position
-                    + (-0.06 + retreat_along) * hook_direction
-                    + retreat_side * side
-                    + (0.04 + retreat_up) * world_up,
-                    current_eef_matrix,
-                    restarts=22,
-                )
-                move(retreat_joints, -1.0, retreat_frames)
-                release_success |= bool(env._check_success())
-                persistent_run = 0
-                for _ in range(40):
-                    step(np.r_[retreat_joints, -1.0])
-                    native_now = bool(env._check_success())
-                    release_success |= native_now
-                    persistent_run = persistent_run + 1 if native_now else 0
-                    if persistent_run >= 10:
-                        break
-                persistent_success = persistent_run >= 10
+                persistent_history.append(native_now)
+                persistent_run = persistent_run + 1 if native_now else 0
+            validation_only_steps["post_release_persistence"] = (
+                steps - persistent_start
+            )
+            persistent_success = persistent_run >= POST_RELEASE_SUCCESS_STEPS
             finish_stage(
                 "release_retreat",
                 persistent_success and not self._grasped(env),
                 {
-                    "release_success": release_success,
-                    "persistent_success_10": persistent_success,
+                    "pre_release_debug": insert_debug,
+                    "release_debug": release_debug,
+                    "retreat_ik_error": float(retreat_ik_error),
+                    "persistent_success_required": POST_RELEASE_SUCCESS_STEPS,
+                    "persistent_success_run": persistent_run,
+                    "persistent_success_history": persistent_history,
                     "final_debug": tool_hang_debug(env),
                 },
             )
@@ -1598,6 +2126,10 @@ class GeometricJointPolicy:
             "trajectory_source": "generated_from_geometric_waypoints",
             "ph_frame_replay": False,
             "steps": int(steps),
+            "training_recorded_steps": int(
+                steps - sum(validation_only_steps.values())
+            ),
+            "validation_only_steps": validation_only_steps,
             "initial_tool_position": initial_tool_position.tolist(),
             "initial_hole_position": initial_hole.tolist(),
             "wrench_pose_assist_count": 0,
@@ -1887,11 +2419,44 @@ def finalize_episode(env, success, stats, keep_failed):
         return
     episode_directory = env.ep_directory
     if env.has_interaction:
+        if env.collect_freq == 1:
+            recorded_actions = len(env.action_infos)
+            recorded_states = len(env.states)
+            expected_actions = int(stats.get("training_recorded_steps", recorded_actions))
+            recorded_times = np.asarray(
+                [np.asarray(state, dtype=float)[0] for state in env.states], dtype=float
+            )
+            state_dts = np.diff(recorded_times)
+            expected_dt = float(env.control_timestep)
+            integrity = {
+                "recorded_actions": recorded_actions,
+                "recorded_states": recorded_states,
+                "states_equal_actions_plus_one": recorded_states
+                == recorded_actions + 1,
+                "recorded_actions_match_policy_stats": recorded_actions
+                == expected_actions,
+                "expected_state_dt_s": expected_dt,
+                "max_state_dt_s": float(np.max(state_dts)) if len(state_dts) else 0.0,
+                "min_state_dt_s": float(np.min(state_dts)) if len(state_dts) else 0.0,
+                "contiguous_control_steps": bool(
+                    len(state_dts) == 0
+                    or np.allclose(state_dts, expected_dt, atol=1e-8, rtol=0.0)
+                ),
+            }
+            stats["recording_integrity"] = integrity
+            if not all(
+                (
+                    integrity["states_equal_actions_plus_one"],
+                    integrity["recorded_actions_match_policy_stats"],
+                    integrity["contiguous_control_steps"],
+                )
+            ):
+                raise RuntimeError(f"Invalid masked demonstration recording: {integrity}")
         env._flush()
         env.has_interaction = False
     if episode_directory and os.path.isdir(episode_directory):
         with open(os.path.join(episode_directory, "policy_stats.json"), "w") as stream:
-            json.dump(stats, stream, indent=2)
+            json.dump(stats, stream, indent=2, default=numpy_json_default)
         if not success and not keep_failed:
             shutil.rmtree(episode_directory)
 
@@ -1903,27 +2468,99 @@ def collection_acceptance(native_success, stats, wrist_requirement="any", requir
         {},
     )
     hole_visibility = preinsert.get("wrist_visibility", {}).get("tool_hole_center", {})
+    hook_visibility = preinsert.get("wrist_visibility", {}).get("hook_start", {})
+    hole_xy = np.asarray(hole_visibility.get("normalized_image_xy", [np.inf, np.inf]), dtype=float)
+    hook_xy = np.asarray(hook_visibility.get("normalized_image_xy", [np.inf, np.inf]), dtype=float)
+    relative_pixel_separation = (
+        float(np.linalg.norm(hole_xy - hook_xy))
+        if np.all(np.isfinite(hole_xy)) and np.all(np.isfinite(hook_xy))
+        else 0.0
+    )
+    both_with_margin = bool(
+        np.all(np.isfinite(hole_xy))
+        and np.all(np.isfinite(hook_xy))
+        and np.max(np.abs(hole_xy)) <= 0.995
+        and np.max(np.abs(hook_xy)) <= 0.995
+    )
     if wrist_requirement == "visible":
         checks["wrist_visible"] = bool(hole_visibility.get("center_ray_visible"))
     elif wrist_requirement == "hidden":
         checks["wrist_hidden"] = bool(hole_visibility.get("hidden_from_wrist"))
     visibility_regime = stats.get("variation", {}).get("grasp_visibility_regime")
     if visibility_regime == "full_visible":
-        checks["balanced_full_visible"] = bool(hole_visibility.get("center_ray_visible"))
+        checks["balanced_full_ring_visible"] = bool(
+            hole_visibility.get("center_ray_visible")
+        )
+        checks["balanced_full_hook_visible"] = bool(
+            hook_visibility.get("center_ray_visible")
+        )
+        checks["balanced_full_image_margin"] = both_with_margin
+        checks["balanced_full_relative_separation"] = relative_pixel_separation >= 0.08
     elif visibility_regime == "partial_hidden":
         checks["balanced_partial_hidden"] = bool(hole_visibility.get("hidden_from_wrist"))
+    checks["recording_contiguous"] = bool(
+        stats.get("recording_integrity", {}).get("contiguous_control_steps", True)
+    )
     if require_ph_quality:
         smooth = stats.get("smoothness", {})
+        insert = next(
+            (stage for stage in stats.get("stage_checks", []) if stage.get("name") == "insert"),
+            {},
+        )
+        transfer = next(
+            (
+                stage
+                for stage in stats.get("stage_checks", [])
+                if stage.get("name") == "transfer_rotate"
+            ),
+            {},
+        )
+        insert_debug = insert.get("tool_debug", {})
         threading_style_start = (
             stats.get("variation", {}).get("reset", {}).get("robot_start_mode")
             == "threading_continuous"
         )
-        frame_low, frame_high = (140, 290) if threading_style_start else (165, 223)
+        frame_low, frame_high = (140, 325) if threading_style_start else (165, 240)
+        quality_frames = stats.get("training_recorded_steps", stats.get("steps", 0))
         checks.update(
             {
+                "clean_pre_release_contact": bool(insert_debug.get("hole_frame_contact")),
+                "clean_pre_release_straddle": bool(insert_debug.get("hole_straddles_hook")),
+                "clean_pre_release_line_distance": insert_debug.get(
+                    "line_distance_m", float("inf")
+                )
+                <= PRE_RELEASE_LINE_DISTANCE_MAX,
+                "clean_pre_release_insertion": PRE_RELEASE_INSERTION_MIN
+                < insert_debug.get("normalized_insertion", float("-inf"))
+                < 1.0,
+                "clean_pre_release_moving_seated_run": insert.get(
+                    "pre_release_seated_run", 0
+                )
+                >= PRE_RELEASE_SEATED_STEPS,
+                "clean_insertion_monotonic": bool(insert.get("insertion_monotonic")),
+                "clean_insert_release_continuous": bool(
+                    insert.get("insert_release_continuous")
+                ),
+                "clean_grasp_ik": stats.get("variation", {}).get(
+                    "grasp_ik_error", float("inf")
+                )
+                <= CLEAN_GRASP_IK_ERROR_MAX,
+                "clean_transfer_ik": transfer.get(
+                    "global_ik_final_error",
+                    transfer.get("global_ik_error", float("inf")),
+                )
+                <= CLEAN_TRANSFER_IK_ERROR_MAX,
                 f"ph_frames_{frame_low}_{frame_high}": frame_low
-                <= stats.get("steps", 0)
+                <= quality_frames
                 <= frame_high,
+                "clean_max_joint_target_delta": smooth.get(
+                    "max_joint_target_delta", float("inf")
+                )
+                <= 0.065,
+                "clean_max_joint_target_jerk": smooth.get(
+                    "max_joint_target_jerk", float("inf")
+                )
+                <= 0.060,
                 "ph_max_actual_joint_step": smooth.get("max_actual_joint_step", float("inf"))
                 <= 0.07899320978201528,
                 "ph_max_actual_joint_second_difference": smooth.get(
@@ -2000,6 +2637,18 @@ def parse_args():
         help="Freeze one local-X grasp coordinate across retries.",
     )
     parser.add_argument(
+        "--hang-yaw-deg",
+        type=float,
+        default=0.0,
+        help="In-plane wrench yaw at the hook; positive yaw exposes the hook beside the handle.",
+    )
+    parser.add_argument(
+        "--grasp-yaw-deg",
+        type=float,
+        default=None,
+        help="Override oblique gripper yaw; the default keeps the stable orthogonal grasp.",
+    )
+    parser.add_argument(
         "--robot-start-indexes",
         type=int,
         nargs="+",
@@ -2048,6 +2697,7 @@ def main():
             flush_freq=args.horizon + 1,
             record_joint_position_fields=args.record_joint_training_fields,
             joint_delta_scale=args.joint_delta_scale,
+            reload_from_xml_on_episode_start=False,
         )
 
     policy = GeometricJointPolicy(
@@ -2060,6 +2710,8 @@ def main():
         robot_start_indexes=args.robot_start_indexes,
         motion_style=args.motion_style,
         grasp_offset_local_x_override=args.grasp_offset_local_x,
+        hang_yaw_deg=args.hang_yaw_deg,
+        grasp_yaw_deg=args.grasp_yaw_deg,
     )
     results = []
     attempts = successes = 0
@@ -2119,7 +2771,14 @@ def main():
     output_directory = args.directory if args.collect else (args.summary_dir or args.video_dir or REPO_ROOT / "output")
     output_directory.mkdir(parents=True, exist_ok=True)
     summary_path = output_directory / "tool_hang_wrench_joint_summary.json"
-    summary_path.write_text(json.dumps(summary, indent=2) + "\n")
+    summary_path.write_text(
+        json.dumps(
+            summary,
+            indent=2,
+            default=numpy_json_default,
+        )
+        + "\n"
+    )
     print(json.dumps({key: value for key, value in summary.items() if key != "rollouts"}, indent=2))
     print(f"summary={summary_path}")
 
