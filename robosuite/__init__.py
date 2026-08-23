@@ -8,6 +8,7 @@ from robosuite.environments.manipulation.pick_place import PickPlace
 from robosuite.environments.manipulation.door import Door
 from robosuite.environments.manipulation.wipe import Wipe
 from robosuite.environments.manipulation.tool_hang import ToolHang
+from robosuite.environments.manipulation.tool_hang_wrench_only import ToolHangWrenchOnly
 from robosuite.environments.manipulation.threading import (
     Threading,
     Threading_D0,

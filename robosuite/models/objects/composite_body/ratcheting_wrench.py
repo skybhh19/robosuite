@@ -34,6 +34,8 @@ class RatchetingWrenchObject(CompositeBodyObject):
         height_2=0.05,
         ngeoms=8,
         grip_size=None,
+        grip_density=None,
+        grip_friction=(1.0, 0.005, 0.0001),
         # rgba=None,
         density=1000.0,
         solref=(0.02, 1.0),
@@ -47,6 +49,8 @@ class RatchetingWrenchObject(CompositeBodyObject):
         self.heights = (height_1, height_2)
         self.ngeoms = ngeoms
         self.grip_size = tuple(grip_size) if grip_size is not None else None
+        self.grip_density = density if grip_density is None else float(grip_density)
+        self.grip_friction = tuple(grip_friction)
 
         # Define materials we want to use for this object
         tex_attrib = {
@@ -129,10 +133,10 @@ class RatchetingWrenchObject(CompositeBodyObject):
                     name="grip",
                     size=[self.grip_size[0], self.grip_size[0], self.grip_size[1]],
                     rgba=(0.13, 0.13, 0.13, 1.0),
-                    density=density,
+                    density=self.grip_density,
                     solref=solref,
                     solimp=solimp,
-                    friction=(1.0, 0.005, 0.0001),  # use default friction
+                    friction=self.grip_friction,
                 )
             )
             positions.append(np.zeros(3))

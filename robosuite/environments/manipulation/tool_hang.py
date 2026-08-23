@@ -270,6 +270,15 @@ class ToolHang(ManipulationEnv):
             quat=[0.39713290333747864, 0.27807527780532837, 0.5016612410545349, 0.7164464592933655],
         )
 
+        # Preserve the canonical Square / Threading external view under a
+        # distinct name so ToolHang's custom agentview and the standard view
+        # can be trained and evaluated concurrently.
+        mujoco_arena.set_camera(
+            camera_name="standard_agentview",
+            pos=[0.5, 0.0, 1.35],
+            quat=[0.653, 0.271, 0.271, 0.653],
+        )
+
         # Add sideview
         mujoco_arena.set_camera(
             camera_name="sideview",
@@ -321,10 +330,10 @@ class ToolHang(ManipulationEnv):
         self.real_tool_args = dict(
             name="tool",
             handle_size=(
-                (16.5 / 200.0),
+                getattr(self, "tool_handle_half_length", (16.5 / 200.0)),
                 (1.75 / 200.0),
                 (0.32 / 200.0),
-            ),  # 16.5 cm length, 1.75 cm width, 0.32 cm thick (1.5 cm with foam)
+            ),  # default: 16.5 cm full length; phase-2 may extend the silver handle
             outer_radius_1=(3.5 / 200.0),  # larger hole 3.5 cm outer diameter
             inner_radius_1=(2.1 / 200.0),  # reduced larger hole 2.1 cm inner diameter (from real world 2.3 cm)
             height_1=(0.7 / 200.0),  # 0.7 cm height
@@ -332,7 +341,14 @@ class ToolHang(ManipulationEnv):
             inner_radius_2=(2.0 / 200.0),  # smaller hole 2 cm outer diameter
             height_2=(0.7 / 200.0),  # 0.7 cm height
             ngeoms=8,
-            grip_size=((3 / 200.0), (8.0 / 200.0)),  # 8 cm length, 3 cm thick
+            # Scripted variants may override the metal-handle and black-grip
+            # lengths independently; ring sites follow the handle geometry.
+            grip_size=(
+                (3 / 200.0),
+                getattr(self, "tool_grip_half_length", (8.0 / 200.0)),
+            ),  # default: 8 cm full length, 3 cm thick
+            grip_density=getattr(self, "tool_grip_density", 2000.0),
+            grip_friction=getattr(self, "tool_grip_friction", (1.0, 0.005, 0.0001)),
             density=2000.0,
             solref=(0.02, 1.0),
             solimp=(0.998, 0.998, 0.001),
