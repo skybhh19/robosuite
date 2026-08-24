@@ -1,7 +1,7 @@
 """Collect scripted demonstrations for the Threading task.
 
 Example:
-    $ python robosuite/scripts/collect_threading_scripted.py --num-demos 1 --render
+    $ python robosuite/scripts/collect_threading_scripted_grasp_angle.py --num-demos 1 --render
 """
 
 import argparse
@@ -20,12 +20,41 @@ if str(REPO_ROOT) not in sys.path:
 
 import robosuite as suite
 import robosuite.utils.transform_utils as T
+from robosuite.models.objects.composite.needle import NEEDLE_SHAFT_HALF_LENGTH
 from robosuite.utils.ik_utils import IKSolver
 from robosuite.wrappers import DataCollectionWrapper
 
 
 POSITION_SCALE = np.array([0.05, 0.05, 0.05])
 ORIENTATION_SCALE = np.array([0.5, 0.5, 0.5])
+PATH_COMMAND_POSITION_TOLERANCE = 1e-6
+PATH_COMMAND_ORIENTATION_TOLERANCE_DEG = 1e-3
+GRIPPER_CLOSE_COMMAND_THRESHOLD = 0.99
+GRIPPER_CLOSE_MOTION_THRESHOLD = 1e-4
+GRIPPER_CLOSE_STABLE_STEPS = 3
+GRIPPER_CLOSE_MAX_STEPS = 32
+# Reference steps define curve speed; independent caps bound OSC convergence time.
+NOMINAL_STAGE_STEPS = {
+    "aim_approach": 45,
+    "aim_descend": 45,
+    "close_gripper": 24,
+    "grasp_probe_lift": 14,
+    "lift_arc": 60,
+    "align": 50,
+    "pre_insert": 1,
+    "insert_through": 65,
+    "hold_after_insert": 10,
+}
+OSC_STAGE_MAX_STEPS = {
+    "aim_continuous": 135,
+    "close_gripper": GRIPPER_CLOSE_MAX_STEPS,
+    "grasp_probe_lift": 22,
+    "lift_arc": 150,
+    "align": 90,
+    "pre_insert": 20,
+    "insert_through": 135,
+    "hold_after_insert": 18,
+}
 MOTION_STYLES = [
     "direct_low",
     "high_arc",
@@ -66,6 +95,12 @@ def rotation_between(source, target):
 def smoothstep(x):
     x = np.clip(x, 0.0, 1.0)
     return x * x * (3.0 - 2.0 * x)
+
+
+def minimum_jerk(x):
+    """Return a quintic blend with zero endpoint velocity and acceleration."""
+    x = np.clip(x, 0.0, 1.0)
+    return x**3 * (10.0 - 15.0 * x + 6.0 * x**2)
 
 
 def quadratic_bezier(start, control, end, t):
@@ -124,13 +159,13 @@ def needle_state(env):
         "xaxis": unit(needle_mat[:, 0]),
         "yaxis": yaxis,
         "zaxis": unit(needle_mat[:, 2], fallback=[0.0, 0.0, 1.0]),
-        "tip": needle_center - 0.06 * yaxis,
-        "handle_side": needle_center + 0.06 * yaxis,
+        "tip": needle_center - NEEDLE_SHAFT_HALF_LENGTH * yaxis,
+        "handle_side": needle_center + NEEDLE_SHAFT_HALF_LENGTH * yaxis,
     }
 
 
 def ring_state(env):
-    """Return ring center and opening normal."""
+    """Return the ring center and an oriented orthonormal aperture frame."""
     ring_pos = np.zeros(3)
     ring_mat = None
     for i in range(env.tripod.num_ring_geoms):
@@ -140,21 +175,45 @@ def ring_state(env):
             ring_mat = mat
     ring_pos /= env.tripod.num_ring_geoms
     normal = unit(ring_mat[:, 0], fallback=[1.0, 0.0, 0.0])
+    tangent = unit(ring_mat[:, 1], fallback=[1.0, 0.0, 0.0])
+    vertical = unit(ring_mat[:, 2], fallback=[0.0, 0.0, 1.0])
     # Match D0's fixed insertion convention: approach from world +Y and pass
     # through the ring toward world -Y, never from the back side.
     env_name = env.unwrapped.__class__.__name__ if hasattr(env, "unwrapped") else env.__class__.__name__
     preferred_y = 1.0 if env_name == "Threading_D2" else -1.0
     if normal[1] * preferred_y < 0:
         normal = -normal
+        tangent = -tangent
+    # Match Threading._check_success(), which defines insertion against the
+    # horizontal projection of the ring normal even if contact tilts the tripod.
     normal[2] = 0.0
     normal = unit(normal, fallback=[1.0, 0.0, 0.0])
-    return {"center": ring_pos, "normal": normal}
+    tangent = unit(tangent - np.dot(tangent, normal) * normal, fallback=[1.0, 0.0, 0.0])
+    vertical = unit(np.cross(normal, tangent), fallback=vertical)
+    tangent = unit(np.cross(vertical, normal), fallback=tangent)
+    return {
+        "center": ring_pos,
+        "mat": ring_mat,
+        "normal": normal,
+        "tangent": tangent,
+        "vertical": vertical,
+    }
+
+
+def ring_frame_offsets(point, ring):
+    """Express a world-space point relative to the ring aperture frame."""
+    delta = np.asarray(point, dtype=float) - np.asarray(ring["center"], dtype=float)
+    return {
+        "normal": float(np.dot(delta, ring["normal"])),
+        "lateral": float(np.dot(delta, ring["tangent"])),
+        "vertical": float(np.dot(delta, ring["vertical"])),
+    }
 
 
 def shaft_ring_distance(needle, ring):
     """Return the closest distance from the ring center to the needle shaft segment."""
     rel = ring["center"] - needle["needle_center"]
-    t = np.clip(np.dot(rel, needle["yaxis"]), -0.06, 0.06)
+    t = np.clip(np.dot(rel, needle["yaxis"]), -NEEDLE_SHAFT_HALF_LENGTH, NEEDLE_SHAFT_HALF_LENGTH)
     closest = needle["needle_center"] + t * needle["yaxis"]
     return float(np.linalg.norm(closest - ring["center"]))
 
@@ -165,44 +224,44 @@ def insertion_progress(needle, ring):
 
 
 def clean_ring_aperture_geometry(env):
-    """Require the finite needle shaft to fit through the physical ring aperture."""
+    """Evaluate aperture crossing with the environment's canonical geometry test."""
     needle = needle_state(env)
-    ring_positions = []
-    ring_mat = None
-    for index in range(env.tripod.num_ring_geoms):
-        position, matrix = geom_pose(env, f"tripod_obj_ring_{index}")
-        ring_positions.append(position)
-        if ring_mat is None:
-            ring_mat = matrix
-    center = np.mean(ring_positions, axis=0)
-    normal = unit(ring_mat[:, 0])
-    tangent = unit(ring_mat[:, 1])
-    vertical = unit(ring_mat[:, 2])
-    denominator = float(np.dot(needle["yaxis"], normal))
-    if abs(denominator) < 1e-6:
-        return {"clear": False, "reason": "needle_parallel_to_ring", "margin_m": -float("inf")}
-    along = float(np.dot(center - needle["needle_center"], normal) / denominator)
-    if abs(along) > 0.06:
-        return {"clear": False, "reason": "finite_shaft_misses_plane", "margin_m": -float("inf")}
-    intersection = needle["needle_center"] + along * needle["yaxis"]
-    relative = intersection - center
-    tangent_offset = abs(float(np.dot(relative, tangent)))
-    vertical_offset = abs(float(np.dot(relative, vertical)))
-    margin = min(
-        0.008 - tangent_offset,
-        0.008 - vertical_offset,
+    ring = ring_state(env)
+    base_env = env.unwrapped if hasattr(env, "unwrapped") else env
+    metrics = base_env._aperture_intersection_metrics(
+        needle_pos=needle["needle_center"],
+        needle_mat=needle["mat"],
+        ring_pos=ring["center"],
+        ring_mat=ring["mat"],
+        ring_normal=ring["normal"],
     )
+    if metrics["clean_aperture"]:
+        reason = "clear"
+    elif not metrics["finite_shaft_crosses_ring_plane"]:
+        reason = "finite_shaft_misses_plane"
+    else:
+        reason = "outside_safe_aperture"
     return {
-        "clear": bool(margin >= 0.0),
-        "reason": "clear" if margin >= 0.0 else "outside_safe_aperture",
-        "margin_m": float(margin),
-        "tangent_offset_m": tangent_offset,
-        "vertical_offset_m": vertical_offset,
+        "clear": bool(metrics["clean_aperture"]),
+        "reason": reason,
+        "margin_m": float(metrics["clean_aperture_margin"]),
+        "tangent_offset_m": float(metrics["aperture_tangent_offset"]),
+        "vertical_offset_m": float(metrics["aperture_vertical_offset"]),
     }
 
 
 def tripod_position(env):
     return np.array(env.sim.data.body_xpos[env.obj_body_id["tripod"]])
+
+
+def tripod_orientation(env):
+    return np.array(env.sim.data.body_xmat[env.obj_body_id["tripod"]]).reshape(3, 3)
+
+
+def rotation_error_deg(target_mat, current_mat):
+    relative = np.asarray(target_mat).T.dot(np.asarray(current_mat))
+    cosine = np.clip((np.trace(relative) - 1.0) * 0.5, -1.0, 1.0)
+    return float(np.rad2deg(np.arccos(cosine)))
 
 
 def local_axis_name(axis):
@@ -239,9 +298,10 @@ def calibrate_gripper_axes(base_eef_mat, needle):
 
 def construct_grasp_mat(base_eef_mat, needle, grasp_angle_deg, axes):
     """Construct EEF rotation with a real target grasp angle and stable jaw axis."""
+    needle_axis, needle_up, _ = needle_angle_basis(needle)
     desired_approach = (
-        -np.cos(np.deg2rad(grasp_angle_deg)) * needle["yaxis"]
-        + np.sin(np.deg2rad(grasp_angle_deg)) * np.array([0.0, 0.0, 1.0])
+        -np.cos(np.deg2rad(grasp_angle_deg)) * needle_axis
+        + np.sin(np.deg2rad(grasp_angle_deg)) * needle_up
     )
     desired_approach = unit(desired_approach)
 
@@ -273,23 +333,36 @@ def measured_grasp_angle(eef_mat, needle, axes):
     return angle_deg(eef_approach_axis(eef_mat, axes), needle["yaxis"])
 
 
+def eef_jaw_axis(eef_mat, axes):
+    return unit(eef_mat.dot(axes["jaw_local"]))
+
+
+def needle_angle_basis(needle):
+    """Return needle shaft, projected-up, and side axes for grasp angles."""
+    needle_axis = unit(needle["yaxis"])
+    world_up = np.array([0.0, 0.0, 1.0])
+    projected_up = world_up - np.dot(world_up, needle_axis) * needle_axis
+    needle_up = unit(projected_up, fallback=needle["zaxis"])
+    side = unit(np.cross(needle_axis, needle_up), fallback=needle["xaxis"])
+    needle_up = unit(np.cross(side, needle_axis), fallback=needle_up)
+    return needle_axis, needle_up, side
+
+
 def visual_angle_axis(needle, visual_angle_deg):
     """Approach axis for the user-facing side-view grasp angle.
 
     90 degrees is straight down from above. Values below / above 90 move the
     pregrasp point to opposite sides of the handle in the needle-up plane.
     """
-    needle_axis = unit(needle["yaxis"])
-    up_axis = np.array([0.0, 0.0, 1.0])
+    needle_axis, up_axis, _ = needle_angle_basis(needle)
     side_component = -np.cos(np.deg2rad(visual_angle_deg)) * needle_axis
     up_component = np.sin(np.deg2rad(visual_angle_deg)) * up_axis
     return unit(side_component + up_component, fallback=up_axis)
 
 
 def visual_grasp_angle_from_axis(axis, needle):
-    needle_axis = unit(needle["yaxis"])
-    up_axis = np.array([0.0, 0.0, 1.0])
-    projected = axis - np.dot(axis, np.cross(needle_axis, up_axis)) * unit(np.cross(needle_axis, up_axis), fallback=[1, 0, 0])
+    needle_axis, up_axis, side_axis = needle_angle_basis(needle)
+    projected = axis - np.dot(axis, side_axis) * side_axis
     projected = unit(projected, fallback=up_axis)
     signed_cos = -float(np.dot(projected, needle_axis))
     signed_sin = float(np.dot(projected, up_axis))
@@ -311,13 +384,38 @@ def eef_from_needle_pose(needle_center, needle_mat, needle_to_eef):
     return target_pos, T.mat2quat(target_mat)
 
 
+def needle_to_eef_error(reference, measured):
+    """Measure translation and rotation drift of a grasp transform."""
+    return {
+        "translation_m": float(np.linalg.norm(np.asarray(reference["pos"]) - np.asarray(measured["pos"]))),
+        "rotation_deg": rotation_error_deg(reference["mat"], measured["mat"]),
+    }
+
+
+def gripper_joint_positions(env):
+    robot = env.robots[0]
+    return np.asarray(robot.get_gripper_joint_positions(robot.arms[0]), dtype=float).copy()
+
+
+def needle_grasp_contact(env):
+    robot = env.robots[0]
+    return bool(env._check_grasp(robot.gripper[robot.arms[0]], env.needle))
+
+
+def shortest_orientation_error(target_quat, current_quat):
+    """Return the equivalent relative rotation whose angle is at most pi."""
+    quat_err = T.quat_distance(np.asarray(target_quat).copy(), np.asarray(current_quat).copy())
+    if quat_err[3] < 0.0:
+        quat_err = -quat_err
+    return T.quat2axisangle(quat_err)
+
+
 def target_action(env, target_pos, target_quat, gripper, prev_action, noise_state, noise_std, rng):
     """Convert a target pose into a smooth normalized OSC_POSE action."""
     eef_pos, eef_quat = get_eef_pose(env)
     pos_cmd = np.clip((target_pos - eef_pos) / POSITION_SCALE, -0.7, 0.7)
 
-    quat_err = T.quat_distance(target_quat.copy(), eef_quat.copy())
-    ori_err = T.quat2axisangle(quat_err)
+    ori_err = shortest_orientation_error(target_quat, eef_quat)
     ori_cmd = np.clip(ori_err / ORIENTATION_SCALE, -0.45, 0.45)
 
     action = np.zeros(env.action_spec[0].shape)
@@ -449,15 +547,35 @@ def hold_pose_steps(env, target_pos, target_quat, gripper, steps, policy_state, 
     return success
 
 
+def json_safe(value):
+    """Convert NumPy values and non-finite floats into strict JSON values."""
+    if isinstance(value, dict):
+        return {key: json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [json_safe(item) for item in value]
+    if isinstance(value, np.ndarray):
+        return json_safe(value.tolist())
+    if isinstance(value, (np.bool_, bool)):
+        return bool(value)
+    if isinstance(value, (np.integer, int)):
+        return int(value)
+    if isinstance(value, (np.floating, float)):
+        numeric = float(value)
+        return numeric if np.isfinite(numeric) else None
+    return value
+
+
 def finalize_episode(env, success, cleanup_failed=True, stats=None):
     """Flush the wrapper and optionally remove failed attempts."""
     ep_dir = env.ep_directory
+    if stats is not None and hasattr(env, "successful"):
+        env.successful = bool(stats.get("collection_success", success))
     if env.has_interaction:
         env._flush()
         env.has_interaction = False
     if ep_dir and os.path.exists(ep_dir) and stats is not None:
         with open(os.path.join(ep_dir, "policy_stats.json"), "w") as f:
-            json.dump(stats, f, indent=2)
+            json.dump(json_safe(stats), f, indent=2, allow_nan=False)
     if not success and cleanup_failed and ep_dir and os.path.exists(ep_dir):
         shutil.rmtree(ep_dir)
     return ep_dir
@@ -507,7 +625,12 @@ class ThreadingScriptedPolicy:
         stats["min_ring_distance"] = min(stats["min_ring_distance"], shaft_ring_distance(needle, ring))
         stats["max_insert_progress"] = max(stats["max_insert_progress"], insertion_progress(needle, ring))
         stats["final_insert_progress"] = insertion_progress(needle, ring)
-        stats["tripod_displacement"] = float(np.linalg.norm(tripod_position(env) - stats["initial_tripod_pos"]))
+        tripod_displacement = float(np.linalg.norm(tripod_position(env) - stats["initial_tripod_pos"]))
+        tripod_rotation = rotation_error_deg(stats["initial_tripod_mat"], tripod_orientation(env))
+        stats["final_tripod_displacement"] = tripod_displacement
+        stats["final_tripod_rotation_deg"] = tripod_rotation
+        stats["tripod_displacement"] = max(stats["tripod_displacement"], tripod_displacement)
+        stats["tripod_rotation_deg"] = max(stats["tripod_rotation_deg"], tripod_rotation)
         clean_geometry = clean_ring_aperture_geometry(env)
         stats["clean_aperture_history"].append(bool(clean_geometry["clear"]))
         stats["final_clean_aperture_geometry"] = clean_geometry
@@ -531,8 +654,7 @@ class ThreadingScriptedPolicy:
         else:
             policy_state["target_pos"] = np.array(desired_pos)
 
-        quat_delta = T.quat_distance(desired_quat.copy(), policy_state["target_quat"].copy())
-        angle = np.linalg.norm(T.quat2axisangle(quat_delta))
+        angle = np.linalg.norm(shortest_orientation_error(desired_quat, policy_state["target_quat"]))
         if angle > max_angle_step:
             policy_state["target_quat"] = T.quat_slerp(policy_state["target_quat"], desired_quat, max_angle_step / angle)
         else:
@@ -542,9 +664,142 @@ class ThreadingScriptedPolicy:
     def _pose_error(self, env, desired_pos, desired_quat):
         eef_pos, eef_quat = get_eef_pose(env)
         pos_err = float(np.linalg.norm(desired_pos - eef_pos))
-        quat_err = T.quat_distance(desired_quat.copy(), eef_quat.copy())
-        ori_err = float(np.linalg.norm(T.quat2axisangle(quat_err)))
+        ori_err = float(np.linalg.norm(shortest_orientation_error(desired_quat, eef_quat)))
         return pos_err, ori_err
+
+    def _pose_completion(
+        self,
+        env,
+        desired_pos,
+        desired_quat,
+        eef_step_motion,
+        position_tolerance,
+        orientation_tolerance_deg,
+        motion_tolerance,
+    ):
+        position_error, orientation_error = self._pose_error(env, desired_pos, desired_quat)
+        orientation_error_deg = float(np.rad2deg(orientation_error))
+        return {
+            "passed": bool(
+                position_error < position_tolerance
+                and orientation_error_deg < orientation_tolerance_deg
+                and eef_step_motion < motion_tolerance
+            ),
+            "position_error_m": float(position_error),
+            "orientation_error_deg": orientation_error_deg,
+            "eef_step_motion_m": float(eef_step_motion),
+            "position_tolerance_m": float(position_tolerance),
+            "orientation_tolerance_deg": float(orientation_tolerance_deg),
+            "motion_tolerance_m": float(motion_tolerance),
+        }
+
+    def _run_bounded_trajectory_stage(
+        self,
+        env,
+        target_at_progress,
+        gripper,
+        nominal_steps,
+        policy_state,
+        stats,
+        subgoal,
+        completion_fn,
+        render=False,
+        max_fr=None,
+        required_stable_steps=2,
+        start_at_zero=False,
+        completion_start_step=None,
+        max_steps=None,
+    ):
+        """Follow a nominal trajectory, returning once its endpoint gate is stable."""
+        nominal_steps = max(1, int(nominal_steps))
+        completion_start_step = 1 if completion_start_step is None else max(1, int(completion_start_step))
+        if max_steps is None:
+            max_steps = nominal_steps + required_stable_steps - 1
+        max_steps = max(nominal_steps, int(max_steps))
+        stable_steps = 0
+        final_details = None
+        previous_eef_pos, _ = get_eef_pose(env)
+        path_index = 0
+        path_waypoints_completed = 0
+        path_command_complete = False
+        command_position_error = float("inf")
+        command_orientation_error_deg = float("inf")
+
+        for step in range(max_steps):
+            if start_at_zero and nominal_steps > 1:
+                progress = path_index / (nominal_steps - 1)
+            else:
+                progress = (path_index + 1) / nominal_steps
+            desired_pos, desired_quat = target_at_progress(float(progress))
+            self._track_target(
+                env,
+                self._fixed_target(desired_pos, desired_quat),
+                gripper,
+                1,
+                policy_state,
+                stats,
+                subgoal,
+                render,
+                max_fr,
+                stop_on_reach=False,
+            )
+            eef_pos, _ = get_eef_pose(env)
+            eef_step_motion = float(np.linalg.norm(eef_pos - previous_eef_pos))
+            previous_eef_pos = eef_pos
+
+            command_position_error = float(np.linalg.norm(policy_state["target_pos"] - desired_pos))
+            command_orientation_error_deg = float(
+                np.rad2deg(
+                    np.linalg.norm(
+                        shortest_orientation_error(desired_quat, policy_state["target_quat"])
+                    )
+                )
+            )
+            waypoint_reached = (
+                command_position_error <= PATH_COMMAND_POSITION_TOLERANCE
+                and command_orientation_error_deg <= PATH_COMMAND_ORIENTATION_TOLERANCE_DEG
+            )
+            if waypoint_reached:
+                path_waypoints_completed = max(path_waypoints_completed, path_index + 1)
+                if path_index < nominal_steps - 1:
+                    path_index += 1
+                else:
+                    path_command_complete = True
+
+            if step + 1 < completion_start_step:
+                continue
+            final_pos, final_quat = target_at_progress(1.0)
+            final_details = completion_fn(env, final_pos, final_quat, eef_step_motion)
+            final_details.update(
+                {
+                    "path_command_complete": bool(path_command_complete),
+                    "path_waypoints_completed": int(path_waypoints_completed),
+                    "path_waypoints_total": int(nominal_steps),
+                    "command_position_error_m": command_position_error,
+                    "command_orientation_error_deg": command_orientation_error_deg,
+                }
+            )
+            final_details["passed"] = bool(final_details["passed"] and path_command_complete)
+            stable_steps = stable_steps + 1 if final_details["passed"] else 0
+            if stable_steps >= required_stable_steps:
+                break
+
+        complete = stable_steps >= required_stable_steps
+        actual_steps = int(stats["subgoal_durations"].get(subgoal, 0))
+        stats["stage_outcomes"][subgoal] = {
+            "complete": bool(complete),
+            "timed_out": bool(not complete and actual_steps >= max_steps),
+            "nominal_steps": int(nominal_steps),
+            "max_steps": int(max_steps),
+            "actual_steps": actual_steps,
+            "stable_steps": int(stable_steps),
+            "required_stable_steps": int(required_stable_steps),
+            "path_command_complete": bool(path_command_complete),
+            "path_waypoints_completed": int(path_waypoints_completed),
+            "path_waypoints_total": int(nominal_steps),
+            "final": final_details,
+        }
+        return complete
 
     def _track_target(
         self,
@@ -575,13 +830,6 @@ class ThreadingScriptedPolicy:
 
     def _fixed_target(self, target_pos, target_quat):
         return lambda: (np.array(target_pos), np.array(target_quat))
-
-    def _two_stage_orientation(self, start_quat, midpoint_quat, final_quat, progress):
-        """Interpolate through a 50% orientation waypoint without stopping there."""
-        progress = float(np.clip(progress, 0.0, 1.0))
-        if progress <= 0.5:
-            return T.quat_slerp(start_quat, midpoint_quat, 2.0 * progress)
-        return T.quat_slerp(midpoint_quat, final_quat, 2.0 * progress - 1.0)
 
     def _settle_at_grasp(
         self,
@@ -646,6 +894,71 @@ class ThreadingScriptedPolicy:
         }
         return settled
 
+    def _close_gripper_until_stable_contact(
+        self,
+        env,
+        target_pos,
+        target_quat,
+        policy_state,
+        stats,
+        render=False,
+        max_fr=None,
+    ):
+        """Close under OSC until the command, fingers, and grasp are stable."""
+        previous_qpos = gripper_joint_positions(env)
+        stable_steps = 0
+        steps = 0
+        finger_motion = float("inf")
+        contact = False
+        command = float(policy_state["prev_action"][-1]) if policy_state["prev_action"] is not None else -1.0
+
+        for _ in range(GRIPPER_CLOSE_MAX_STEPS):
+            self._track_target(
+                env,
+                self._fixed_target(target_pos, target_quat),
+                1.0,
+                1,
+                policy_state,
+                stats,
+                "close_gripper",
+                render,
+                max_fr,
+                stop_on_reach=False,
+            )
+            steps += 1
+            current_qpos = gripper_joint_positions(env)
+            finger_motion = float(np.linalg.norm(current_qpos - previous_qpos))
+            previous_qpos = current_qpos
+            command = float(policy_state["prev_action"][-1])
+            contact = needle_grasp_contact(env)
+            if (
+                command >= GRIPPER_CLOSE_COMMAND_THRESHOLD
+                and finger_motion <= GRIPPER_CLOSE_MOTION_THRESHOLD
+                and contact
+            ):
+                stable_steps += 1
+                if stable_steps >= GRIPPER_CLOSE_STABLE_STEPS:
+                    break
+            else:
+                stable_steps = 0
+
+        complete = stable_steps >= GRIPPER_CLOSE_STABLE_STEPS
+        stats["gripper_close"] = {
+            "complete": bool(complete),
+            "timed_out": bool(not complete and steps >= GRIPPER_CLOSE_MAX_STEPS),
+            "steps": int(steps),
+            "max_steps": int(GRIPPER_CLOSE_MAX_STEPS),
+            "stable_steps": int(stable_steps),
+            "required_stable_steps": int(GRIPPER_CLOSE_STABLE_STEPS),
+            "command": float(command),
+            "command_fully_closed": bool(command >= GRIPPER_CLOSE_COMMAND_THRESHOLD),
+            "finger_motion_m": float(finger_motion),
+            "finger_motion_threshold_m": float(GRIPPER_CLOSE_MOTION_THRESHOLD),
+            "contact": bool(contact),
+        }
+        stats.setdefault("stage_outcomes", {})["close_gripper"] = dict(stats["gripper_close"])
+        return complete
+
     def _alignment_target(
         self,
         offset,
@@ -655,12 +968,17 @@ class ThreadingScriptedPolicy:
         tilt=0.0,
         rotation_fraction=1.0,
         needle_to_eef=None,
+        reference_needle_mat=None,
     ):
+        if needle_to_eef is None or reference_needle_mat is None:
+            raise ValueError("Alignment targets require a measured grasp transform and fixed reference needle frame")
+
         def target(env):
-            current_needle = needle_state(env)
             current_ring = ring_state(env)
-            side = unit(np.cross([0.0, 0.0, 1.0], current_ring["normal"]), fallback=[0.0, 1.0, 0.0])
-            align_rot = rotation_between(-current_needle["yaxis"], current_ring["normal"])
+            side = current_ring["tangent"]
+            vertical = current_ring["vertical"]
+            reference_mat = np.asarray(reference_needle_mat, dtype=float)
+            align_rot = rotation_between(-reference_mat[:, 1], current_ring["normal"])
             align_quat = T.mat2quat(align_rot)
             partial_align_quat = T.quat_slerp(T.mat2quat(np.eye(3)), align_quat, np.clip(rotation_fraction, 0.0, 1.0))
             partial_align_rot = T.quat2mat(partial_align_quat)
@@ -669,55 +987,80 @@ class ThreadingScriptedPolicy:
                     T.rotation_matrix(tilt, side)[:3, :3]
                 )
             )
-            target_needle_mat = wobble_rot.dot(partial_align_rot).dot(current_needle["mat"])
+            target_needle_mat = wobble_rot.dot(partial_align_rot).dot(reference_mat)
             desired_tip = (
                 current_ring["center"]
                 + offset * current_ring["normal"]
                 + lateral_offset * side
-                + np.array([0.0, 0.0, vertical_offset])
+                + vertical_offset * vertical
             )
-            target_needle_center = desired_tip + 0.06 * target_needle_mat[:, 1]
-            if needle_to_eef is None:
-                current_eef_pos, current_eef_quat = get_eef_pose(env)
-                target_quat = T.mat2quat(wobble_rot.dot(partial_align_rot).dot(T.quat2mat(current_eef_quat)))
-                target_pos = current_eef_pos + (desired_tip - current_needle["tip"])
-            else:
-                target_pos, target_quat = eef_from_needle_pose(target_needle_center, target_needle_mat, needle_to_eef)
+            target_needle_center = desired_tip + NEEDLE_SHAFT_HALF_LENGTH * target_needle_mat[:, 1]
+            target_pos, target_quat = eef_from_needle_pose(target_needle_center, target_needle_mat, needle_to_eef)
             return target_pos, target_quat
 
         return target
 
-    def _curved_alignment_target(self, offset, progress, curve, needle_to_eef=None):
+    def _curved_alignment_target(
+        self,
+        offset,
+        progress,
+        curve,
+        needle_to_eef=None,
+        reference_needle_mat=None,
+        alignment_fraction=None,
+    ):
         path_t = smoothstep(progress)
         rot_t = smoothstep((progress - curve["rotation_delay"]) / curve["rotation_span"])
         lateral = quadratic_bezier(curve["lateral_start"], curve["lateral_control"], curve["lateral_end"], path_t)
         vertical = quadratic_bezier(curve["vertical_start"], curve["vertical_control"], curve["vertical_end"], path_t)
         twist = quadratic_bezier(curve["twist_start"], curve["twist_control"], curve["twist_end"], rot_t)
         tilt = quadratic_bezier(curve["tilt_start"], curve["tilt_control"], curve["tilt_end"], rot_t)
-        return self._alignment_target(offset, lateral, vertical, twist, tilt, rot_t, needle_to_eef)
+        return self._alignment_target(
+            offset,
+            lateral,
+            vertical,
+            twist,
+            tilt,
+            rot_t if alignment_fraction is None else alignment_fraction,
+            needle_to_eef,
+            reference_needle_mat,
+        )
 
     def _needle_target_errors(self, env, offset, lateral_offset=0.0, vertical_offset=0.0):
         """Measure needle-tip tracking error in the moving ring frame."""
         needle = needle_state(env)
         ring = ring_state(env)
-        side = unit(np.cross([0.0, 0.0, 1.0], ring["normal"]), fallback=[0.0, 1.0, 0.0])
+        side = ring["tangent"]
         desired_tip = (
             ring["center"]
             + offset * ring["normal"]
             + lateral_offset * side
-            + np.array([0.0, 0.0, vertical_offset])
+            + vertical_offset * ring["vertical"]
         )
         error = needle["tip"] - desired_tip
         alignment_cosine = float(np.clip(np.dot(-needle["yaxis"], ring["normal"]), -1.0, 1.0))
         return {
             "normal_error_m": abs(float(np.dot(error, ring["normal"]))),
             "tangent_error_m": abs(float(np.dot(error, side))),
-            "vertical_error_m": abs(float(error[2])),
+            "vertical_error_m": abs(float(np.dot(error, ring["vertical"]))),
             "orientation_error_deg": float(np.rad2deg(np.arccos(alignment_cosine))),
         }
 
     def _tripod_displacement(self, env, stats):
-        return float(np.linalg.norm(tripod_position(env) - stats["initial_tripod_pos"]))
+        current = float(np.linalg.norm(tripod_position(env) - stats["initial_tripod_pos"]))
+        return max(float(stats["tripod_displacement"]), current)
+
+    def _tripod_motion(self, env, stats, max_displacement=0.035, max_rotation_deg=5.0):
+        displacement = self._tripod_displacement(env, stats)
+        current_rotation = rotation_error_deg(stats["initial_tripod_mat"], tripod_orientation(env))
+        rotation_deg = max(float(stats["tripod_rotation_deg"]), current_rotation)
+        return {
+            "stable": bool(displacement < max_displacement and rotation_deg < max_rotation_deg),
+            "displacement_m": float(displacement),
+            "rotation_deg": float(rotation_deg),
+            "max_displacement_m": float(max_displacement),
+            "max_rotation_deg": float(max_rotation_deg),
+        }
 
     def _policy_success(self, env, stats):
         needle = needle_state(env)
@@ -737,17 +1080,78 @@ class ThreadingScriptedPolicy:
             "ring_crossed": bool(clean_geometry["clear"]),
             "inserted_past_ring": stats["max_insert_progress"] > 0.026,
             "final_still_inserted": stats["final_insert_progress"] > 0.014,
-            "tripod_stable": stats["tripod_displacement"] < 0.035,
+            "tripod_stable": stats["tripod_displacement"] < 0.035 and stats["tripod_rotation_deg"] < 5.0,
             "hold_complete": bool(stats["hold_complete"]),
+            "gripper_close_complete": bool(stats.get("gripper_close_complete", False)),
             "gripper_closed": bool(stats["gripper_closed"]),
-            "grasp_settled": bool(stats.get("grasp_settled", False)),
-            "grasp_axis_perpendicular": stats.get("grasp_jaw_needle_axis_abs_dot", 1.0) < 1e-4,
+            "grasp_contact": bool(stats.get("grasp_contact_after_lift", False)),
+            "grasp_rigid": bool(stats.get("grasp_rigid_after_lift", False)),
+            "grasp_axis_perpendicular": stats.get("actual_grasp_jaw_needle_axis_abs_dot", 1.0) < 0.15,
             "insert_direction_valid": bool(stats.get("insert_direction_valid", False)),
         }
+        if stats.get("control_mode") == "osc_pose":
+            checks["stage_sequence_complete"] = bool(
+                stats.get("approach_complete", False)
+                and stats.get("gripper_close_complete", False)
+                and stats.get("probe_complete", False)
+                and stats.get("lift_complete", False)
+                and stats.get("align_complete", False)
+                and stats.get("pre_insert_complete", False)
+                and stats.get("insert_complete", False)
+                and stats.get("hold_complete", False)
+            )
         stats["policy_checks"] = checks
         failed = [name for name, passed in checks.items() if not passed]
         stats["failure_reason"] = "none" if not failed else ",".join(failed)
         return not failed
+
+    def _finish_rollout(self, env, stats, policy_state, gripper_axes):
+        """Finalize diagnostics for both completed and stage-aborted rollouts."""
+        self._record_metrics(env, stats)
+        insert_needle = needle_state(env)
+        stats["actual_insert_angle_deg"] = float(
+            visual_grasp_angle_from_axis(eef_approach_axis(get_eef_mat(env), gripper_axes), insert_needle)
+        )
+        stats["policy_success"] = bool(self._policy_success(env, stats))
+        stats["success"] = stats["policy_success"]
+        stats["steps"] = int(env.t)
+        if policy_state["action_delta_norms"]:
+            stats["smoothness"] = {
+                "mean_action_delta": float(np.mean(policy_state["action_delta_norms"])),
+                "max_action_delta": float(np.max(policy_state["action_delta_norms"])),
+                "mean_action_jerk": float(np.mean(policy_state["action_jerk_norms"]))
+                if policy_state["action_jerk_norms"]
+                else 0.0,
+                "max_action_jerk": float(np.max(policy_state["action_jerk_norms"]))
+                if policy_state["action_jerk_norms"]
+                else 0.0,
+            }
+        else:
+            stats["smoothness"] = {
+                "mean_action_delta": 0.0,
+                "max_action_delta": 0.0,
+                "mean_action_jerk": 0.0,
+                "max_action_jerk": 0.0,
+            }
+        finite_conditions = [value for value in policy_state["jacobian_conditions"] if np.isfinite(value)]
+        stats["joint_control"] = {
+            "enabled": self.control_mode == "joint_position",
+            "max_jacobian_condition": float(max(finite_conditions)) if finite_conditions else None,
+            "mean_jacobian_condition": float(np.mean(finite_conditions)) if finite_conditions else None,
+            "singular_condition_count": int(
+                sum(not np.isfinite(value) for value in policy_state["jacobian_conditions"])
+            ),
+            "max_joint_target_step": float(max(policy_state["joint_target_step_norms"]))
+            if policy_state["joint_target_step_norms"]
+            else None,
+            "mean_joint_target_step": float(np.mean(policy_state["joint_target_step_norms"]))
+            if policy_state["joint_target_step_norms"]
+            else None,
+        }
+        stats["initial_tripod_pos"] = stats["initial_tripod_pos"].tolist()
+        stats["initial_tripod_mat"] = stats["initial_tripod_mat"].tolist()
+        self.stats.append(stats)
+        return bool(stats["policy_success"])
 
     def rollout(
         self,
@@ -771,17 +1175,8 @@ class ThreadingScriptedPolicy:
         grasp_angle = float(target_grasp_angle) if target_grasp_angle is not None else self.rng.uniform(*self.grasp_angle_range)
         grasp_tilt_x = 0.0
         grasp_tilt_y = 0.0
-        # Keep the nominal contact well inside the handle. Small variation is
-        # retained for data diversity, but controller tracking error must not be
-        # compounded by a target that is already displaced toward an edge.
-        # Keep most grasps near the geometric center, while allowing a smaller
-        # population on the shaft / visually lower side of the handle. Both
-        # modes retain a generous margin from the handle boundary.
-        grasp_location_mode = "center" if self.rng.rand() < 0.7 else "lower"
-        if grasp_location_mode == "center":
-            grasp_offset_along = self.rng.uniform(-0.0015, 0.0015)
-        else:
-            grasp_offset_along = self.rng.uniform(-0.0040, -0.0015)
+        # Sample the lower handle region while retaining a margin from its edge.
+        grasp_offset_along = self.rng.uniform(-0.0040, -0.0015)
         grasp_offset_lateral = self.rng.uniform(-0.0003, 0.0003)
         grasp_offset_vertical = self.rng.uniform(-0.0003, 0.0003)
         grasp_offset = (
@@ -969,16 +1364,8 @@ class ThreadingScriptedPolicy:
         lift_align_rot = rotation_between(-needle["yaxis"], ring["normal"])
         lift_align_quat = T.mat2quat(lift_align_rot)
         lift_prealign_fraction = float(self.rng.uniform(0.28, 0.55))
-        durations = {
-            "aim_approach": int(self.rng.randint(42, 58)),
-            "aim_descend": int(self.rng.randint(36, 50) if full_quality_mode else self.rng.randint(42, 58)),
-            "close_gripper": int(self.rng.randint(10, 16) if full_quality_mode else self.rng.randint(16, 23)),
-            "lift_arc": int(self.rng.randint(38, 70)),
-            "align": int(self.rng.randint(48, 72)),
-            "pre_insert": int(self.rng.randint(4, 9) if full_quality_mode else self.rng.randint(8, 16)),
-            "insert_through": int(self.rng.randint(78, 112)),
-            "hold_after_insert": int(self.rng.randint(8, 14)),
-        }
+        durations = dict(NOMINAL_STAGE_STEPS)
+        durations["close_gripper_max"] = GRIPPER_CLOSE_MAX_STEPS
         pre_insert_offset = float(self.rng.uniform(-0.052, -0.038))
         align_offset = float(self.rng.uniform(-0.082, -0.062))
         insert_start_offset = float(self.rng.uniform(-0.045, -0.035))
@@ -1010,15 +1397,33 @@ class ThreadingScriptedPolicy:
             "policy_success": False,
             "failure_reason": "not_evaluated",
             "subgoal_durations": {},
+            "stage_outcomes": {},
+            "aborted_stage": None,
             "min_ring_distance": float("inf"),
             "max_insert_progress": -float("inf"),
             "final_insert_progress": -float("inf"),
             "clean_aperture_history": [],
             "tripod_displacement": 0.0,
+            "final_tripod_displacement": 0.0,
+            "tripod_rotation_deg": 0.0,
+            "final_tripod_rotation_deg": 0.0,
             "initial_tripod_pos": tripod_position(env),
+            "initial_tripod_mat": tripod_orientation(env),
             "gripper_closed": False,
+            "gripper_command_closed": False,
+            "grasp_contact_at_close": False,
+            "grasp_contact_after_probe": False,
+            "grasp_contact_after_lift": False,
+            "grasp_rigid_after_probe": False,
+            "grasp_rigid_after_lift": False,
             "hold_complete": False,
             "grasp_settled": False,
+            "approach_complete": False,
+            "probe_complete": False,
+            "lift_complete": False,
+            "align_complete": False,
+            "pre_insert_complete": False,
+            "insert_complete": False,
             "grasp_angle_deg": float(grasp_angle),
             "target_grasp_angle_deg": float(grasp_angle),
             "planned_grasp_angle_deg": float(measured_grasp_angle_value),
@@ -1033,13 +1438,16 @@ class ThreadingScriptedPolicy:
             "planned_grasp_approach_axis": grasp_to_gripper_axis.tolist(),
             "planned_grasp_jaw_axis": grasp_jaw_axis.tolist(),
             "grasp_jaw_needle_axis_abs_dot": float(abs(np.dot(grasp_jaw_axis, needle["yaxis"]))),
+            "planned_needle_to_eef": {
+                "pos": planned_needle_to_eef["pos"].tolist(),
+                "mat": planned_needle_to_eef["mat"].tolist(),
+            },
             "planned_insert_normal": ring["normal"].tolist(),
             "insert_direction_preferred_y": -1.0,
             "insert_direction_valid": bool(ring["normal"][1] < 0.0),
             "grasp_tilt_x_deg": float(np.rad2deg(grasp_tilt_x)),
             "grasp_tilt_y_deg": float(np.rad2deg(grasp_tilt_y)),
             "grasp_offset_along": float(grasp_offset_along),
-            "grasp_location_mode": grasp_location_mode,
             "grasp_offset_lateral": float(grasp_offset_lateral),
             "grasp_offset_vertical": float(grasp_offset_vertical),
             "grasp_pos": grasp_pos.tolist(),
@@ -1094,96 +1502,337 @@ class ThreadingScriptedPolicy:
         # pregrasp waypoint and starting a second descend phase from rest.
         approach_start_pos, approach_start_quat = get_eef_pose(env)
         approach_steps = durations["aim_approach"] + durations["aim_descend"]
-        for i in range(approach_steps):
-            progress = (i + 1) / approach_steps
+        high_angle_contact_mode = grasp_angle >= 108.0
+        close_target_quat = grasp_quat
+
+        def approach_target(progress):
             # Do not ease to zero velocity at the former pregrasp boundary or
             # before the short final verification window.
             path_t = progress
             target_pos = quadratic_bezier(approach_start_pos, pregrasp_pos, close_pos, path_t)
-            target_quat = T.quat_slerp(approach_start_quat, grasp_quat, smoothstep(min(1.0, progress / 0.7)))
-            self._track_target(
+            if high_angle_contact_mode:
+                orientation_progress = smoothstep((progress - 0.82) / 0.18)
+            else:
+                orientation_progress = smoothstep(min(1.0, progress / 0.7))
+            target_quat = T.quat_slerp(approach_start_quat, grasp_quat, orientation_progress)
+            return target_pos, target_quat
+
+        if self.control_mode == "osc_pose":
+            stats["approach_complete"] = self._run_bounded_trajectory_stage(
                 env,
-                self._fixed_target(target_pos, target_quat),
+                approach_target,
                 -1.0,
-                1,
+                approach_steps,
                 policy_state,
                 stats,
                 "aim_continuous",
+                lambda stage_env, target_pos, target_quat, motion: self._pose_completion(
+                    stage_env,
+                    target_pos,
+                    target_quat,
+                    motion,
+                    position_tolerance=0.002,
+                    orientation_tolerance_deg=2.0,
+                    motion_tolerance=0.003,
+                ),
                 render,
                 max_fr,
-                stop_on_reach=False,
+                max_steps=OSC_STAGE_MAX_STEPS["aim_continuous"],
             )
+            approach_outcome = stats["stage_outcomes"]["aim_continuous"]
+            stats["pregrasp_pose_settled"] = stats["approach_complete"]
+            stats["grasp_settled"] = stats["approach_complete"]
+            stats["grasp_settle"] = {
+                "passed": bool(stats["approach_complete"]),
+                "stable_steps": int(approach_outcome["stable_steps"]),
+                "required_stable_steps": int(approach_outcome["required_stable_steps"]),
+                "best_position_error": None
+                if approach_outcome["final"] is None
+                else float(approach_outcome["final"]["position_error_m"]),
+                "best_orientation_error_deg": None
+                if approach_outcome["final"] is None
+                else float(approach_outcome["final"]["orientation_error_deg"]),
+            }
+            if not stats["approach_complete"]:
+                stats["aborted_stage"] = "aim_continuous"
+                return self._finish_rollout(env, stats, policy_state, gripper_axes)
+        else:
+            for i in range(approach_steps):
+                target_pos, target_quat = approach_target((i + 1) / approach_steps)
+                self._track_target(
+                    env,
+                    self._fixed_target(target_pos, target_quat),
+                    -1.0,
+                    1,
+                    policy_state,
+                    stats,
+                    "aim_continuous",
+                    render,
+                    max_fr,
+                    stop_on_reach=False,
+                )
 
         # Closing is allowed only after the actual EEF pose has remained within
         # a tight tolerance for several consecutive control steps.
-        stats["grasp_settled"] = self._settle_at_grasp(
-            env,
-            close_pos,
-            grasp_quat,
-            policy_state,
-            stats,
-            render,
-            max_fr,
+        if high_angle_contact_mode:
+            _, close_target_quat = get_eef_pose(env)
+        stats["high_angle_contact_mode"] = bool(high_angle_contact_mode)
+        stats["close_target_angle_deg"] = float(
+            visual_grasp_angle_from_axis(
+                eef_approach_axis(T.quat2mat(close_target_quat), gripper_axes),
+                needle_state(env),
+            )
         )
-
-        # close_gripper: close while already starting a small lift, so the rollout
-        # does not pause at the grasp point. The gripper command reaches a closed
-        # state during this blend because target_action rate-limits gripper motion.
-        for i in range(durations["close_gripper"]):
-            progress = i / max(1, durations["close_gripper"] - 1)
-            close_t = smoothstep(progress)
-            target_pos = (1.0 - close_t) * close_pos + close_t * close_lift_end_pos
-            self._track_target(
+        if self.control_mode != "osc_pose":
+            stats["pregrasp_pose_settled"] = self._settle_at_grasp(
                 env,
-                self._fixed_target(target_pos, grasp_quat),
-                1.0,
-                1,
+                close_pos,
+                close_target_quat,
                 policy_state,
                 stats,
-                "close_gripper",
                 render,
                 max_fr,
-                stop_on_reach=False,
             )
-        stats["gripper_closed"] = True
+            stats["grasp_settled"] = stats["pregrasp_pose_settled"]
+
+        # Require the rate-limited command, physical finger motion, and grasp
+        # contact to remain complete together before starting the probe lift.
+        if self.control_mode == "osc_pose":
+            stats["gripper_close_complete"] = self._close_gripper_until_stable_contact(
+                env,
+                close_pos,
+                close_target_quat,
+                policy_state,
+                stats,
+                render,
+                max_fr,
+            )
+            stats["gripper_command_closed"] = stats["gripper_close"]["command_fully_closed"]
+        else:
+            for _ in range(durations["close_gripper"]):
+                self._track_target(
+                    env,
+                    self._fixed_target(close_pos, close_target_quat),
+                    1.0,
+                    1,
+                    policy_state,
+                    stats,
+                    "close_gripper",
+                    render,
+                    max_fr,
+                    stop_on_reach=False,
+                )
+            stats["gripper_close_complete"] = True
+            stats["gripper_command_closed"] = True
+        stats["gripper_qpos_at_close"] = gripper_joint_positions(env).tolist()
+        stats["grasp_contact_at_close"] = needle_grasp_contact(env)
+        if self.control_mode == "osc_pose" and not stats["gripper_close_complete"]:
+            stats["aborted_stage"] = "close_gripper"
+            return self._finish_rollout(env, stats, policy_state, gripper_axes)
+        close_grasp_transform = needle_to_eef_transform(env)
+        close_needle_center = needle_state(env)["needle_center"].copy()
+
+        def probe_target(progress):
+            target_pos = close_pos + smoothstep(progress) * (close_lift_end_pos - close_pos)
+            return target_pos, close_target_quat
+
+        def probe_completion(stage_env, target_pos, target_quat, motion):
+            pose = self._pose_completion(
+                stage_env,
+                target_pos,
+                target_quat,
+                motion,
+                position_tolerance=0.003,
+                orientation_tolerance_deg=3.0,
+                motion_tolerance=0.003,
+            )
+            measured_transform = needle_to_eef_transform(stage_env)
+            transform_error = needle_to_eef_error(close_grasp_transform, measured_transform)
+            needle_displacement = float(
+                np.linalg.norm(needle_state(stage_env)["needle_center"] - close_needle_center)
+            )
+            contact = needle_grasp_contact(stage_env)
+            tripod_motion = self._tripod_motion(stage_env, stats)
+            pose.update(
+                {
+                    "contact": bool(contact),
+                    "needle_displacement_m": needle_displacement,
+                    "transform_translation_error_m": float(transform_error["translation_m"]),
+                    "transform_rotation_error_deg": float(transform_error["rotation_deg"]),
+                    "tripod_motion": tripod_motion,
+                    "tripod_stable": bool(tripod_motion["stable"]),
+                }
+            )
+            pose["passed"] = bool(
+                pose["passed"]
+                and contact
+                and tripod_motion["stable"]
+                and needle_displacement > 0.003
+                and transform_error["translation_m"] < 0.006
+                and transform_error["rotation_deg"] < 8.0
+            )
+            return pose
+
+        if self.control_mode == "osc_pose":
+            stats["probe_complete"] = self._run_bounded_trajectory_stage(
+                env,
+                probe_target,
+                1.0,
+                durations["grasp_probe_lift"],
+                policy_state,
+                stats,
+                "grasp_probe_lift",
+                probe_completion,
+                render,
+                max_fr,
+                max_steps=OSC_STAGE_MAX_STEPS["grasp_probe_lift"],
+            )
+        else:
+            for i in range(durations["grasp_probe_lift"]):
+                target_pos, target_quat = probe_target((i + 1) / durations["grasp_probe_lift"])
+                self._track_target(
+                    env,
+                    self._fixed_target(target_pos, target_quat),
+                    1.0,
+                    1,
+                    policy_state,
+                    stats,
+                    "grasp_probe_lift",
+                    render,
+                    max_fr,
+                    stop_on_reach=False,
+                )
+            stats["probe_complete"] = True
+        probe_grasp_transform = needle_to_eef_transform(env)
+        probe_grasp_error = needle_to_eef_error(close_grasp_transform, probe_grasp_transform)
+        stats["grasp_contact_after_probe"] = needle_grasp_contact(env)
+        stats["gripper_qpos_after_probe"] = gripper_joint_positions(env).tolist()
+        stats["grasp_probe_needle_displacement_m"] = float(
+            np.linalg.norm(needle_state(env)["needle_center"] - close_needle_center)
+        )
+        stats["grasp_transform_error_after_probe"] = probe_grasp_error
+        stats["grasp_rigid_after_probe"] = bool(
+            probe_grasp_error["translation_m"] < 0.006
+            and probe_grasp_error["rotation_deg"] < 8.0
+            and stats["grasp_probe_needle_displacement_m"] > 0.003
+        )
+        stats["gripper_closed"] = bool(stats["grasp_contact_after_probe"])
         close_needle = needle_state(env)
         stats["actual_close_angle_deg"] = float(
             visual_grasp_angle_from_axis(eef_approach_axis(get_eef_mat(env), gripper_axes), close_needle)
         )
+        if self.control_mode == "osc_pose" and not stats["probe_complete"]:
+            stats["aborted_stage"] = "grasp_probe_lift"
+            return self._finish_rollout(env, stats, policy_state, gripper_axes)
 
         # lift: follow one continuous randomized arc and pre-rotate partway toward
         # the ring while moving, leaving less rotation for the align phase.
-        for i in range(durations["lift_arc"]):
-            progress = i / max(1, durations["lift_arc"] - 1)
+        def lift_target(progress):
             lift_t = smoothstep(progress**lift_progress_power)
             target_pos = cubic_bezier(lift_start_pos, lift_control_pos, lift_control2_pos, lift_pos, lift_t)
             rot_fraction = lift_prealign_fraction * smoothstep(progress)
             partial_lift_quat = T.quat_slerp(T.mat2quat(np.eye(3)), lift_align_quat, rot_fraction)
             partial_lift_rot = T.quat2mat(partial_lift_quat)
-            target_quat = T.mat2quat(partial_lift_rot.dot(grasp_mat))
-            self._track_target(
+            target_quat = T.mat2quat(partial_lift_rot.dot(T.quat2mat(close_target_quat)))
+            return target_pos, target_quat
+
+        def lift_completion(stage_env, target_pos, target_quat, motion):
+            pose = self._pose_completion(
+                stage_env,
+                target_pos,
+                target_quat,
+                motion,
+                position_tolerance=0.006,
+                orientation_tolerance_deg=4.0,
+                motion_tolerance=0.005,
+            )
+            transform_error = needle_to_eef_error(close_grasp_transform, needle_to_eef_transform(stage_env))
+            contact = needle_grasp_contact(stage_env)
+            tripod_motion = self._tripod_motion(stage_env, stats)
+            pose.update(
+                {
+                    "contact": bool(contact),
+                    "transform_translation_error_m": float(transform_error["translation_m"]),
+                    "transform_rotation_error_deg": float(transform_error["rotation_deg"]),
+                    "tripod_motion": tripod_motion,
+                    "tripod_stable": bool(tripod_motion["stable"]),
+                }
+            )
+            pose["passed"] = bool(
+                pose["passed"]
+                and contact
+                and tripod_motion["stable"]
+                and transform_error["translation_m"] < 0.008
+                and transform_error["rotation_deg"] < 12.0
+            )
+            return pose
+
+        if self.control_mode == "osc_pose":
+            stats["lift_complete"] = self._run_bounded_trajectory_stage(
                 env,
-                self._fixed_target(target_pos, target_quat),
+                lift_target,
                 1.0,
-                1,
+                durations["lift_arc"],
                 policy_state,
                 stats,
                 "lift_arc",
+                lift_completion,
                 render,
                 max_fr,
+                required_stable_steps=2,
+                start_at_zero=True,
+                max_steps=OSC_STAGE_MAX_STEPS["lift_arc"],
             )
+        else:
+            for i in range(durations["lift_arc"]):
+                progress = i / max(1, durations["lift_arc"] - 1)
+                target_pos, target_quat = lift_target(progress)
+                self._track_target(
+                    env,
+                    self._fixed_target(target_pos, target_quat),
+                    1.0,
+                    1,
+                    policy_state,
+                    stats,
+                    "lift_arc",
+                    render,
+                    max_fr,
+                )
+            stats["lift_complete"] = True
         lift_needle = needle_state(env)
         actual_lift_angle = visual_grasp_angle_from_axis(eef_approach_axis(get_eef_mat(env), gripper_axes), lift_needle)
         stats["actual_lift_angle_deg"] = float(actual_lift_angle)
         stats["lift_angle_error_deg"] = float(actual_lift_angle - grasp_angle)
 
-        measured_needle_to_eef = None
+        measured_needle_to_eef = needle_to_eef_transform(env)
+        lift_grasp_error = needle_to_eef_error(close_grasp_transform, measured_needle_to_eef)
+        stats["measured_needle_to_eef_after_lift"] = {
+            "pos": measured_needle_to_eef["pos"].tolist(),
+            "mat": measured_needle_to_eef["mat"].tolist(),
+        }
+        stats["planned_to_measured_grasp_error"] = needle_to_eef_error(
+            planned_needle_to_eef,
+            measured_needle_to_eef,
+        )
+        stats["grasp_transform_error_after_lift"] = lift_grasp_error
+        stats["grasp_contact_after_lift"] = needle_grasp_contact(env)
+        stats["gripper_qpos_after_lift"] = gripper_joint_positions(env).tolist()
+        stats["grasp_rigid_after_lift"] = bool(
+            stats["grasp_rigid_after_probe"]
+            and lift_grasp_error["translation_m"] < 0.008
+            and lift_grasp_error["rotation_deg"] < 12.0
+        )
+        stats["actual_grasp_jaw_needle_axis_abs_dot"] = float(
+            abs(np.dot(eef_jaw_axis(get_eef_mat(env), gripper_axes), lift_needle["yaxis"]))
+        )
+        if self.control_mode == "osc_pose" and not stats["lift_complete"]:
+            stats["aborted_stage"] = "lift_arc"
+            return self._finish_rollout(env, stats, policy_state, gripper_axes)
+        align_reference_needle_mat = lift_needle["mat"].copy()
+        alignment_start = ring_frame_offsets(lift_needle["tip"], ring_state(env))
+        stats["alignment_profile"] = "measured_minimum_jerk"
+        stats["alignment_start_offsets"] = dict(alignment_start)
         if self.collision_aware_threading:
-            measured_needle_to_eef = needle_to_eef_transform(env)
-            stats["measured_needle_to_eef_after_lift"] = {
-                "pos": measured_needle_to_eef["pos"].tolist(),
-                "mat": measured_needle_to_eef["mat"].tolist(),
-            }
             # First move above the entry side, then descend while still well
             # outside the ring. This avoids sweeping through a rotated support.
             self._track_target(
@@ -1193,6 +1842,7 @@ class ThreadingScriptedPolicy:
                     vertical_offset=0.080,
                     rotation_fraction=1.0,
                     needle_to_eef=measured_needle_to_eef,
+                    reference_needle_mat=align_reference_needle_mat,
                 )(env),
                 1.0,
                 100,
@@ -1203,7 +1853,7 @@ class ThreadingScriptedPolicy:
                 max_fr,
                 min_steps=24,
             )
-            if self._tripod_displacement(env, stats) < 0.012:
+            if self._tripod_motion(env, stats, max_displacement=0.012)["stable"]:
                 self._track_target(
                     env,
                     lambda: self._alignment_target(
@@ -1211,6 +1861,7 @@ class ThreadingScriptedPolicy:
                         vertical_offset=0.025,
                         rotation_fraction=1.0,
                         needle_to_eef=measured_needle_to_eef,
+                        reference_needle_mat=align_reference_needle_mat,
                     )(env),
                     1.0,
                     80,
@@ -1222,54 +1873,101 @@ class ThreadingScriptedPolicy:
                     min_steps=20,
                 )
 
-        # align: freeze a start / halfway / final orientation plan. The global
-        # progress remains continuous through the halfway waypoint, so angular
-        # velocity is not reset and the robot does not pause there.
+        # Start from the measured post-lift tip pose and blend monotonically to
+        # the pre-insertion pose. This avoids a one-off target reversal when the
+        # lift hands control to alignment.
         align_end_offset = pre_insert_offset - 0.012
-        align_start_quat = T.mat2quat(get_eef_mat(env))
-        align_start_needle = needle_state(env)
-        align_start_ring = ring_state(env)
-        align_full_rot = rotation_between(-align_start_needle["yaxis"], align_start_ring["normal"])
-        align_final_quat = T.mat2quat(align_full_rot.dot(get_eef_mat(env)))
-        align_midpoint_quat = T.quat_slerp(align_start_quat, align_final_quat, 0.5)
-        stats["align_orientation_waypoint"] = {
-            "fraction": 0.5,
-            "start_quat": align_start_quat.tolist(),
-            "midpoint_quat": align_midpoint_quat.tolist(),
-            "final_quat": align_final_quat.tolist(),
-        }
-        for i, offset in enumerate(np.linspace(align_offset, align_end_offset, durations["align"])):
-            progress = i / max(1, durations["align"] - 1)
-            if self.collision_aware_threading:
-                target_fn = lambda offset=offset, progress=progress: self._curved_alignment_target(
-                    offset,
-                    progress,
-                    align_curve,
-                    measured_needle_to_eef,
-                )(env)
-            else:
-                rotation_progress = smoothstep((progress - align_curve["rotation_delay"]) / align_curve["rotation_span"])
-                waypoint_quat = self._two_stage_orientation(
-                    align_start_quat,
-                    align_midpoint_quat,
-                    align_final_quat,
-                    rotation_progress,
-                )
-                target_fn = lambda offset=offset, progress=progress, waypoint_quat=waypoint_quat: (
-                    self._curved_alignment_target(offset, progress, align_curve)(env)[0],
-                    waypoint_quat,
-                )
-            self._track_target(
+        def align_target(progress):
+            blend = minimum_jerk(progress)
+            offset = (1.0 - blend) * alignment_start["normal"] + blend * align_end_offset
+            lateral = (1.0 - blend) * alignment_start["lateral"] + blend * align_curve["lateral_end"]
+            vertical = (1.0 - blend) * alignment_start["vertical"] + blend * align_curve["vertical_end"]
+            twist = blend * align_curve["twist_end"]
+            tilt = blend * align_curve["tilt_end"]
+            target_fn = self._alignment_target(
+                offset,
+                lateral_offset=lateral,
+                vertical_offset=vertical,
+                twist=twist,
+                tilt=tilt,
+                rotation_fraction=blend,
+                needle_to_eef=measured_needle_to_eef,
+                reference_needle_mat=align_reference_needle_mat,
+            )
+            return target_fn(env)
+
+        def align_completion(stage_env, target_pos, target_quat, motion):
+            pose = self._pose_completion(
+                stage_env,
+                target_pos,
+                target_quat,
+                motion,
+                position_tolerance=0.006,
+                orientation_tolerance_deg=4.0,
+                motion_tolerance=0.005,
+            )
+            tracking = self._needle_target_errors(
+                stage_env,
+                align_end_offset,
+                align_curve["lateral_end"],
+                align_curve["vertical_end"],
+            )
+            contact = needle_grasp_contact(stage_env)
+            tripod_motion = self._tripod_motion(stage_env, stats)
+            pose.update(
+                {
+                    "needle_tracking": tracking,
+                    "contact": bool(contact),
+                    "tripod_motion": tripod_motion,
+                    "tripod_stable": bool(tripod_motion["stable"]),
+                }
+            )
+            pose["passed"] = bool(
+                pose["passed"]
+                and contact
+                and tripod_motion["stable"]
+                and tracking["normal_error_m"] < 0.008
+                and tracking["tangent_error_m"] < 0.004
+                and tracking["vertical_error_m"] < 0.004
+                and tracking["orientation_error_deg"] < 5.0
+            )
+            return pose
+
+        if self.control_mode == "osc_pose":
+            stats["align_complete"] = self._run_bounded_trajectory_stage(
                 env,
-                target_fn,
+                align_target,
                 1.0,
-                1,
+                durations["align"],
                 policy_state,
                 stats,
                 "align",
+                align_completion,
                 render,
                 max_fr,
+                required_stable_steps=2,
+                start_at_zero=True,
+                max_steps=OSC_STAGE_MAX_STEPS["align"],
             )
+            if not stats["align_complete"]:
+                stats["aborted_stage"] = "align"
+                return self._finish_rollout(env, stats, policy_state, gripper_axes)
+        else:
+            for i in range(durations["align"]):
+                progress = i / max(1, durations["align"] - 1)
+                target_pos, target_quat = align_target(progress)
+                self._track_target(
+                    env,
+                    self._fixed_target(target_pos, target_quat),
+                    1.0,
+                    1,
+                    policy_state,
+                    stats,
+                    "align",
+                    render,
+                    max_fr,
+                )
+            stats["align_complete"] = True
         if self.collision_aware_threading:
             stable_steps = 0
             gate_errors = None
@@ -1283,6 +1981,7 @@ class ThreadingScriptedPolicy:
                         1.0,
                         align_curve,
                         measured_needle_to_eef,
+                        align_reference_needle_mat,
                     )(env),
                     1.0,
                     1,
@@ -1294,49 +1993,110 @@ class ThreadingScriptedPolicy:
                     stop_on_reach=False,
                 )
                 gate_errors = self._needle_target_errors(env, pre_insert_offset)
+                gate_tripod_motion = self._tripod_motion(env, stats, max_displacement=0.012)
                 within_gate = (
                     gate_errors["normal_error_m"] < 0.008
                     and gate_errors["tangent_error_m"] < 0.004
                     and gate_errors["vertical_error_m"] < 0.004
                     and gate_errors["orientation_error_deg"] < 5.0
+                    and gate_tripod_motion["stable"]
                 )
                 stable_steps = stable_steps + 1 if within_gate else 0
-                if stable_steps >= 4 or self._tripod_displacement(env, stats) >= 0.012:
+                if stable_steps >= 4 or not gate_tripod_motion["stable"]:
                     break
             stats["pre_insert_gate"] = {
                 "passed": bool(stable_steps >= 4),
                 "stable_steps": int(stable_steps),
                 "steps": int(gate_steps),
                 "errors": gate_errors,
+                "tripod_motion": gate_tripod_motion,
             }
+            stats["pre_insert_complete"] = bool(stable_steps >= 4)
         else:
-            self._track_target(
-                env,
-                lambda: (
-                    self._curved_alignment_target(pre_insert_offset, 1.0, align_curve)(env)[0],
-                    align_final_quat,
-                ),
-                1.0,
-                durations["pre_insert"],
-                policy_state,
-                stats,
-                "pre_insert",
-                render,
-                max_fr,
-            )
+            def pre_insert_target(progress):
+                return self._curved_alignment_target(
+                    pre_insert_offset,
+                    1.0,
+                    align_curve,
+                    measured_needle_to_eef,
+                    align_reference_needle_mat,
+                )(env)
+
+            def pre_insert_completion(stage_env, target_pos, target_quat, motion):
+                pose = self._pose_completion(
+                    stage_env,
+                    target_pos,
+                    target_quat,
+                    motion,
+                    position_tolerance=0.005,
+                    orientation_tolerance_deg=3.5,
+                    motion_tolerance=0.003,
+                )
+                tracking = self._needle_target_errors(stage_env, pre_insert_offset)
+                contact = needle_grasp_contact(stage_env)
+                tripod_motion = self._tripod_motion(stage_env, stats)
+                pose.update(
+                    {
+                        "needle_tracking": tracking,
+                        "contact": bool(contact),
+                        "tripod_motion": tripod_motion,
+                        "tripod_stable": bool(tripod_motion["stable"]),
+                    }
+                )
+                pose["passed"] = bool(
+                    pose["passed"]
+                    and contact
+                    and tripod_motion["stable"]
+                    and tracking["normal_error_m"] < 0.006
+                    and tracking["tangent_error_m"] < 0.003
+                    and tracking["vertical_error_m"] < 0.003
+                    and tracking["orientation_error_deg"] < 4.0
+                )
+                return pose
+
+            if self.control_mode == "osc_pose":
+                stats["pre_insert_complete"] = self._run_bounded_trajectory_stage(
+                    env,
+                    pre_insert_target,
+                    1.0,
+                    durations["pre_insert"],
+                    policy_state,
+                    stats,
+                    "pre_insert",
+                    pre_insert_completion,
+                    render,
+                    max_fr,
+                    required_stable_steps=3,
+                    completion_start_step=1,
+                    max_steps=OSC_STAGE_MAX_STEPS["pre_insert"],
+                )
+            else:
+                self._track_target(
+                    env,
+                    lambda: pre_insert_target(1.0),
+                    1.0,
+                    durations["pre_insert"],
+                    policy_state,
+                    stats,
+                    "pre_insert",
+                    render,
+                    max_fr,
+                )
+                stats["pre_insert_complete"] = True
+
+        if self.control_mode == "osc_pose" and not stats["pre_insert_complete"]:
+            stats["aborted_stage"] = "pre_insert"
+            return self._finish_rollout(env, stats, policy_state, gripper_axes)
 
         # insert_through: keep inserting past sparse env success instead of terminating early.
         insert_offsets = np.linspace(insert_start_offset, insert_end_offset, durations["insert_through"])
-        insert_index = 0
-        insert_steps = 0
-        max_insert_steps = len(insert_offsets) * (5 if self.collision_aware_threading else 1)
         gate_passed = (
             not self.collision_aware_threading
             or bool(stats.get("pre_insert_gate", {}).get("passed", False))
         )
-        while gate_passed and insert_index < len(insert_offsets) and insert_steps < max_insert_steps:
-            offset = insert_offsets[insert_index]
-            progress = insert_index / max(1, len(insert_offsets) - 1)
+
+        def insert_target(progress):
+            offset = insert_start_offset + progress * (insert_end_offset - insert_start_offset)
             insert_curve = {
                 **align_curve,
                 "lateral_start": align_curve["lateral_end"],
@@ -1354,49 +2114,132 @@ class ThreadingScriptedPolicy:
                 "rotation_delay": 0.0,
                 "rotation_span": 0.35,
             }
-            self._track_target(
+            return self._curved_alignment_target(
+                offset,
+                progress,
+                insert_curve,
+                measured_needle_to_eef,
+                align_reference_needle_mat,
+                alignment_fraction=1.0,
+            )(env)
+
+        if self.control_mode == "osc_pose" and not self.collision_aware_threading:
+            def insert_completion(stage_env, target_pos, target_quat, motion):
+                pose = self._pose_completion(
+                    stage_env,
+                    target_pos,
+                    target_quat,
+                    motion,
+                    position_tolerance=0.008,
+                    orientation_tolerance_deg=5.0,
+                    motion_tolerance=0.005,
+                )
+                tracking = self._needle_target_errors(stage_env, insert_end_offset)
+                geometry = clean_ring_aperture_geometry(stage_env)
+                current_progress = insertion_progress(needle_state(stage_env), ring_state(stage_env))
+                contact = needle_grasp_contact(stage_env)
+                tripod_motion = self._tripod_motion(stage_env, stats)
+                pose.update(
+                    {
+                        "needle_tracking": tracking,
+                        "clean_aperture": bool(geometry["clear"]),
+                        "insertion_progress_m": float(current_progress),
+                        "contact": bool(contact),
+                        "tripod_motion": tripod_motion,
+                        "tripod_stable": bool(tripod_motion["stable"]),
+                    }
+                )
+                pose["passed"] = bool(
+                    pose["passed"]
+                    and geometry["clear"]
+                    and stats["max_insert_progress"] > 0.026
+                    and current_progress > 0.014
+                    and contact
+                    and tripod_motion["stable"]
+                    and tracking["normal_error_m"] < 0.010
+                    and tracking["tangent_error_m"] < 0.003
+                    and tracking["vertical_error_m"] < 0.005
+                    and tracking["orientation_error_deg"] < 4.0
+                )
+                return pose
+
+            stats["insert_complete"] = self._run_bounded_trajectory_stage(
                 env,
-                lambda offset=offset, progress=progress, insert_curve=insert_curve: self._curved_alignment_target(
-                    offset,
-                    progress,
-                    insert_curve,
-                    measured_needle_to_eef,
-                )(env),
+                insert_target,
                 1.0,
-                1,
+                durations["insert_through"],
                 policy_state,
                 stats,
                 "insert_through",
+                insert_completion,
                 render,
                 max_fr,
+                required_stable_steps=2,
+                start_at_zero=True,
+                max_steps=OSC_STAGE_MAX_STEPS["insert_through"],
             )
-            insert_steps += 1
-            if self.collision_aware_threading:
-                tracking = self._needle_target_errors(env, offset)
-                stats["closed_loop_insert_last_tracking"] = tracking
-                near_aperture = offset >= -0.015
-                well_tracked = (
-                    tracking["normal_error_m"] < (0.007 if near_aperture else 0.010)
-                    and tracking["tangent_error_m"] < (0.002 if near_aperture else 0.004)
-                    and tracking["vertical_error_m"] < (0.002 if near_aperture else 0.004)
-                    and tracking["orientation_error_deg"] < (2.5 if near_aperture else 6.0)
+            insert_steps = stats["stage_outcomes"]["insert_through"]["actual_steps"]
+            insert_index = len(insert_offsets) if stats["insert_complete"] else len(insert_offsets) - 1
+            stats["closed_loop_insert"] = {
+                "enabled": False,
+                "completed": bool(stats["insert_complete"]),
+                "steps": int(insert_steps),
+                "offsets_completed": int(insert_index),
+                "offsets_total": int(len(insert_offsets)),
+                "tripod_abort": False,
+            }
+        else:
+            insert_index = 0
+            insert_steps = 0
+            max_insert_steps = len(insert_offsets) * (5 if self.collision_aware_threading else 1)
+            while gate_passed and insert_index < len(insert_offsets) and insert_steps < max_insert_steps:
+                offset = insert_offsets[insert_index]
+                progress = insert_index / max(1, len(insert_offsets) - 1)
+                target_pos, target_quat = insert_target(progress)
+                self._track_target(
+                    env,
+                    self._fixed_target(target_pos, target_quat),
+                    1.0,
+                    1,
+                    policy_state,
+                    stats,
+                    "insert_through",
+                    render,
+                    max_fr,
                 )
-                if self._tripod_displacement(env, stats) >= 0.012:
-                    break
-                if well_tracked:
+                insert_steps += 1
+                if self.collision_aware_threading:
+                    tracking = self._needle_target_errors(env, offset)
+                    stats["closed_loop_insert_last_tracking"] = tracking
+                    near_aperture = offset >= -0.015
+                    well_tracked = (
+                        tracking["normal_error_m"] < (0.007 if near_aperture else 0.010)
+                        and tracking["tangent_error_m"] < (0.002 if near_aperture else 0.004)
+                        and tracking["vertical_error_m"] < (0.002 if near_aperture else 0.004)
+                        and tracking["orientation_error_deg"] < (2.5 if near_aperture else 6.0)
+                    )
+                    if not self._tripod_motion(env, stats, max_displacement=0.012)["stable"]:
+                        break
+                    if well_tracked:
+                        insert_index += 1
+                else:
                     insert_index += 1
-            else:
-                insert_index += 1
-        stats["closed_loop_insert"] = {
-            "enabled": bool(self.collision_aware_threading),
-            "completed": bool(insert_index >= len(insert_offsets)),
-            "steps": int(insert_steps),
-            "offsets_completed": int(insert_index),
-            "offsets_total": int(len(insert_offsets)),
-            "tripod_abort": bool(
-                self.collision_aware_threading and self._tripod_displacement(env, stats) >= 0.012
-            ),
-        }
+            stats["insert_complete"] = bool(insert_index >= len(insert_offsets))
+            stats["closed_loop_insert"] = {
+                "enabled": bool(self.collision_aware_threading),
+                "completed": bool(stats["insert_complete"]),
+                "steps": int(insert_steps),
+                "offsets_completed": int(insert_index),
+                "offsets_total": int(len(insert_offsets)),
+                "tripod_abort": bool(
+                    self.collision_aware_threading
+                    and not self._tripod_motion(env, stats, max_displacement=0.012)["stable"]
+                ),
+            }
+
+        if self.control_mode == "osc_pose" and not stats["insert_complete"]:
+            stats["aborted_stage"] = "insert_through"
+            return self._finish_rollout(env, stats, policy_state, gripper_axes)
 
         # hold_after_insert: keep moving very slightly through the ring instead of
         # freezing into a zero-action terminal pause.
@@ -1404,63 +2247,80 @@ class ThreadingScriptedPolicy:
             hold_pos, hold_quat = get_eef_pose(env)
             hold_ring = ring_state(env)
             hold_drift = self.rng.uniform(0.0015, 0.004) * hold_ring["normal"]
-            for i in range(durations["hold_after_insert"]):
-                progress = i / max(1, durations["hold_after_insert"] - 1)
+
+            def hold_target(progress):
                 target_pos = hold_pos + smoothstep(progress) * hold_drift
-                self._track_target(
+                return target_pos, hold_quat
+
+            def hold_completion(stage_env, target_pos, target_quat, motion):
+                pose = self._pose_completion(
+                    stage_env,
+                    target_pos,
+                    target_quat,
+                    motion,
+                    # The commanded drift is only 1.5-4 mm, so this must be
+                    # tighter than the shortest drift to prevent an immediate pass.
+                    position_tolerance=0.0015,
+                    orientation_tolerance_deg=4.0,
+                    motion_tolerance=0.003,
+                )
+                geometry = clean_ring_aperture_geometry(stage_env)
+                current_progress = insertion_progress(needle_state(stage_env), ring_state(stage_env))
+                contact = needle_grasp_contact(stage_env)
+                tripod_motion = self._tripod_motion(stage_env, stats)
+                pose.update(
+                    {
+                        "clean_aperture": bool(geometry["clear"]),
+                        "insertion_progress_m": float(current_progress),
+                        "contact": bool(contact),
+                        "tripod_motion": tripod_motion,
+                        "tripod_stable": bool(tripod_motion["stable"]),
+                    }
+                )
+                pose["passed"] = bool(
+                    pose["passed"]
+                    and geometry["clear"]
+                    and current_progress > 0.014
+                    and contact
+                    and tripod_motion["stable"]
+                )
+                return pose
+
+            if self.control_mode == "osc_pose":
+                stats["hold_complete"] = self._run_bounded_trajectory_stage(
                     env,
-                    self._fixed_target(target_pos, hold_quat),
+                    hold_target,
                     1.0,
-                    1,
+                    durations["hold_after_insert"],
                     policy_state,
                     stats,
                     "hold_after_insert",
+                    hold_completion,
                     render,
                     max_fr,
-                    stop_on_reach=False,
+                    start_at_zero=True,
+                    max_steps=OSC_STAGE_MAX_STEPS["hold_after_insert"],
                 )
-            stats["hold_complete"] = True
-        self._record_metrics(env, stats)
-        insert_needle = needle_state(env)
-        stats["actual_insert_angle_deg"] = float(
-            visual_grasp_angle_from_axis(eef_approach_axis(get_eef_mat(env), gripper_axes), insert_needle)
-        )
-
-        stats["policy_success"] = bool(self._policy_success(env, stats))
-        stats["success"] = stats["policy_success"]
-        stats["steps"] = int(env.t)
-        if policy_state["action_delta_norms"]:
-            stats["smoothness"] = {
-                "mean_action_delta": float(np.mean(policy_state["action_delta_norms"])),
-                "max_action_delta": float(np.max(policy_state["action_delta_norms"])),
-                "mean_action_jerk": float(np.mean(policy_state["action_jerk_norms"])) if policy_state["action_jerk_norms"] else 0.0,
-                "max_action_jerk": float(np.max(policy_state["action_jerk_norms"])) if policy_state["action_jerk_norms"] else 0.0,
-            }
-        else:
-            stats["smoothness"] = {
-                "mean_action_delta": 0.0,
-                "max_action_delta": 0.0,
-                "mean_action_jerk": 0.0,
-                "max_action_jerk": 0.0,
-            }
-        finite_conditions = [value for value in policy_state["jacobian_conditions"] if np.isfinite(value)]
-        stats["joint_control"] = {
-            "enabled": self.control_mode == "joint_position",
-            "max_jacobian_condition": float(max(finite_conditions)) if finite_conditions else None,
-            "mean_jacobian_condition": float(np.mean(finite_conditions)) if finite_conditions else None,
-            "singular_condition_count": int(
-                sum(not np.isfinite(value) for value in policy_state["jacobian_conditions"])
-            ),
-            "max_joint_target_step": float(max(policy_state["joint_target_step_norms"]))
-            if policy_state["joint_target_step_norms"]
-            else None,
-            "mean_joint_target_step": float(np.mean(policy_state["joint_target_step_norms"]))
-            if policy_state["joint_target_step_norms"]
-            else None,
-        }
-        stats["initial_tripod_pos"] = stats["initial_tripod_pos"].tolist()
-        self.stats.append(stats)
-        return bool(stats["policy_success"])
+            else:
+                for i in range(durations["hold_after_insert"]):
+                    progress = i / max(1, durations["hold_after_insert"] - 1)
+                    target_pos, target_quat = hold_target(progress)
+                    self._track_target(
+                        env,
+                        self._fixed_target(target_pos, target_quat),
+                        1.0,
+                        1,
+                        policy_state,
+                        stats,
+                        "hold_after_insert",
+                        render,
+                        max_fr,
+                        stop_on_reach=False,
+                    )
+                stats["hold_complete"] = True
+        if self.control_mode == "osc_pose" and not stats["hold_complete"]:
+            stats["aborted_stage"] = "hold_after_insert"
+        return self._finish_rollout(env, stats, policy_state, gripper_axes)
 
 
 def parse_args():
@@ -1517,6 +2377,12 @@ def parse_args():
         action="store_true",
         help="For full-only insert-angle-range collection, reduce extreme approach / pause artifacts without changing success filters.",
     )
+    parser.add_argument(
+        "--collision-aware-threading",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Use staged D0 alignment, a pre-insertion gate, and closed-loop insertion tracking.",
+    )
     parser.add_argument("--insert-angle-threshold", type=float, default=95.0)
     parser.add_argument("--insert-angle-per-bin", type=int, default=25)
     parser.add_argument("--insert-angle-min", type=float, default=105.0)
@@ -1557,6 +2423,7 @@ def parse_args():
     parser.add_argument("--max-action-jerk", type=float, default=0.095)
     parser.add_argument("--max-mean-action-delta", type=float, default=0.04)
     parser.add_argument("--max-tripod-displacement", type=float, default=0.02)
+    parser.add_argument("--max-tripod-rotation-deg", type=float, default=5.0)
     parser.add_argument(
         "--record-joint-training-fields",
         action="store_true",
@@ -1829,6 +2696,8 @@ def geometric_collection_success(stats):
         "tripod_stable",
         "hold_complete",
         "gripper_closed",
+        "grasp_contact",
+        "grasp_rigid",
     ]
     return all(bool(checks.get(name)) for name in required)
 
@@ -1844,6 +2713,8 @@ def smooth_collection_success(stats, args):
         failures.append("mean_action_delta")
     if stats.get("tripod_displacement", float("inf")) > args.max_tripod_displacement:
         failures.append("tripod_displacement")
+    if stats.get("tripod_rotation_deg", float("inf")) > args.max_tripod_rotation_deg:
+        failures.append("tripod_rotation")
     stats["smooth_filter"] = {
         "enabled": bool(args.smooth_filter),
         "passed": not failures,
@@ -1853,6 +2724,7 @@ def smooth_collection_success(stats, args):
             "max_action_jerk": float(args.max_action_jerk),
             "max_mean_action_delta": float(args.max_mean_action_delta),
             "max_tripod_displacement": float(args.max_tripod_displacement),
+            "max_tripod_rotation_deg": float(args.max_tripod_rotation_deg),
         },
     }
     return not failures
@@ -1892,9 +2764,16 @@ def main():
     args = parse_args()
     if args.collect_insert_angle_split and args.collect_insert_angle_range:
         raise ValueError("--collect-insert-angle-split and --collect-insert-angle-range are mutually exclusive")
+    if args.allow_failures and (args.collect_insert_angle_split or args.collect_insert_angle_range):
+        raise ValueError(
+            "--allow-failures cannot fill successful angle-filtered collections; "
+            "use --keep-failed to retain rejected attempts without counting them"
+        )
     rng = np.random.RandomState(args.seed)
     if args.control_mode == "joint_position" and args.robots != ["Panda"]:
         raise ValueError("The joint-position experiment currently supports only one Panda robot")
+    if args.record_joint_training_fields and args.control_mode != "joint_position":
+        raise ValueError("--record-joint-training-fields requires --control-mode joint_position")
     controller_config = make_controller_config(args.robots[0], args.control_mode)
 
     split_counts = {"lt": 0, "ge": 0}
@@ -1957,6 +2836,7 @@ def main():
         action_noise_std=args.action_noise_std,
         grasp_angle_range=(args.grasp_angle_min, args.grasp_angle_max),
         control_mode=args.control_mode,
+        collision_aware_threading=args.collision_aware_threading,
     )
     target_total = 2 * args.insert_angle_per_bin if args.collect_insert_angle_split else args.num_demos
     motion_style_plan = make_motion_style_plan(rng, target_total) if args.balanced_motion_styles else None
@@ -2026,11 +2906,12 @@ def main():
                 )
             )
             accepted_bucket = insert_angle_bucket(insert_angle, args.insert_angle_threshold) if collection_success else None
-            keep_episode = (
+            count_episode = (
                 collection_success
                 and accepted_bucket is not None
                 and split_counts[accepted_bucket] < args.insert_angle_per_bin
             )
+            keep_episode = bool(count_episode or args.keep_failed)
         elif args.collect_insert_angle_range:
             collection_success = bool(success)
             if args.split_use_geometric_success:
@@ -2045,7 +2926,7 @@ def main():
             else:
                 accepted_bucket = None
                 bucket_has_capacity = True
-            stats["collection_success"] = bool((collection_success or args.allow_failures) and smooth_success and angle_in_range)
+            stats["collection_success"] = bool(collection_success and smooth_success and angle_in_range)
             stats["collection_success_source"] = (
                 "policy_success_insert_angle_range"
                 if success and stats["collection_success"]
@@ -2064,14 +2945,22 @@ def main():
                 stats["insert_angle_range"]["balanced_bins"] = range_angle_counts_label(range_edges, range_counts)
                 stats["insert_angle_range"]["accepted_bin"] = None if accepted_bucket is None else int(accepted_bucket)
                 stats["insert_angle_range"]["target_bin"] = None if target_range_bin is None else int(target_range_bin)
-            keep_episode = bool(stats["collection_success"] and bucket_has_capacity)
+            count_episode = bool(stats["collection_success"] and bucket_has_capacity)
+            keep_episode = bool(count_episode or args.keep_failed)
         else:
             smooth_success = smooth_collection_success(stats, args) if args.smooth_filter else True
             if not args.smooth_filter:
                 stats["smooth_filter"] = {"enabled": False, "passed": True, "failure_reasons": []}
-            stats["collection_success"] = bool((success and smooth_success) or args.allow_failures or args.keep_failed)
-            stats["collection_success_source"] = "policy_success" if success else "not_kept"
-            keep_episode = (success and smooth_success) or args.allow_failures or args.keep_failed
+            stats["collection_success"] = bool(smooth_success and (success or args.allow_failures))
+            stats["collection_success_source"] = (
+                "policy_success_smooth"
+                if success and smooth_success
+                else ("allow_failures_smooth" if args.allow_failures and smooth_success else "failed")
+            )
+            count_episode = bool(stats["collection_success"])
+            keep_episode = bool(count_episode or args.keep_failed)
+        stats["episode_kept"] = bool(keep_episode)
+        stats["counted_toward_target"] = bool(count_episode)
         ep_dir = finalize_episode(
             env,
             success=keep_episode,
@@ -2080,7 +2969,7 @@ def main():
         )
         if success:
             successes += 1
-        if keep_episode:
+        if count_episode:
             kept += 1
             if args.collect_insert_angle_split:
                 split_counts[accepted_bucket] += 1

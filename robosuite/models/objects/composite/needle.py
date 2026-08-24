@@ -4,8 +4,20 @@ from robosuite.models.objects import CompositeObject
 from robosuite.utils.mjcf_utils import CustomMaterial, add_to_dict
 
 
+NEEDLE_SHAFT_HALF_SIZE = (0.005, 0.054, 0.005)
+NEEDLE_SHAFT_HALF_LENGTH = NEEDLE_SHAFT_HALF_SIZE[1]
+NEEDLE_HANDLE_HALF_SIZE = (0.02, 0.02, 0.02)
+NEEDLE_TOTAL_HALF_SIZE = (
+    max(NEEDLE_SHAFT_HALF_SIZE[0], NEEDLE_HANDLE_HALF_SIZE[0]),
+    NEEDLE_SHAFT_HALF_LENGTH + NEEDLE_HANDLE_HALF_SIZE[1],
+    max(NEEDLE_SHAFT_HALF_SIZE[2], NEEDLE_HANDLE_HALF_SIZE[2]),
+)
+
+
 class NeedleObject(CompositeObject):
     """Procedural needle with a graspable handle."""
+
+    shaft_half_length = NEEDLE_SHAFT_HALF_LENGTH
 
     def __init__(self, name):
         self._name = name
@@ -25,7 +37,7 @@ class NeedleObject(CompositeObject):
 
     def _get_geom_attrs(self):
         base_args = {
-            "total_size": [0.02, 0.08, 0.02],
+            "total_size": NEEDLE_TOTAL_HALF_SIZE,
             "name": self.name,
             "locations_relative_to_center": False,
             "obj_types": "all",
@@ -33,8 +45,8 @@ class NeedleObject(CompositeObject):
         }
         obj_args = {}
 
-        needle_size = [0.005, 0.06, 0.005]
-        handle_size = [0.02, 0.02, 0.02]
+        needle_size = NEEDLE_SHAFT_HALF_SIZE
+        handle_size = NEEDLE_HANDLE_HALF_SIZE
 
         add_to_dict(
             dic=obj_args,

@@ -6,6 +6,7 @@ import robosuite.utils.transform_utils as T
 from robosuite.environments.manipulation.manipulation_env import ManipulationEnv
 from robosuite.models.arenas import TableArena
 from robosuite.models.objects import NeedleObject, RingTripodObject
+from robosuite.models.objects.composite.needle import NEEDLE_SHAFT_HALF_LENGTH
 from robosuite.models.tasks import ManipulationTask
 from robosuite.utils.mjcf_utils import string_to_array
 from robosuite.utils.observables import Observable, sensor
@@ -128,7 +129,7 @@ class Threading(ManipulationEnv):
     def _get_initial_placement_bounds(self):
         return {
             "needle": {
-                "x": (-0.2, -0.05),
+                "x": (-0.1, -0.0),
                 "y": (0.15, 0.25),
                 "z_rot": (-2.0 * np.pi / 3.0 + np.pi, -np.pi / 3.0 + np.pi),
                 "reference": self.table_offset,
@@ -263,7 +264,7 @@ class Threading(ManipulationEnv):
         needle_pos = np.array(self.sim.data.geom_xpos[needle_id])
         needle_mat = np.array(self.sim.data.geom_xmat[needle_id]).reshape(3, 3)
         needle_axis = self._unit_vector(needle_mat[:, 1])
-        needle_tip = needle_pos - 0.06 * needle_axis
+        needle_tip = needle_pos - NEEDLE_SHAFT_HALF_LENGTH * needle_axis
 
         ring_pos = np.zeros(3)
         ring_mat = None
@@ -328,7 +329,7 @@ class Threading(ManipulationEnv):
         ring_pos,
         ring_mat,
         ring_normal,
-        needle_half_length=0.06,
+        needle_half_length=NEEDLE_SHAFT_HALF_LENGTH,
         aperture_half_extent=0.008,
     ):
         """Evaluate whether the finite needle centerline intersects the ring opening.
@@ -404,9 +405,9 @@ class Threading_D05(Threading_D0):
     def _get_initial_placement_bounds(self):
         bounds = super()._get_initial_placement_bounds()
         bounds["tripod"] = {
-            "x": (-0.02, 0.02),
-            "y": (-0.17, -0.13),
-            "z_rot": (np.pi / 3.0, 2.0 * np.pi / 3.0),
+            "x": (-0.01, 0.01),
+            "y": (-0.16, -0.14),
+            "z_rot": (np.pi / 2.0 - np.pi / 20.0, np.pi / 2.0 + np.pi / 20.0),
             "reference": self.table_offset,
         }
         return bounds

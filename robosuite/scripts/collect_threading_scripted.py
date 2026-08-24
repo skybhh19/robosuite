@@ -20,6 +20,7 @@ if str(REPO_ROOT) not in sys.path:
 
 import robosuite as suite
 import robosuite.utils.transform_utils as T
+from robosuite.models.objects.composite.needle import NEEDLE_SHAFT_HALF_LENGTH
 from robosuite.wrappers import DataCollectionWrapper
 
 
@@ -110,8 +111,8 @@ def needle_state(env):
         "xaxis": unit(needle_mat[:, 0]),
         "yaxis": yaxis,
         "zaxis": unit(needle_mat[:, 2], fallback=[0.0, 0.0, 1.0]),
-        "tip": needle_center - 0.06 * yaxis,
-        "handle_side": needle_center + 0.06 * yaxis,
+        "tip": needle_center - NEEDLE_SHAFT_HALF_LENGTH * yaxis,
+        "handle_side": needle_center + NEEDLE_SHAFT_HALF_LENGTH * yaxis,
     }
 
 
@@ -137,7 +138,7 @@ def ring_state(env):
 def shaft_ring_distance(needle, ring):
     """Return the closest distance from the ring center to the needle shaft segment."""
     rel = ring["center"] - needle["needle_center"]
-    t = np.clip(np.dot(rel, needle["yaxis"]), -0.06, 0.06)
+    t = np.clip(np.dot(rel, needle["yaxis"]), -NEEDLE_SHAFT_HALF_LENGTH, NEEDLE_SHAFT_HALF_LENGTH)
     closest = needle["needle_center"] + t * needle["yaxis"]
     return float(np.linalg.norm(closest - ring["center"]))
 

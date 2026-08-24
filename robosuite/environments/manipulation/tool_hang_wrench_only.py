@@ -73,14 +73,11 @@ class ToolHangWrenchOnly(ToolHang):
     # handle almost edge-to-edge with black material.
     EXTENDED_HANDLE_HALF_LENGTH = 0.1025  # 20.5 cm full silver handle
     EXTENDED_GRIP_HALF_LENGTH = 0.080
-    # ToolHang's long opaque handle lies directly between the stock centered
-    # Panda wrist camera and the hook during pre-insertion. Use a task-local
-    # side-mounted camera baseline (and a modestly wider lens) so the full
-    # regime can observe both the ring and hook without changing arm motion.
-    WRIST_CAMERA_POS = np.array([0.05, 0.06, 0.0])
-    # Keep Panda's native 75 degree lens. The lateral baseline reveals the
-    # hook, while the narrower field preserves the intended full / partial
-    # distinction as the ring moves farther from the camera.
+    # Restore the standard TableArena and Panda camera poses for this variant.
+    AGENTVIEW_CAMERA_POS = np.array([0.5, 0.0, 1.35])
+    AGENTVIEW_CAMERA_QUAT = np.array([0.653, 0.271, 0.271, 0.653])
+    WRIST_CAMERA_POS = np.array([0.05, 0.0, 0.0])
+    WRIST_CAMERA_QUAT = np.array([0.0, 0.707108, 0.707108, 0.0])
     WRIST_CAMERA_FOVY_DEG = 75.0
     RESET_CONTROLLER_SETTLE_STEPS = 10
 
@@ -93,9 +90,14 @@ class ToolHangWrenchOnly(ToolHang):
 
     def _setup_references(self):
         super()._setup_references()
-        camera_id = self.sim.model.camera_name2id("robot0_eye_in_hand")
-        self.sim.model.cam_pos[camera_id] = self.WRIST_CAMERA_POS
-        self.sim.model.cam_fovy[camera_id] = self.WRIST_CAMERA_FOVY_DEG
+        agentview_id = self.sim.model.camera_name2id("agentview")
+        self.sim.model.cam_pos[agentview_id] = self.AGENTVIEW_CAMERA_POS
+        self.sim.model.cam_quat[agentview_id] = self.AGENTVIEW_CAMERA_QUAT
+
+        wrist_id = self.sim.model.camera_name2id("robot0_eye_in_hand")
+        self.sim.model.cam_pos[wrist_id] = self.WRIST_CAMERA_POS
+        self.sim.model.cam_quat[wrist_id] = self.WRIST_CAMERA_QUAT
+        self.sim.model.cam_fovy[wrist_id] = self.WRIST_CAMERA_FOVY_DEG
         self.sim.forward()
 
     def configure_reset_variation(self, variation=None):
@@ -193,6 +195,11 @@ class ToolHangWrenchOnly(ToolHang):
     def _equality_id(self, name):
         return mujoco.mj_name2id(self.sim.model._model, mujoco.mjtObj.mjOBJ_EQUALITY, name)
 
+    def _set_equality_active(self, name, active):
+        equality_id = self._equality_id(name)
+        equality_owner = self.sim.data if hasattr(self.sim.data, "eq_active") else self.sim.model
+        equality_owner.eq_active[equality_id] = int(bool(active))
+
     def _anchor_fixture(self):
         for key, anchor_name, weld_name in (
             ("stand", self.STAND_ANCHOR, self.STAND_WELD),
@@ -207,7 +214,7 @@ class ToolHangWrenchOnly(ToolHang):
             self.sim.data.mocap_quat[mocap_id] = anchor_quat
             self.sim.model.body_pos[anchor_body_id] = anchor_position
             self.sim.model.body_quat[anchor_body_id] = anchor_quat
-            self.sim.data.eq_active[self._equality_id(weld_name)] = 1
+            self._set_equality_active(weld_name, True)
         self.sim.forward()
         self._fixture_reference = {
             key: np.r_[
@@ -220,7 +227,7 @@ class ToolHangWrenchOnly(ToolHang):
     def reset(self):
         if self.sim is not None:
             for name in (self.STAND_WELD, self.FRAME_WELD):
-                self.sim.data.eq_active[self._equality_id(name)] = 0
+                self._set_equality_active(name, False)
         observation = super().reset()
         has_pending = bool(getattr(self, "_has_pending_reset_variation", False))
         variation = getattr(self, "_pending_reset_variation", {}) if has_pending else {}
@@ -285,7 +292,7 @@ class ToolHangWrenchOnly(ToolHang):
     def load_phase2_reference_state(self, flattened_state, fixture_state=None):
         """Load a reference state and anchor its assembled fixture pose."""
         for name in (self.STAND_WELD, self.FRAME_WELD):
-            self.sim.data.eq_active[self._equality_id(name)] = 0
+            self._set_equality_active(name, False)
         self.sim.set_state_from_flattened(np.asarray(flattened_state, dtype=float))
         if fixture_state is not None:
             fixture_qpos = np.asarray(fixture_state, dtype=float)[1 : 1 + self.sim.model.nq]
