@@ -73,16 +73,16 @@ class ToolHangWrenchOnly(ToolHang):
     # handle almost edge-to-edge with black material.
     EXTENDED_HANDLE_HALF_LENGTH = 0.1025  # 20.5 cm full silver handle
     EXTENDED_GRIP_HALF_LENGTH = 0.080
-    # ToolHang's long opaque handle lies directly between the stock centered
-    # Panda wrist camera and the hook during pre-insertion. Use a task-local
-    # side-mounted camera baseline (and a modestly wider lens) so the full
-    # regime can observe both the ring and hook without changing arm motion.
-    WRIST_CAMERA_POS = np.array([0.05, 0.06, 0.0])
-    # Keep Panda's native 75 degree lens. The lateral baseline reveals the
-    # hook, while the narrower field preserves the intended full / partial
-    # distinction as the ring moves farther from the camera.
+    # Restore Panda's centered eye-in-hand camera. Explicitly setting both pose
+    # and lens prevents task-local XML edits from silently changing the data
+    # observation geometry.
+    WRIST_CAMERA_POS = np.array([0.05, 0.0, 0.0])
+    WRIST_CAMERA_QUAT = np.array([0.0, 0.707108, 0.707108, 0.0])
     WRIST_CAMERA_FOVY_DEG = 75.0
-    RESET_CONTROLLER_SETTLE_STEPS = 10
+    # The collector writes frame zero after restoring the sampled robot qpos.
+    # Advancing OSC here moves every evaluation reset away from that qpos and
+    # makes the policy start outside the demonstration distribution.
+    RESET_CONTROLLER_SETTLE_STEPS = 0
 
     def _load_model(self):
         self.tool_handle_half_length = self.EXTENDED_HANDLE_HALF_LENGTH
@@ -93,9 +93,15 @@ class ToolHangWrenchOnly(ToolHang):
 
     def _setup_references(self):
         super()._setup_references()
-        camera_id = self.sim.model.camera_name2id("robot0_eye_in_hand")
-        self.sim.model.cam_pos[camera_id] = self.WRIST_CAMERA_POS
-        self.sim.model.cam_fovy[camera_id] = self.WRIST_CAMERA_FOVY_DEG
+        agentview_id = self.sim.model.camera_name2id("agentview")
+        self.sim.model.cam_pos[agentview_id] = self.AGENTVIEW_CAMERA_POS
+        self.sim.model.cam_quat[agentview_id] = self.AGENTVIEW_CAMERA_QUAT
+        self.sim.model.cam_fovy[agentview_id] = self.AGENTVIEW_CAMERA_FOVY_DEG
+
+        wrist_id = self.sim.model.camera_name2id("robot0_eye_in_hand")
+        self.sim.model.cam_pos[wrist_id] = self.WRIST_CAMERA_POS
+        self.sim.model.cam_quat[wrist_id] = self.WRIST_CAMERA_QUAT
+        self.sim.model.cam_fovy[wrist_id] = self.WRIST_CAMERA_FOVY_DEG
         self.sim.forward()
 
     def configure_reset_variation(self, variation=None):
@@ -132,13 +138,11 @@ class ToolHangWrenchOnly(ToolHang):
                     - np.deg2rad(-100.74883)
                 ),
                 "fixture_translation_m": [
-                    float(self.rng.uniform(-0.001, 0.001)),
-                    float(self.rng.uniform(-0.001, 0.001)),
+                    0.0,
+                    0.0,
                     0.0,
                 ],
-                "fixture_yaw_rad": float(
-                    self.rng.uniform(np.deg2rad(-0.10), np.deg2rad(0.10))
-                ),
+                "fixture_yaw_rad": 0.0,
             }
         )
         return variation
@@ -193,6 +197,12 @@ class ToolHangWrenchOnly(ToolHang):
     def _equality_id(self, name):
         return mujoco.mj_name2id(self.sim.model._model, mujoco.mjtObj.mjOBJ_EQUALITY, name)
 
+    def _set_equality_active(self, name, active):
+        """Toggle one equality constraint across supported MuJoCo layouts."""
+        equality_id = self._equality_id(name)
+        equality_owner = self.sim.data if hasattr(self.sim.data, "eq_active") else self.sim.model
+        equality_owner.eq_active[equality_id] = int(bool(active))
+
     def _anchor_fixture(self):
         for key, anchor_name, weld_name in (
             ("stand", self.STAND_ANCHOR, self.STAND_WELD),
@@ -207,7 +217,7 @@ class ToolHangWrenchOnly(ToolHang):
             self.sim.data.mocap_quat[mocap_id] = anchor_quat
             self.sim.model.body_pos[anchor_body_id] = anchor_position
             self.sim.model.body_quat[anchor_body_id] = anchor_quat
-            self.sim.data.eq_active[self._equality_id(weld_name)] = 1
+            self._set_equality_active(weld_name, True)
         self.sim.forward()
         self._fixture_reference = {
             key: np.r_[
@@ -220,7 +230,7 @@ class ToolHangWrenchOnly(ToolHang):
     def reset(self):
         if self.sim is not None:
             for name in (self.STAND_WELD, self.FRAME_WELD):
-                self.sim.data.eq_active[self._equality_id(name)] = 0
+                self._set_equality_active(name, False)
         observation = super().reset()
         has_pending = bool(getattr(self, "_has_pending_reset_variation", False))
         variation = getattr(self, "_pending_reset_variation", {}) if has_pending else {}
@@ -265,13 +275,15 @@ class ToolHangWrenchOnly(ToolHang):
         self._has_pending_reset_variation = False
         self.robots[0].composite_controller.update_state()
         self.robots[0].composite_controller.reset()
-        # Data collection historically discarded ten controller-settling
-        # steps before frame zero, while a normal evaluation reset exposed
-        # the freshly reset controller immediately. That made policy rollout
-        # start from different controller / velocity state than every demo.
-        # Make settling part of the registered environment reset so bare
-        # training and evaluation resets reproduce the demonstrated state.
-        settle_action = np.r_[robot_qpos, -1.0]
+        # Keep this optional for compatibility with older joint-controller
+        # datasets. OSC collection records the restored sampled qpos directly,
+        # so its registered environment must not advance physics before frame
+        # zero.
+        settle_action = (
+            np.r_[robot_qpos, -1.0]
+            if self.action_dim == 8
+            else np.r_[np.zeros(6), -1.0]
+        )
         for _ in range(self.RESET_CONTROLLER_SETTLE_STEPS):
             super().step(settle_action)
         self.timestep = 0
@@ -285,7 +297,7 @@ class ToolHangWrenchOnly(ToolHang):
     def load_phase2_reference_state(self, flattened_state, fixture_state=None):
         """Load a reference state and anchor its assembled fixture pose."""
         for name in (self.STAND_WELD, self.FRAME_WELD):
-            self.sim.data.eq_active[self._equality_id(name)] = 0
+            self._set_equality_active(name, False)
         self.sim.set_state_from_flattened(np.asarray(flattened_state, dtype=float))
         if fixture_state is not None:
             fixture_qpos = np.asarray(fixture_state, dtype=float)[1 : 1 + self.sim.model.nq]

@@ -33,21 +33,29 @@ from robosuite.scripts.collect_tool_hang_wrench_joint import (
     collection_acceptance,
     finalize_episode,
     make_controller_config,
+    controller_metadata,
+    numpy_json_default,
 )
 from robosuite.wrappers import DataCollectionWrapper
 
 
-def make_env(seed, camera_height, camera_width):
+def make_env(
+    seed,
+    camera_height,
+    camera_width,
+    headless=False,
+    controller_backend="osc_pose",
+):
     return suite.make(
         "ToolHangWrenchOnly",
         robots=["Panda"],
-        controller_configs=make_controller_config("Panda"),
+        controller_configs=make_controller_config("Panda", controller_backend),
         initialization_noise=None,
         ignore_done=True,
-        use_camera_obs=True,
+        use_camera_obs=not headless,
         use_object_obs=True,
         has_renderer=False,
-        has_offscreen_renderer=True,
+        has_offscreen_renderer=not headless,
         camera_names=["agentview", "robot0_eye_in_hand"],
         camera_heights=camera_height,
         camera_widths=camera_width,
@@ -63,6 +71,8 @@ def sample_screened_state(env, candidates):
     while True:
         candidates += 1
         variation = base_env.sample_reset_variation()
+        variation["fixture_translation_m"] = [0.0, 0.0, 0.0]
+        variation["fixture_yaw_rad"] = 0.0
         base_env.configure_reset_variation(deepcopy(variation))
         base_env.reset()
         qpos = np.asarray(variation["robot_qpos"], dtype=float)
@@ -152,7 +162,16 @@ def generate_state_pool(env, count, assignment_seed):
 
 def write_json(path, payload):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2) + "\n")
+    path.write_text(json.dumps(payload, indent=2, default=numpy_json_default) + "\n")
+
+
+def freeze_manifest_fixtures(state_pool):
+    """Normalize old and new manifests to the fixed assembled fixture."""
+    for entry in state_pool:
+        variation = entry["reset_variation"]
+        variation["fixture_translation_m"] = [0.0, 0.0, 0.0]
+        variation["fixture_yaw_rad"] = 0.0
+    return state_pool
 
 
 def write_dataset_metadata(output_dir, raw_dir, results):
@@ -181,6 +200,8 @@ def write_dataset_metadata(output_dir, raw_dir, results):
         "tool_on_frame",
         "wrench_pose_assist_count",
         "video",
+        "controller_backend",
+        "action_space",
     ]
     labels_path = output_dir / "labels.csv"
     with labels_path.open("w", newline="") as stream:
@@ -206,14 +227,37 @@ def write_dataset_metadata(output_dir, raw_dir, results):
                     "tool_on_frame": bool(stats["tool_on_frame"]),
                     "wrench_pose_assist_count": int(stats["wrench_pose_assist_count"]),
                     "video": stats["video"],
+                    "controller_backend": stats.get("controller_backend", "joint_position"),
+                    "action_space": stats.get(
+                        "action_space", "absolute_joint_position_plus_gripper"
+                    ),
                 }
             )
 
-    readme = """# ToolHang phase-2 scripted dataset
+    regime_counts = Counter(item["assigned_regime"] for item in results)
+    controller_counts = Counter(
+        item.get("controller_backend", "joint_position") for item in results
+    )
+    controller_configs = {
+        backend: controller_metadata(backend) for backend in controller_counts
+    }
+    write_json(
+        output_dir / "controller_metadata.json",
+        {
+            "controllers": controller_configs,
+            "no_temporal_subsampling": True,
+            "fixture_translation_m": [0.0, 0.0, 0.0],
+            "fixture_yaw_rad": 0.0,
+        },
+    )
+    readme = f"""# ToolHang phase-2 scripted dataset
 
-This directory contains 100 strict-success demonstrations: 50 `full_visible`
-grasps and 50 `partial_hidden` grasps. The initial physical states were sampled
-before grasp regimes and motion styles were assigned.
+This directory contains {len(results)} strict-success demonstrations:
+{regime_counts.get('full_visible', 0)} `full_visible` grasps and
+{regime_counts.get('partial_hidden', 0)} `partial_hidden` grasps. Controllers:
+{dict(controller_counts)}. The initial physical states were sampled before
+grasp regimes and motion styles were assigned. Fixture translation and yaw are
+fixed at zero.
 
 ## Files
 
@@ -225,11 +269,14 @@ before grasp regimes and motion styles were assigned.
   episode directory, grasp regime, continuous grasp coordinate, and motion style.
 - `state_manifest.json`: the pre-generated reset-state pool and assignments.
 - `tool_hang_wrench_joint_summary.json`: collection-level and rollout summaries.
+- `controller_metadata.json`: exact action dimensions, frames, scaling, gains,
+  and control frequency for each real rollout backend.
 
-Inside each NPZ, `action_infos` stores the commanded action plus
-`absolute_joint_target`, `joint_position`, `joint_delta`,
-`joint_delta_reference_scaled`, `actions_absolute_joint_position`, and
-`actions_joint_delta` for every control step.
+Inside each NPZ, `action_infos` stores the action actually executed at every
+control step. Joint-position episodes additionally store absolute joint targets
+and joint-position diagnostics. OSC episodes store the real normalized 6-D
+world-frame delta pose action plus gripper; they are never relabeled from a
+joint trajectory after collection.
 """
     (output_dir / "README.md").write_text(readme)
 
@@ -250,10 +297,35 @@ def parse_args():
     parser.add_argument("--states", type=int, default=100)
     parser.add_argument("--max-retries", type=int, default=20)
     parser.add_argument("--max-replacements-per-slot", type=int, default=20)
+    parser.add_argument(
+        "--max-regime-success-rate-gap",
+        type=float,
+        default=0.10,
+        help="Reject the completed collection if full / partial attempt success rates differ by more than this fraction.",
+    )
     parser.add_argument("--seed", type=int, default=6100)
     parser.add_argument("--assignment-seed", type=int, default=6101)
     parser.add_argument("--camera-height", type=int, default=512)
     parser.add_argument("--camera-width", type=int, default=512)
+    parser.add_argument(
+        "--controller-backend",
+        choices=("joint_position", "osc_pose"),
+        default="osc_pose",
+    )
+    parser.add_argument("--high-hole-height-m", type=float, default=0.060)
+    parser.add_argument("--seat-along-fraction", type=float, default=0.10)
+    parser.add_argument("--hang-yaw-deg", type=float, default=0.0)
+    parser.add_argument(
+        "--headless",
+        action="store_true",
+        help="Run physics and strict gates without creating a video renderer.",
+    )
+    parser.add_argument(
+        "--motion-style",
+        choices=GeometricJointPolicy.VARIATION_STYLES,
+        default="high_arc",
+        help="Use the same validated transfer style for every full / partial state.",
+    )
     parser.add_argument("--resume", action="store_true")
     return parser.parse_args()
 
@@ -277,7 +349,13 @@ def main():
     video_dir.mkdir(parents=True, exist_ok=True)
     failed_video_dir.mkdir(parents=True, exist_ok=True)
 
-    env = make_env(args.seed, args.camera_height, args.camera_width)
+    env = make_env(
+        args.seed,
+        args.camera_height,
+        args.camera_width,
+        args.headless,
+        args.controller_backend,
+    )
     if args.resume and manifest_path.is_file():
         manifest_payload = json.loads(manifest_path.read_text())
         state_pool = manifest_payload["states"]
@@ -296,6 +374,19 @@ def main():
         }
         write_json(manifest_path, manifest_payload)
 
+    state_pool = freeze_manifest_fixtures(state_pool)
+    manifest_payload["fixture_randomization"] = False
+    manifest_payload["controller_backend"] = args.controller_backend
+    manifest_payload["states"] = state_pool
+    write_json(manifest_path, manifest_payload)
+
+    if args.motion_style is not None:
+        for entry in state_pool:
+            entry["motion_style"] = args.motion_style
+        manifest_payload["forced_motion_style"] = args.motion_style
+        manifest_payload["states"] = state_pool
+        write_json(manifest_path, manifest_payload)
+
     prior_progress = load_progress(progress_path) if args.resume else {}
     existing = prior_progress.get("rollouts", [])
     completed = {int(item["state_id"]): item for item in existing if item.get("accepted")}
@@ -306,8 +397,9 @@ def main():
         str(raw_dir),
         collect_freq=1,
         flush_freq=701,
-        record_joint_position_fields=True,
+        record_joint_position_fields=args.controller_backend == "joint_position",
         joint_delta_scale=0.05,
+        reload_from_xml_on_episode_start=False,
     )
 
     started = time.time()
@@ -330,6 +422,10 @@ def main():
                     robot_start_mode="threading_continuous",
                     motion_style=entry["motion_style"],
                     grasp_offset_range=tuple(entry["grasp_offset_range_m"]),
+                    controller_backend=args.controller_backend,
+                    high_hole_height_m=args.high_hole_height_m,
+                    seat_along_fraction=args.seat_along_fraction,
+                    hang_yaw_deg=args.hang_yaw_deg,
                 )
                 attempt_history = []
                 for retry in range(1, args.max_retries + 1):
@@ -339,7 +435,7 @@ def main():
                     )
                     native_success, stats = policy.rollout(
                         env,
-                        VideoRecorder(attempt_video),
+                        VideoRecorder(None if args.headless else attempt_video),
                         reset_variation_override=entry["reset_variation"],
                         allow_reset_resample=False,
                     )
@@ -370,16 +466,23 @@ def main():
                             "accepted": bool(accepted),
                             "failure_reason": stats.get("failure_reason"),
                             "acceptance_checks": checks,
+                            "stage_checks": stats.get("stage_checks", []),
+                            "final_debug": stats.get("final_debug", {}),
+                            "smoothness": stats.get("smoothness", {}),
+                            "visibility_diagnostics": stats.get(
+                                "visibility_diagnostics", {}
+                            ),
                         }
                     )
                     if accepted:
-                        shutil.move(str(attempt_video), str(final_video))
+                        if not args.headless:
+                            shutil.move(str(attempt_video), str(final_video))
                         stats["retry_history"] = attempt_history
                         stats["replacement_count"] = replacement_index
                         stats["total_slot_attempts"] = (
                             replacement_index * args.max_retries + retry
                         )
-                        stats["video"] = final_video.name
+                        stats["video"] = None if args.headless else final_video.name
                         accepted_stats = stats
                         results.append(stats)
                         print(
@@ -390,10 +493,15 @@ def main():
                         )
                         break
                     attempt_video.unlink(missing_ok=True)
+                    last_stage = stats.get("stage_checks", [])[-1] if stats.get("stage_checks") else {}
+                    last_debug = last_stage.get("tool_debug", stats.get("final_debug", {}))
                     print(
                         f"state={state_id:03d}/{args.states} regime={regime} "
                         f"replacement={replacement_index} retry={retry}/{args.max_retries} "
-                        f"failed={stats.get('failure_reason')}",
+                        f"failed={stats.get('failure_reason')} "
+                        f"line_mm={1000.0 * last_debug.get('line_distance_m', float('nan')):.1f} "
+                        f"straddle={last_debug.get('hole_straddles_hook')} "
+                        f"depth={last_debug.get('normalized_insertion', float('nan')):.3f}",
                         flush=True,
                     )
                 if accepted_stats is not None:
@@ -443,6 +551,33 @@ def main():
     finally:
         env.close()
 
+    regime_attempts = {
+        regime: sum(
+            int(item.get("total_slot_attempts", item["retry"]))
+            for item in results
+            if item["assigned_regime"] == regime
+        )
+        for regime in ("full_visible", "partial_hidden")
+    }
+    regime_successes = {
+        regime: sum(item["assigned_regime"] == regime for item in results)
+        for regime in ("full_visible", "partial_hidden")
+    }
+    regime_attempt_success_rates = {
+        regime: (
+            regime_successes[regime] / regime_attempts[regime]
+            if regime_attempts[regime]
+            else 0.0
+        )
+        for regime in regime_attempts
+    }
+    regime_success_rate_gap = abs(
+        regime_attempt_success_rates["full_visible"]
+        - regime_attempt_success_rates["partial_hidden"]
+    )
+    regime_rate_balanced = bool(
+        regime_success_rate_gap <= args.max_regime_success_rate_gap
+    )
     summary = {
         "seed": args.seed,
         "assignment_seed": args.assignment_seed,
@@ -454,6 +589,12 @@ def main():
         + sum(len(item["attempts"]) for item in failed_states),
         "successes": len(results),
         "success_rate": len(results) / args.states,
+        "attempts_by_regime": regime_attempts,
+        "successes_by_regime": regime_successes,
+        "attempt_success_rates_by_regime": regime_attempt_success_rates,
+        "regime_success_rate_gap": regime_success_rate_gap,
+        "max_regime_success_rate_gap": args.max_regime_success_rate_gap,
+        "regime_success_rates_balanced": regime_rate_balanced,
         "elapsed_seconds": time.time() - started,
         "failed_states": failed_states,
         "replacement_events": replacement_events,
@@ -464,7 +605,8 @@ def main():
         "rollouts": sorted(results, key=lambda item: int(item["state_id"])),
     }
     write_json(summary_path, summary)
-    write_dataset_metadata(output_dir, raw_dir, results)
+    if len(results) == args.states and regime_rate_balanced:
+        write_dataset_metadata(output_dir, raw_dir, results)
     print(
         json.dumps(
             {
@@ -478,6 +620,8 @@ def main():
     )
     if len(results) != args.states:
         raise SystemExit(2)
+    if not regime_rate_balanced:
+        raise SystemExit(3)
 
 
 if __name__ == "__main__":

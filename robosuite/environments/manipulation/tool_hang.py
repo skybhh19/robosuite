@@ -139,6 +139,16 @@ class ToolHang(ManipulationEnv):
         AssertionError: [Invalid number of robots specified]
     """
 
+    # Match Threading's front-facing camera azimuth. A modest negative-y shift
+    # moves the wrench away from the left image boundary, while the slightly
+    # larger x distance and 48 degree lens keep both rings in frame at reset
+    # and throughout transfer. Height and pitch remain object-parallel.
+    AGENTVIEW_CAMERA_POS = np.array([0.65, -0.10, 1.02])
+    AGENTVIEW_CAMERA_QUAT = np.array(
+        [0.5169143677, 0.4824930131, 0.4824928641, 0.5169143677]
+    )
+    AGENTVIEW_CAMERA_FOVY_DEG = 48.0
+
     def __init__(
         self,
         robots,
@@ -263,20 +273,12 @@ class ToolHang(ManipulationEnv):
         # Arena always gets set to zero origin
         mujoco_arena.set_origin([0, 0, 0])
 
-        # Modify default agentview camera
+        # Use the canonical object-height ToolHang external view.
         mujoco_arena.set_camera(
             camera_name="agentview",
-            pos=[0.4837275266036987, 0.2505579098815722, 1.2639379055124524],
-            quat=[0.39713290333747864, 0.27807527780532837, 0.5016612410545349, 0.7164464592933655],
-        )
-
-        # Preserve the canonical Square / Threading external view under a
-        # distinct name so ToolHang's custom agentview and the standard view
-        # can be trained and evaluated concurrently.
-        mujoco_arena.set_camera(
-            camera_name="standard_agentview",
-            pos=[0.5, 0.0, 1.35],
-            quat=[0.653, 0.271, 0.271, 0.653],
+            pos=self.AGENTVIEW_CAMERA_POS,
+            quat=self.AGENTVIEW_CAMERA_QUAT,
+            camera_attribs={"fovy": str(self.AGENTVIEW_CAMERA_FOVY_DEG)},
         )
 
         # Add sideview
@@ -540,41 +542,58 @@ class ToolHang(ManipulationEnv):
             query_name = obj_name
 
         assert query_type in ["body", "geom", "site"]
-        if query_type == "body":
-            id_lookup = self.obj_body_id
-            pos_lookup = self.sim.data.body_xpos
-            mat_lookup = self.sim.data.body_xmat
-        elif query_type == "geom":
-            id_lookup = self.obj_geom_id
-            pos_lookup = self.sim.data.geom_xpos
-            mat_lookup = self.sim.data.geom_xmat
-        else:
-            id_lookup = self.obj_site_id
-            pos_lookup = self.sim.data.site_xpos
-            mat_lookup = self.sim.data.site_xmat
-
         @sensor(modality=modality)
         def obj_pos(obs_cache):
-            return np.array(pos_lookup[id_lookup[query_name]])
+            # Query through self.sim at sample time. Capturing a sim.data array
+            # here leaves the sensor attached to the old simulator whenever
+            # robomimic reloads an episode XML during state-to-observation
+            # conversion.
+            if query_type == "body":
+                return np.array(self.sim.data.body_xpos[self.obj_body_id[query_name]])
+            if query_type == "geom":
+                return np.array(self.sim.data.geom_xpos[self.obj_geom_id[query_name]])
+            return np.array(self.sim.data.site_xpos[self.obj_site_id[query_name]])
 
         @sensor(modality=modality)
         def obj_quat(obs_cache):
-            return T.mat2quat(np.array(mat_lookup[id_lookup[query_name]]).reshape(3, 3))
+            if query_type == "body":
+                matrix = self.sim.data.body_xmat[self.obj_body_id[query_name]]
+            elif query_type == "geom":
+                matrix = self.sim.data.geom_xmat[self.obj_geom_id[query_name]]
+            else:
+                matrix = self.sim.data.site_xmat[self.obj_site_id[query_name]]
+            return T.mat2quat(np.array(matrix).reshape(3, 3))
 
         arm_prefixes = self._get_arm_prefixes(self.robots[0], include_robot_name=False)
         full_prefixes = self._get_arm_prefixes(self.robots[0])
 
-        sensors = [
-            self._get_rel_obj_eef_sensor(arm_pf, obj_name, f"{obj_name}_to_{full_pf}eef_pos", full_pf, modality)
+        # Populate the absolute pose cache before evaluating relative sensors.
+        # The previous order made every relative pose lag by one observation
+        # and left the first frame dependent on stale reset / previous-episode
+        # cache contents. Threading uses this dependency-safe ordering too.
+        sensors = [obj_pos, obj_quat]
+        names = [f"{obj_name}_pos", f"{obj_name}_quat"]
+        rel_sensors = [
+            self._get_rel_obj_eef_sensor(
+                arm_pf,
+                obj_name,
+                f"{obj_name}_to_{full_pf}eef_pos",
+                full_pf,
+                modality,
+            )
             for arm_pf, full_pf in zip(arm_prefixes, full_prefixes)
         ]
-        sensors += [
-            self._get_obj_eef_rel_quat_sensor(full_pf, obj_name, f"{obj_name}_to_{full_pf}eef_quat", modality)
+        rel_sensors += [
+            self._get_obj_eef_rel_quat_sensor(
+                full_pf,
+                obj_name,
+                f"{obj_name}_to_{full_pf}eef_quat",
+                modality,
+            )
             for full_pf in full_prefixes
         ]
-        names = [fn.__name__ for fn in sensors]
-        sensors += [obj_pos, obj_quat]
-        names += [f"{obj_name}_pos", f"{obj_name}_quat"]
+        sensors += rel_sensors
+        names += [fn.__name__ for fn in rel_sensors]
 
         return sensors, names
 
