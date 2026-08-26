@@ -26,32 +26,45 @@ A normal `env.reset()` samples:
 - the wrench XY position and yaw within the native ToolHang workspace; and
 - a small assembled-fixture translation and yaw.
 
+For OSC demonstrations, reset then executes 10 zero-delta controller-settling
+steps, restores the sampled arm joint positions, zeros arm velocity, and
+updates and resets the controller. This is the recorded frame-zero semantics;
+evaluation must call `env.reset()` exactly once and must not subsequently call
+`reset_to(state_dict)`.
+
 ## Policy and collection
 
-The geometric policy commands absolute joint positions through gated stages:
+The geometric policy generates gated geometric stages:
 pregrasp, vertical descend, close, lift verification, transfer/rotation,
-preinsert, linear insertion, release, and retreat. Five related transfer
-families provide controlled path diversity while converging to the same
-preinsert and insertion geometry.
+preinsert, linear insertion, release, and retreat. The production dataset uses
+the real 7-D OSC_POSE action sent to the environment: normalized world-frame
+delta position, delta rotation, and gripper command.
 
-Collect a balanced set of fixed reset states with one retained strict success
-per state:
+Collect 220 frozen states, obtain two strict-success candidates per state, and
+retain the better candidate for the first 100 eligible full and partial states:
 
 ```bash
-python robosuite/scripts/collect_tool_hang_balanced_state_retries.py \
-  --states 100 \
-  --max-retries 20 \
-  --max-replacements-per-slot 20 \
-  --seed 10000 \
-  --assignment-seed 10001 \
-  --output-dir output/tool_hang_success100
+python robosuite/scripts/collect_tool_hang_two_candidate_pool.py \
+  --output-dir output/tool_hang_osc_balanced200 \
+  --states 220 \
+  --final-states 200 \
+  --successes-per-state 2 \
+  --max-attempts 20 \
+  --max-regime-success-rate-gap 0.05 \
+  --seed 20260827 \
+  --assignment-seed 20260827 \
+  --controller-backend osc_pose \
+  --policy-motion-style high_arc
 ```
 
 All physical reset states are generated before the 50/50 full-visible and
-partial-hidden grasp labels are assigned. A failed state is retried without
-changing its physical reset; only after all retries are exhausted is that slot
-replaced by another screened state. Only native successes that pass every
-stage and smoothness gate are retained.
+partial-hidden labels are assigned. The two regimes use equally wide,
+continuous 10 mm grasp intervals: `[-5, 5]` mm for full and `[35, 45]` mm for
+partial. Shared hanging and motion parameters are identical. A failed attempt
+is retried without changing its physical reset, and only native successes that
+pass every stage and smoothness gate are eligible. The completed collection is
+rejected when the per-attempt full/partial success-rate gap exceeds five
+percentage points.
 
 The collector writes:
 
@@ -62,6 +75,40 @@ The collector writes:
 - `tool_hang_wrench_joint_summary.json`, containing collection and quality
   statistics.
 
-Each NPZ `action_infos` record includes the absolute joint-position target,
-current joint position, raw joint delta, reference-scaled joint delta, and the
-gripper action.
+Each OSC NPZ `action_infos` record stores the action actually executed; actions
+are not relabeled from a joint trajectory after collection.
+
+## Canonical evaluation
+
+Evaluate a robomimic checkpoint with the single-reset evaluator:
+
+```bash
+python robosuite/scripts/evaluate_tool_hang_policy.py \
+  --agent path/to/model.pth \
+  --output-dir output/tool_hang_policy_eval \
+  --n-rollouts 100 \
+  --horizon 700 \
+  --seed 2026082601 \
+  --skip-video
+```
+
+Remove `--skip-video` to render the centered agent view and wrist view side by
+side. The evaluator rejects a ToolHang environment whose configured controller
+settle count is not 10. It always uses one `env.reset()` and never calls
+`reset_to`.
+
+The reset audit for the published OSC dataset measured a maximum frame-zero
+state error of `1.18e-7`. After the first recorded action, arm qpos and qvel
+errors were `4.2e-17` and `2.2e-15`.
+
+## Published dataset
+
+The audited 200-demo release is available at:
+
+```text
+/iliad/u/jasonyan/projects/robosuite/tool_hang_osc_v1_balanced_100_per_regime_20260825
+```
+
+It contains `dataset/demo.hdf5`, `dataset/observability_labels.csv`, corrected
+low-dimensional and two-camera RGB derivatives, collection metadata, and
+SHA-256 checksums.

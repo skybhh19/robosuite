@@ -9,24 +9,15 @@ import numpy as np
 import robosuite.utils.transform_utils as T
 from robosuite.environments.manipulation.tool_hang import ToolHang
 
-
 # Authored phase-2 reference configuration. These values define reset state,
 # never a replayed trajectory or an execution-time object assist.
-RESET_ROBOT_QPOS = np.array(
-    [0.08073644, 0.90338240, -0.11503691, -1.48327730, -0.09632931, 1.53187796, 0.35768220]
-)
+RESET_ROBOT_QPOS = np.array([0.08073644, 0.90338240, -0.11503691, -1.48327730, -0.09632931, 1.53187796, 0.35768220])
 # Start fully open. The stock Panda value is half-open; making reset itself
 # open avoids a visually different frame before the policy's open command.
 RESET_GRIPPER_QPOS = np.array([0.040, -0.040])
-RESET_STAND_QPOS = np.array(
-    [-0.08000954, 0.00001946, 0.87989457, 1.0, -0.00002121, 0.00000039, 0.00004552]
-)
-RESET_FRAME_QPOS = np.array(
-    [-0.07911001, 0.00217305, 0.94521802, 0.70699097, 0.00000380, 0.01625869, 0.70703566]
-)
-RESET_TOOL_QPOS = np.array(
-    [0.05106344, -0.21424905, 0.81489473, 0.63776799, -0.00005003, -0.00004143, -0.77022853]
-)
+RESET_STAND_QPOS = np.array([-0.08000954, 0.00001946, 0.87989457, 1.0, -0.00002121, 0.00000039, 0.00004552])
+RESET_FRAME_QPOS = np.array([-0.07911001, 0.00217305, 0.94521802, 0.70699097, 0.00000380, 0.01625869, 0.70703566])
+RESET_TOOL_QPOS = np.array([0.05106344, -0.21424905, 0.81489473, 0.63776799, -0.00005003, -0.00004143, -0.77022853])
 
 THREADING_DEPARTURE_QPOS = np.array([-0.25, 0.65, 0.10, -2.00, -0.25, 2.55, 0.05])
 THREADING_STYLE_TASK_HOME_QPOS = THREADING_DEPARTURE_QPOS.copy()
@@ -79,10 +70,10 @@ class ToolHangWrenchOnly(ToolHang):
     WRIST_CAMERA_POS = np.array([0.05, 0.0, 0.0])
     WRIST_CAMERA_QUAT = np.array([0.0, 0.707108, 0.707108, 0.0])
     WRIST_CAMERA_FOVY_DEG = 75.0
-    # The collector writes frame zero after restoring the sampled robot qpos.
-    # Advancing OSC here moves every evaluation reset away from that qpos and
-    # makes the policy start outside the demonstration distribution.
-    RESET_CONTROLLER_SETTLE_STEPS = 0
+    # Match the OSC data-collection reset used by the ToolHang demonstrations.
+    # The collector settles for ten steps, then restores the sampled arm qpos
+    # before defining frame zero (while retaining settled gripper/object state).
+    RESET_CONTROLLER_SETTLE_STEPS = 10
 
     def _load_model(self):
         self.tool_handle_half_length = self.EXTENDED_HANDLE_HALF_LENGTH
@@ -134,8 +125,7 @@ class ToolHangWrenchOnly(ToolHang):
                     0.0,
                 ],
                 "tool_yaw_rad": float(
-                    self.rng.uniform(np.deg2rad(-120.0), np.deg2rad(-100.0))
-                    - np.deg2rad(-100.74883)
+                    self.rng.uniform(np.deg2rad(-120.0), np.deg2rad(-100.0)) - np.deg2rad(-100.74883)
                 ),
                 "fixture_translation_m": [
                     0.0,
@@ -252,17 +242,11 @@ class ToolHangWrenchOnly(ToolHang):
         fixture_translation = np.asarray(variation.get("fixture_translation_m", np.zeros(3)), dtype=float)
         fixture_yaw = float(variation.get("fixture_yaw_rad", 0.0))
         fixture_pivot = RESET_STAND_QPOS[:3]
-        stand_qpos = _transform_free_joint_qpos(
-            RESET_STAND_QPOS, fixture_translation, fixture_yaw, fixture_pivot
-        )
-        frame_qpos = _transform_free_joint_qpos(
-            RESET_FRAME_QPOS, fixture_translation, fixture_yaw, fixture_pivot
-        )
+        stand_qpos = _transform_free_joint_qpos(RESET_STAND_QPOS, fixture_translation, fixture_yaw, fixture_pivot)
+        frame_qpos = _transform_free_joint_qpos(RESET_FRAME_QPOS, fixture_translation, fixture_yaw, fixture_pivot)
         tool_translation = np.asarray(variation.get("tool_translation_m", np.zeros(3)), dtype=float)
         tool_yaw = float(variation.get("tool_yaw_rad", 0.0))
-        tool_qpos = _transform_free_joint_qpos(
-            RESET_TOOL_QPOS, tool_translation, tool_yaw, RESET_TOOL_QPOS[:3]
-        )
+        tool_qpos = _transform_free_joint_qpos(RESET_TOOL_QPOS, tool_translation, tool_yaw, RESET_TOOL_QPOS[:3])
         for obj, qpos in ((self.stand, stand_qpos), (self.frame, frame_qpos), (self.tool, tool_qpos)):
             self.sim.data.set_joint_qpos(obj.joints[0], qpos)
             self.sim.data.set_joint_qvel(obj.joints[0], np.zeros(6))
@@ -276,23 +260,29 @@ class ToolHangWrenchOnly(ToolHang):
         self.robots[0].composite_controller.update_state()
         self.robots[0].composite_controller.reset()
         # Keep this optional for compatibility with older joint-controller
-        # datasets. OSC collection records the restored sampled qpos directly,
-        # so its registered environment must not advance physics before frame
-        # zero.
-        settle_action = (
-            np.r_[robot_qpos, -1.0]
-            if self.action_dim == 8
-            else np.r_[np.zeros(6), -1.0]
-        )
+        # datasets. OSC demonstrations were collected after these hold steps,
+        # so registered evaluation must reproduce the same controller state.
+        settle_action = np.r_[robot_qpos, -1.0] if self.action_dim == 8 else np.r_[np.zeros(6), -1.0]
         for _ in range(self.RESET_CONTROLLER_SETTLE_STEPS):
             super().step(settle_action)
+        if self.RESET_CONTROLLER_SETTLE_STEPS:
+            # Collection restores the sampled arm configuration after settling.
+            # Without this, broad Threading-style starts drift by as much as
+            # 0.2 rad and evaluation begins outside the recorded distribution.
+            self.sim.data.qpos[self.robots[0]._ref_joint_pos_indexes] = robot_qpos
+            self.sim.data.qvel[self.robots[0]._ref_joint_vel_indexes] = 0.0
+            self.sim.forward()
+            self.robots[0].composite_controller.update_state()
+            self.robots[0].composite_controller.reset()
         self.timestep = 0
         self.cur_time = 0.0
         self.done = False
         self.sim_state_initial = self.sim.get_state()
         self._anchor_fixture()
         self._phase2_reset_settle_applied = True
-        return self._get_observations(force_update=True)
+        observation = self._get_observations(force_update=True)
+        self.robots[0].composite_controller.update_state()
+        return observation
 
     def load_phase2_reference_state(self, flattened_state, fixture_state=None):
         """Load a reference state and anchor its assembled fixture pose."""
