@@ -25,6 +25,10 @@ if str(REPO_ROOT) not in sys.path:
 
 import robosuite as suite
 from robosuite.scripts.collect_threading_scripted_grasp_angle import (
+    JOINT_ACTION_NOISE_SCALE_RAD,
+    JOINT_TRAJECTORY_TIMING_PROFILE,
+    MAX_LIFT_HEIGHT,
+    OSC_TRAJECTORY_TIMING_PROFILE,
     ThreadingScriptedPolicy,
     finalize_episode,
     json_safe,
@@ -34,6 +38,20 @@ from robosuite.wrappers import DataCollectionWrapper
 
 
 DEFAULT_OUTPUT = REPO_ROOT / "threading_d05_bc_88_96_15_per_angle_balanced_initial_states"
+DEFAULT_PARTIAL_ANGLES = (86.0, 87.0, 88.0, 89.0, 90.0)
+DEFAULT_FULL_ANGLES = (93.0, 94.0, 95.0, 96.0, 97.0)
+
+JOINT_ACTION_INFO_FIELDS = (
+    "robot0_joint_pos",
+    "joint_position",
+    "absolute_joint_target",
+    "joint_delta",
+    "joint_delta_scale",
+    "joint_delta_reference_scaled",
+    "joint_delta_exceeds_reference_scale",
+    "actions_absolute_joint_position",
+    "actions_joint_delta",
+)
 
 
 def parse_args():
@@ -41,12 +59,42 @@ def parse_args():
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--environment", type=str, default="Threading_D05")
     parser.add_argument("--angles", nargs="+", type=float, default=list(range(88, 97)))
+    parser.add_argument(
+        "--partial-angles",
+        nargs="+",
+        type=float,
+        default=list(DEFAULT_PARTIAL_ANGLES),
+    )
+    parser.add_argument(
+        "--full-angles",
+        nargs="+",
+        type=float,
+        default=list(DEFAULT_FULL_ANGLES),
+    )
     parser.add_argument("--rollouts-per-angle", type=int, default=15)
     parser.add_argument("--initial-states-per-angle", type=int, default=12)
     parser.add_argument("--max-retries", type=int, default=10)
     parser.add_argument("--seed", type=int, default=20260824)
     parser.add_argument("--action-noise-std", type=float, default=0.01)
     parser.add_argument("--horizon", type=int, default=1000)
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume an interrupted in-progress collection in --output.",
+    )
+    parser.add_argument(
+        "--control-mode",
+        choices=("osc_pose", "joint_position"),
+        default="osc_pose",
+        help="Use OSC delta-pose actions or damped IK with absolute joint-position actions.",
+    )
+    parser.add_argument(
+        "--record-joint-training-fields",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Record absolute and delta joint labels. Defaults to enabled in joint-position mode.",
+    )
+    parser.add_argument("--joint-delta-scale", type=float, default=0.05)
     parser.add_argument(
         "--collision-aware-threading",
         action=argparse.BooleanOptionalAction,
@@ -99,6 +147,11 @@ def restore_initial_state(wrapped_env, initial_state):
     # its recorded initial state so replay begins from the sampled state.
     wrapped_env._current_task_instance_state = state.copy()
     wrapped_env.successful = False
+    if wrapped_env.record_joint_position_fields:
+        # The wrapper reads cached proprioception before each action. Refresh it
+        # after the direct state restore so the first joint label matches the
+        # first recorded simulator state.
+        base_env._get_observations(force_update=True)
 
 
 def empty_angle_summary(angle, target_successes, initial_count):
@@ -148,16 +201,68 @@ def append_attempt(path, record):
         output.write(json.dumps(json_safe(record), allow_nan=False) + "\n")
 
 
+def load_attempts(path):
+    if not path.exists():
+        return []
+    with path.open() as attempt_file:
+        return [json.loads(line) for line in attempt_file if line.strip()]
+
+
+def validate_resume_summary(summary, args, record_joint_training_fields):
+    expected = {
+        "environment": args.environment,
+        "control_mode": args.control_mode,
+        "angles_deg": [float(angle) for angle in args.angles],
+        "partial_observability_angles_deg": [float(angle) for angle in args.partial_angles],
+        "full_observability_angles_deg": [float(angle) for angle in args.full_angles],
+        "rollouts_per_angle": int(args.rollouts_per_angle),
+        "initial_states_sampled_up_front_per_angle": int(args.initial_states_per_angle),
+        "max_retries_per_initial_state": int(args.max_retries),
+        "record_joint_training_fields": bool(record_joint_training_fields),
+    }
+    if summary.get("status") != "in_progress":
+        raise ValueError("--resume requires an in-progress collection_summary.json")
+    mismatches = {
+        key: (summary.get(key), value)
+        for key, value in expected.items()
+        if summary.get(key) != value
+    }
+    if mismatches:
+        raise ValueError(f"Resume arguments do not match collection summary: {mismatches}")
+
+
+def resume_sampler_position(summary, attempts, initial_states_per_angle):
+    attempted_angles = {
+        f"{float(record['target_grasp_angle_deg']):g}" for record in attempts
+    }
+    sampled = len(attempted_angles) * int(initial_states_per_angle)
+    for angle_key in attempted_angles:
+        angle_summary = summary["angles"][angle_key]
+        sampled += int(angle_summary.get("initial_states_replaced", 0))
+        attempted_slots = [
+            int(record["slot"])
+            for record in attempts
+            if f"{float(record['target_grasp_angle_deg']):g}" == angle_key
+        ]
+        sampled += max(0, max(attempted_slots, default=-1) + 1 - initial_states_per_angle)
+    return sampled
+
+
 def load_raw_episode(ep_dir):
     states = []
     actions = []
+    action_fields = {field: [] for field in JOINT_ACTION_INFO_FIELDS}
     successful = False
     env_name = None
     for state_path in sorted(ep_dir.glob("state_*.npz")):
         data = np.load(state_path, allow_pickle=True)
         env_name = str(data["env"])
         states.extend(data["states"])
-        actions.extend(info["actions"] for info in data["action_infos"])
+        for info in data["action_infos"]:
+            actions.append(info["actions"])
+            for field in JOINT_ACTION_INFO_FIELDS:
+                if field in info:
+                    action_fields[field].append(info[field])
         successful = bool(successful or data["successful"])
     if not successful or not states:
         return None
@@ -165,6 +270,14 @@ def load_raw_episode(ep_dir):
         raise ValueError(
             f"Episode {ep_dir.name} has {len(states)} states for {len(actions)} actions"
         )
+    populated_action_fields = {}
+    for field, values in action_fields.items():
+        if values and len(values) != len(actions):
+            raise ValueError(
+                f"Episode {ep_dir.name} has {len(values)} {field} values for {len(actions)} actions"
+            )
+        if values:
+            populated_action_fields[field] = np.asarray(values)
     with (ep_dir / "model.xml").open() as model_file:
         model_xml = model_file.read()
     with (ep_dir / "policy_stats.json").open() as stats_file:
@@ -175,19 +288,24 @@ def load_raw_episode(ep_dir):
         "model_xml": model_xml,
         "stats": stats,
         "env_name": env_name,
+        "action_fields": populated_action_fields,
     }
 
 
-def observability_label(angle):
+def observability_label(
+    angle,
+    partial_angles=DEFAULT_PARTIAL_ANGLES,
+    full_angles=DEFAULT_FULL_ANGLES,
+):
     angle = float(angle)
-    if 86.0 <= angle <= 90.0:
+    if angle in {float(value) for value in partial_angles}:
         return "partial"
-    if 93.0 <= angle <= 97.0:
+    if angle in {float(value) for value in full_angles}:
         return "full"
     return "unlabeled"
 
 
-def write_hdf5(raw_dir, dataset_dir, env_info):
+def write_hdf5(raw_dir, dataset_dir, env_info, partial_angles, full_angles):
     dataset_dir.mkdir(parents=True, exist_ok=True)
     output_path = dataset_dir / "demo.hdf5"
     episodes = []
@@ -210,15 +328,20 @@ def write_hdf5(raw_dir, dataset_dir, env_info):
             demo = data_group.create_group(demo_name)
             demo.create_dataset("states", data=episode["states"])
             demo.create_dataset("actions", data=episode["actions"])
+            for field, values in episode["action_fields"].items():
+                demo.create_dataset(field, data=values)
             demo.attrs["model_file"] = episode["model_xml"]
             angle = float(episode["stats"]["target_grasp_angle_deg"])
             sampling = episode["stats"]["initial_state_sampling"]
-            label = observability_label(angle)
+            label = observability_label(angle, partial_angles, full_angles)
             demo.attrs["target_grasp_angle_deg"] = angle
             demo.attrs["observability"] = label
             demo.attrs["initial_state_id"] = sampling["state_id"]
             demo.attrs["retry_index"] = int(sampling["retry_index"])
             demo.attrs["raw_episode"] = ep_dir.name
+            demo.attrs["action_representation"] = episode["stats"].get(
+                "action_representation", "unknown"
+            )
             label_rows.append(
                 {
                     "demo": demo_name,
@@ -264,7 +387,20 @@ def main():
         raise ValueError("--initial-states-per-angle must be positive")
     if args.max_retries <= 0:
         raise ValueError("--max-retries must be positive")
-    if args.output.exists() and any(args.output.iterdir()):
+    if args.joint_delta_scale <= 0:
+        raise ValueError("--joint-delta-scale must be positive")
+    partial_angles = {float(angle) for angle in args.partial_angles}
+    full_angles = {float(angle) for angle in args.full_angles}
+    if partial_angles & full_angles:
+        raise ValueError("--partial-angles and --full-angles must not overlap")
+    record_joint_training_fields = (
+        args.control_mode == "joint_position"
+        if args.record_joint_training_fields is None
+        else args.record_joint_training_fields
+    )
+    if record_joint_training_fields and args.control_mode != "joint_position":
+        raise ValueError("--record-joint-training-fields requires --control-mode joint_position")
+    if args.output.exists() and any(args.output.iterdir()) and not args.resume:
         raise FileExistsError(f"Refusing to overwrite non-empty output directory: {args.output}")
 
     raw_dir = args.output / "raw"
@@ -273,11 +409,24 @@ def main():
     summary_path = args.output / "collection_summary.json"
     attempt_log_path = args.output / "attempt_log.jsonl"
 
-    controller_config = make_controller_config("Panda", "osc_pose")
+    controller_config = make_controller_config("Panda", args.control_mode)
     env_info = {
         "env_name": args.environment,
         "robots": ["Panda"],
         "controller_configs": controller_config,
+        "control_mode": args.control_mode,
+        "action_representation": (
+            "absolute_joint_position" if args.control_mode == "joint_position" else "delta_eef_pose"
+        ),
+        "trajectory_timing_profile": (
+            JOINT_TRAJECTORY_TIMING_PROFILE
+            if args.control_mode == "joint_position"
+            else OSC_TRAJECTORY_TIMING_PROFILE
+        ),
+        "joint_action_noise_scale_rad": (
+            JOINT_ACTION_NOISE_SCALE_RAD if args.control_mode == "joint_position" else None
+        ),
+        "max_lift_height_m": MAX_LIFT_HEIGHT,
     }
     sampler_env = make_env(args.environment, controller_config, args.seed, args.horizon)
     collection_base_env = make_env(args.environment, controller_config, args.seed + 1, args.horizon)
@@ -286,26 +435,47 @@ def main():
         str(raw_dir),
         collect_freq=1,
         flush_freq=args.horizon + 1,
+        record_joint_position_fields=record_joint_training_fields,
+        joint_delta_scale=args.joint_delta_scale,
     )
     policy = ThreadingScriptedPolicy(
         rng=np.random.RandomState(args.seed + 2),
         action_noise_std=args.action_noise_std,
         grasp_angle_range=(min(args.angles), max(args.angles)),
-        control_mode="osc_pose",
+        control_mode=args.control_mode,
         collision_aware_threading=args.collision_aware_threading,
     )
 
-    summary = {
+    new_summary = {
         "status": "in_progress",
         "environment": args.environment,
-        "controller": "OSC_POSE",
+        "controller": "JOINT_POSITION" if args.control_mode == "joint_position" else "OSC_POSE",
+        "control_mode": args.control_mode,
+        "action_representation": (
+            "absolute_joint_position" if args.control_mode == "joint_position" else "delta_eef_pose"
+        ),
+        "trajectory_timing_profile": (
+            JOINT_TRAJECTORY_TIMING_PROFILE
+            if args.control_mode == "joint_position"
+            else OSC_TRAJECTORY_TIMING_PROFILE
+        ),
+        "record_joint_training_fields": bool(record_joint_training_fields),
+        "joint_delta_scale": float(args.joint_delta_scale) if record_joint_training_fields else None,
         "success_criterion": "policy composite success AND final env._check_success()",
         "angles_deg": [float(angle) for angle in args.angles],
+        "partial_observability_angles_deg": sorted(partial_angles),
+        "full_observability_angles_deg": sorted(full_angles),
         "rollouts_per_angle": int(args.rollouts_per_angle),
         "initial_states_sampled_up_front_per_angle": int(args.initial_states_per_angle),
         "max_retries_per_initial_state": int(args.max_retries),
         "seed": int(args.seed),
         "action_noise_std": float(args.action_noise_std),
+        "joint_action_noise_std_rad": (
+            float(args.action_noise_std * JOINT_ACTION_NOISE_SCALE_RAD)
+            if args.control_mode == "joint_position"
+            else None
+        ),
+        "max_lift_height_m": MAX_LIFT_HEIGHT,
         "failed_simulator_states_saved": False,
         "angles": {
             f"{float(angle):g}": empty_angle_summary(
@@ -317,9 +487,38 @@ def main():
         },
         "totals": {},
     }
+    if args.resume:
+        if not summary_path.exists() or not attempt_log_path.exists() or not raw_dir.exists():
+            raise FileNotFoundError(
+                "--resume requires collection_summary.json, attempt_log.jsonl, and raw/"
+            )
+        with summary_path.open() as summary_file:
+            summary = json.load(summary_file)
+        validate_resume_summary(summary, args, record_joint_training_fields)
+        summary["resume_count"] = int(summary.get("resume_count", 0)) + 1
+        summary["resumed_after_interruption"] = True
+        attempts = load_attempts(attempt_log_path)
+        logged_successes = sum(bool(record.get("accepted_success")) for record in attempts)
+        if logged_successes != summary["totals"]["successful_trajectories"]:
+            raise ValueError(
+                "Attempt log and summary disagree before resume: "
+                f"{logged_successes} != {summary['totals']['successful_trajectories']}"
+            )
+    else:
+        summary = new_summary
     write_summary(summary_path, summary)
 
-    state_serial = 0
+    existing_attempts = load_attempts(attempt_log_path)
+    if args.resume:
+        state_serial = resume_sampler_position(
+            summary, existing_attempts, args.initial_states_per_angle
+        )
+        for _ in range(state_serial):
+            sampler_env.reset()
+        summary["resume_sampler_fast_forward_resets"] = int(state_serial)
+        write_summary(summary_path, summary)
+    else:
+        state_serial = 0
     try:
         for angle in args.angles:
             angle_key = f"{float(angle):g}"
@@ -327,13 +526,34 @@ def main():
             failure_reasons = Counter()
             aborted_stages = Counter()
             retry_histogram = Counter()
+            failure_reasons.update(angle_summary.get("failure_reasons", {}))
+            aborted_stages.update(angle_summary.get("aborted_stages", {}))
+            retry_histogram.update(angle_summary.get("retry_histogram", {}))
+
+            if angle_summary["successful_trajectories"] >= args.rollouts_per_angle:
+                continue
 
             pending = deque()
-            next_slot = 0
-            for slot in range(args.initial_states_per_angle):
+            angle_attempts = [
+                record
+                for record in existing_attempts
+                if float(record["target_grasp_angle_deg"]) == float(angle)
+            ]
+            next_slot = max((int(record["slot"]) for record in angle_attempts), default=-1) + 1
+            remaining = args.rollouts_per_angle - angle_summary["successful_trajectories"]
+            initial_pool_size = (
+                remaining if angle_attempts else args.initial_states_per_angle
+            )
+            if angle_attempts:
+                angle_summary["initial_states_resampled_after_resume"] = (
+                    int(angle_summary.get("initial_states_resampled_after_resume", 0))
+                    + initial_pool_size
+                )
+                angle_summary["initial_states_sampled"] += initial_pool_size
+            for slot in range(next_slot, next_slot + initial_pool_size):
                 pending.append(sample_initial_state(sampler_env, state_serial, slot, 0))
                 state_serial += 1
-                next_slot += 1
+            next_slot += initial_pool_size
 
             while angle_summary["successful_trajectories"] < args.rollouts_per_angle:
                 if not pending:
@@ -455,7 +675,13 @@ def main():
         collection_env.close()
         sampler_env.close()
 
-    hdf5_path, hdf5_count, labels_path = write_hdf5(raw_dir, dataset_dir, env_info)
+    hdf5_path, hdf5_count, labels_path = write_hdf5(
+        raw_dir,
+        dataset_dir,
+        env_info,
+        partial_angles,
+        full_angles,
+    )
     expected_count = len(args.angles) * args.rollouts_per_angle
     if hdf5_count != expected_count:
         raise RuntimeError(f"HDF5 contains {hdf5_count} demos; expected {expected_count}")
@@ -464,8 +690,8 @@ def main():
     summary["hdf5_demonstrations"] = int(hdf5_count)
     summary["observability_labels_path"] = str(labels_path)
     summary["observability_label_rules"] = {
-        "partial": [86.0, 90.0],
-        "full": [93.0, 97.0],
+        "partial": sorted(partial_angles),
+        "full": sorted(full_angles),
     }
     write_summary(summary_path, summary)
     print(f"dataset={hdf5_path} demos={hdf5_count}", flush=True)

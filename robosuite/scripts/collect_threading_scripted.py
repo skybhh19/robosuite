@@ -100,19 +100,28 @@ def geom_pose(env, name):
     return pos, mat
 
 
+def active_needle_shaft_half_length(env):
+    """Return the shaft half-length configured by the active environment."""
+    base_env = env.unwrapped if hasattr(env, "unwrapped") else env
+    needle = getattr(base_env, "needle", None)
+    return float(getattr(needle, "shaft_half_length", NEEDLE_SHAFT_HALF_LENGTH))
+
+
 def needle_state(env):
     """Return needle center, handle center, and local axes in world coordinates."""
     needle_center, needle_mat = geom_pose(env, "needle_obj_needle")
     handle_center, _ = geom_pose(env, "needle_obj_handle")
     yaxis = unit(needle_mat[:, 1])
+    shaft_half_length = active_needle_shaft_half_length(env)
     return {
         "needle_center": needle_center,
         "handle_center": handle_center,
         "xaxis": unit(needle_mat[:, 0]),
         "yaxis": yaxis,
         "zaxis": unit(needle_mat[:, 2], fallback=[0.0, 0.0, 1.0]),
-        "tip": needle_center - NEEDLE_SHAFT_HALF_LENGTH * yaxis,
-        "handle_side": needle_center + NEEDLE_SHAFT_HALF_LENGTH * yaxis,
+        "shaft_half_length": shaft_half_length,
+        "tip": needle_center - shaft_half_length * yaxis,
+        "handle_side": needle_center + shaft_half_length * yaxis,
     }
 
 
@@ -138,7 +147,8 @@ def ring_state(env):
 def shaft_ring_distance(needle, ring):
     """Return the closest distance from the ring center to the needle shaft segment."""
     rel = ring["center"] - needle["needle_center"]
-    t = np.clip(np.dot(rel, needle["yaxis"]), -NEEDLE_SHAFT_HALF_LENGTH, NEEDLE_SHAFT_HALF_LENGTH)
+    half_length = needle.get("shaft_half_length", NEEDLE_SHAFT_HALF_LENGTH)
+    t = np.clip(np.dot(rel, needle["yaxis"]), -half_length, half_length)
     closest = needle["needle_center"] + t * needle["yaxis"]
     return float(np.linalg.norm(closest - ring["center"]))
 

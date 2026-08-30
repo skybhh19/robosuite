@@ -84,6 +84,71 @@ def render_episode(env, ep_dir, output_path, cameras, width, height, fps, skip_f
     return frame_count
 
 
+def render_compilation(
+    env,
+    episode_paths,
+    output_path,
+    cameras,
+    width,
+    height,
+    fps,
+    skip_frame,
+    flip_vertical=True,
+    separator_frames=3,
+):
+    """Render all episode state sequences into one trajectory review video."""
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    writer = imageio.get_writer(output_path, fps=fps)
+    frame_count = 0
+    separator = np.zeros((height, width * len(cameras), 3), dtype=np.uint8)
+    try:
+        for episode_index, ep_dir in enumerate(episode_paths, start=1):
+            xml_path = os.path.join(ep_dir, "model.xml")
+            state_paths = sorted(glob(os.path.join(ep_dir, "state_*.npz")))
+            if not os.path.exists(xml_path):
+                raise FileNotFoundError(f"Missing model.xml in {ep_dir}")
+            if not state_paths:
+                raise FileNotFoundError(f"Missing state_*.npz in {ep_dir}")
+
+            with open(xml_path, "r") as xml_file:
+                env.reset_from_xml_string(xml_file.read())
+
+            state_index = 0
+            for state_path in state_paths:
+                data = np.load(state_path, allow_pickle=True)
+                for state in data["states"]:
+                    env.sim.set_state_from_flattened(state)
+                    env.sim.forward()
+                    if state_index % skip_frame == 0:
+                        frames = [
+                            env.sim.render(
+                                camera_name=camera,
+                                width=width,
+                                height=height,
+                                depth=False,
+                            )
+                            for camera in cameras
+                        ]
+                        if flip_vertical:
+                            frames = [np.flipud(frame) for frame in frames]
+                        writer.append_data(np.concatenate(frames, axis=1))
+                        frame_count += 1
+                    state_index += 1
+
+            if episode_index < len(episode_paths):
+                for _ in range(separator_frames):
+                    writer.append_data(separator)
+                    frame_count += 1
+            if episode_index % 10 == 0 or episode_index == len(episode_paths):
+                print(
+                    f"rendered compilation episodes={episode_index}/{len(episode_paths)} frames={frame_count}",
+                    flush=True,
+                )
+    finally:
+        writer.close()
+    return frame_count
+
+
 def load_policy_stats(ep_dir):
     stats_path = os.path.join(ep_dir, "policy_stats.json")
     if not os.path.exists(stats_path):
@@ -98,6 +163,9 @@ def write_html_index(output_dir, rendered_videos):
     for video_path, frame_count, stats in rendered_videos:
         name = os.path.basename(video_path)
         rel_path = os.path.relpath(video_path, output_dir)
+        success = bool(stats.get("collection_success", stats.get("policy_success", False)))
+        outcome = "SUCCESS" if success else "FAILED"
+        failure_reason = stats.get("failure_reason", "unknown")
         angle = stats.get("grasp_approach_angle_deg")
         target_angle = stats.get("target_grasp_approach_angle_deg")
         close_angle = stats.get("actual_close_angle_deg")
@@ -123,13 +191,13 @@ def write_html_index(output_dir, rendered_videos):
         cards.append(
             f"""
             <section class="card">
-              <div class="title">{html.escape(name)}</div>
+              <div class="title"><span>{html.escape(name)}</span><strong class="{'success' if success else 'failure'}">{outcome}</strong></div>
               <div class="label-row">
                 <span>{html.escape(angle_text)}</span>
                 <span>{html.escape(str(style))} / {html.escape(str(variant))}</span>
               </div>
               <video src="{html.escape(rel_path)}" autoplay muted loop controls playsinline></video>
-              <div class="meta">{frame_count} frames</div>
+              <div class="meta">{frame_count} frames · {html.escape('all checks passed' if success else failure_reason)}</div>
             </section>
             """
         )
@@ -183,6 +251,11 @@ def write_html_index(output_dir, rendered_videos):
       overflow: hidden;
       text-overflow: ellipsis;
     }}
+    .title {{ display: flex; align-items: center; justify-content: space-between; gap: 10px; }}
+    .title span {{ min-width: 0; overflow: hidden; text-overflow: ellipsis; }}
+    .title strong {{ flex: 0 0 auto; font-size: 10px; }}
+    .success {{ color: #54c987; }}
+    .failure {{ color: #ef766e; }}
     .label-row {{
       display: flex;
       gap: 12px;
@@ -223,6 +296,13 @@ def parse_args():
     parser.add_argument("--environment", type=str, default="Threading")
     parser.add_argument("--robots", nargs="+", type=str, default=["Panda"])
     parser.add_argument("--cameras", nargs="+", type=str, default=["agentview", "robot0_eye_in_hand"])
+    parser.add_argument(
+        "--angles",
+        nargs="+",
+        type=float,
+        default=None,
+        help="Render only episodes whose target grasp angle matches one of these values.",
+    )
     parser.add_argument("--width", type=int, default=256)
     parser.add_argument("--height", type=int, default=256)
     parser.add_argument("--fps", type=int, default=120)
@@ -231,6 +311,13 @@ def parse_args():
     parser.add_argument("--oldest-first", action="store_true")
     parser.add_argument("--no-html", action="store_true")
     parser.add_argument("--separate", action="store_true")
+    parser.add_argument(
+        "--combined",
+        action="store_true",
+        help="Render all selected episodes into one MP4 instead of one MP4 per episode.",
+    )
+    parser.add_argument("--combined-name", type=str, default="all_trajectories.mp4")
+    parser.add_argument("--separator-frames", type=int, default=3)
     parser.add_argument(
         "--no-flip-vertical",
         action="store_true",
@@ -249,6 +336,14 @@ def main():
     output_dir = os.path.abspath(os.path.expanduser(output_dir))
 
     eps = episode_dirs(dataset_dir)
+    if args.angles is not None:
+        selected_angles = {float(angle) for angle in args.angles}
+        filtered_eps = []
+        for ep_dir in eps:
+            target_angle = load_policy_stats(ep_dir).get("target_grasp_angle_deg")
+            if target_angle is not None and float(target_angle) in selected_angles:
+                filtered_eps.append(ep_dir)
+        eps = filtered_eps
     if not args.oldest_first:
         eps = list(reversed(eps))
     if args.limit is not None:
@@ -271,6 +366,27 @@ def main():
     )
 
     try:
+        if args.combined:
+            if args.separate:
+                raise ValueError("--combined and --separate cannot be used together")
+            if args.separator_frames < 0:
+                raise ValueError("--separator-frames cannot be negative")
+            output_path = os.path.join(output_dir, args.combined_name)
+            frames = render_compilation(
+                env=env,
+                episode_paths=eps,
+                output_path=output_path,
+                cameras=args.cameras,
+                width=args.width,
+                height=args.height,
+                fps=args.fps,
+                skip_frame=args.skip_frame,
+                flip_vertical=not args.no_flip_vertical,
+                separator_frames=args.separator_frames,
+            )
+            print(f"rendered {frames} compilation frames -> {output_path}")
+            return
+
         rendered_videos = []
         for ep_dir in eps:
             ep_name = os.path.basename(ep_dir)

@@ -31,19 +31,96 @@ PATH_COMMAND_POSITION_TOLERANCE = 1e-6
 PATH_COMMAND_ORIENTATION_TOLERANCE_DEG = 1e-3
 GRIPPER_CLOSE_COMMAND_THRESHOLD = 0.99
 GRIPPER_CLOSE_MOTION_THRESHOLD = 1e-4
+GRIPPER_CLOSE_HANDOFF_MOTION_THRESHOLD = 1.5e-3
 GRIPPER_CLOSE_STABLE_STEPS = 3
 GRIPPER_CLOSE_MAX_STEPS = 32
-# Reference steps define curve speed; independent caps bound OSC convergence time.
+GRIPPER_CLOSE_HANDOFF_MAX_PROGRESS = 0.75
+OSC_CLOSE_LIFT_HANDOFF_STEPS = 10
+JOINT_CLOSE_LIFT_HANDOFF_STEPS = 7
+JOINT_ACTION_NOISE_SCALE_RAD = 0.05
+JOINT_SERVO_KP = 150.0
+JOINT_SERVO_DAMPING_RATIO = 1.0
+MAX_LIFT_HEIGHT = 0.20
+JOINT_GRASP_PROBE_STEPS = 5
+OSC_GRASP_PROBE_MIN_NEEDLE_DISPLACEMENT = 0.003
+JOINT_GRASP_PROBE_MIN_EEF_DISPLACEMENT = 0.0015
+JOINT_GRASP_PROBE_MIN_FOLLOW_RATIO = 0.70
+TERMINAL_HOLD_POSITION_TOLERANCE = 0.005
+OSC_MOTION_SPEEDUP = 1.30
+OSC_TRAJECTORY_TIMING_PROFILE = "osc_overlapped_close_lift_1p3x_v5"
+JOINT_TRAJECTORY_TIMING_PROFILE = "joint_panda_servo_streaming_insert_v9"
+# Reference steps define curve speed; controller-specific caps bound convergence time.
 NOMINAL_STAGE_STEPS = {
     "aim_approach": 45,
     "aim_descend": 45,
     "close_gripper": 24,
-    "grasp_probe_lift": 14,
+    "grasp_probe_lift": 8,
     "lift_arc": 60,
     "align": 50,
     "pre_insert": 1,
     "insert_through": 65,
     "hold_after_insert": 10,
+}
+JOINT_NOMINAL_STAGE_STEPS = {
+    "aim_approach": 18,
+    "aim_descend": 18,
+    "grasp_probe_lift": JOINT_GRASP_PROBE_STEPS,
+    "lift_arc": 26,
+    "align": 24,
+    "insert_through": 50,
+    "hold_after_insert": 7,
+}
+OSC_ACCELERATED_NOMINAL_STAGES = (
+    "aim_approach",
+    "aim_descend",
+    "grasp_probe_lift",
+    "lift_arc",
+    "align",
+    "insert_through",
+)
+OSC_ACCELERATED_TARGET_STAGES = (
+    "aim_continuous",
+    "grasp_probe_lift",
+    "lift_arc",
+    "align",
+    "insert_through",
+)
+JOINT_DEFAULT_MOTION_LIMITS = {
+    "max_position_step": 0.0052,
+    "max_angle_step": 0.044,
+    "ik_blend": 0.55,
+    "max_target_step": 0.025,
+    "max_tracking_error": 0.040,
+}
+JOINT_STAGE_MOTION_LIMITS = {
+    "aim_continuous": {
+        "max_position_step": 0.0120,
+        "max_angle_step": 0.090,
+        "ik_blend": 0.80,
+        "max_target_step": 0.052,
+        "max_tracking_error": 0.075,
+    },
+    "lift_arc": {
+        "max_position_step": 0.0110,
+        "max_angle_step": 0.085,
+        "ik_blend": 0.78,
+        "max_target_step": 0.048,
+        "max_tracking_error": 0.070,
+    },
+    "align": {
+        "max_position_step": 0.0110,
+        "max_angle_step": 0.080,
+        "ik_blend": 0.76,
+        "max_target_step": 0.045,
+        "max_tracking_error": 0.065,
+    },
+    "insert_through": {
+        "max_position_step": 0.0065,
+        "max_angle_step": 0.050,
+        "ik_blend": 0.68,
+        "max_target_step": 0.035,
+        "max_tracking_error": 0.052,
+    },
 }
 OSC_STAGE_MAX_STEPS = {
     "aim_continuous": 135,
@@ -55,6 +132,15 @@ OSC_STAGE_MAX_STEPS = {
     "insert_through": 135,
     "hold_after_insert": 18,
 }
+JOINT_STAGE_MAX_STEPS = {
+    "aim_continuous": 270,
+    "grasp_probe_lift": 100,
+    "lift_arc": 240,
+    "align": 325,
+    "pre_insert": 40,
+    "insert_through": 325,
+    "hold_after_insert": 40,
+}
 MOTION_STYLES = [
     "direct_low",
     "high_arc",
@@ -62,7 +148,6 @@ MOTION_STYLES = [
     "early_approach",
     "delayed_approach",
     "low_s_curve",
-    "vertical_first",
     "shallow_sweep",
     "over_then_back",
     "short_direct",
@@ -101,6 +186,68 @@ def minimum_jerk(x):
     """Return a quintic blend with zero endpoint velocity and acceleration."""
     x = np.clip(x, 0.0, 1.0)
     return x**3 * (10.0 - 15.0 * x + 6.0 * x**2)
+
+
+def endpoint_smooth_progress(x, initial_slope=1.0):
+    """Blend 0 to 1 with nonzero entry velocity and a smooth stop."""
+    x = np.clip(x, 0.0, 1.0)
+    slope = float(initial_slope)
+    return (
+        slope * x
+        + (10.0 - 6.0 * slope) * x**3
+        + (8.0 * slope - 15.0) * x**4
+        + (6.0 - 3.0 * slope) * x**5
+    )
+
+
+def endpoint_velocity_progress(x, initial_slope=1.0, final_slope=0.0):
+    """Quintic progress with configurable endpoint velocities and zero endpoint acceleration."""
+    x = np.clip(x, 0.0, 1.0)
+    base = minimum_jerk(x)
+    entry_basis = x - 6.0 * x**3 + 8.0 * x**4 - 3.0 * x**5
+    exit_basis = -4.0 * x**3 + 7.0 * x**4 - 3.0 * x**5
+    return base + float(initial_slope) * entry_basis + float(final_slope) * exit_basis
+
+
+def joint_stage_motion_limits(subgoal):
+    """Return joint-only task-space and absolute-target limits for a policy stage."""
+    limits = dict(JOINT_DEFAULT_MOTION_LIMITS)
+    limits.update(JOINT_STAGE_MOTION_LIMITS.get(subgoal, {}))
+    return limits
+
+
+def nominal_stage_durations(control_mode):
+    durations = dict(NOMINAL_STAGE_STEPS)
+    if control_mode == "joint_position":
+        durations.update(JOINT_NOMINAL_STAGE_STEPS)
+    else:
+        for stage in OSC_ACCELERATED_NOMINAL_STAGES:
+            durations[stage] = max(1, int(round(durations[stage] / OSC_MOTION_SPEEDUP)))
+    durations["close_gripper_max"] = GRIPPER_CLOSE_MAX_STEPS
+    return durations
+
+
+def grasp_probe_motion_metrics(control_mode, needle_displacement, eef_displacement):
+    """Evaluate probe motion without assuming joint control reaches its nominal target."""
+    needle_displacement = float(needle_displacement)
+    eef_displacement = float(eef_displacement)
+    follow_ratio = needle_displacement / eef_displacement if eef_displacement > 1e-8 else 0.0
+    if control_mode == "joint_position":
+        passed = bool(
+            eef_displacement > JOINT_GRASP_PROBE_MIN_EEF_DISPLACEMENT
+            and follow_ratio >= JOINT_GRASP_PROBE_MIN_FOLLOW_RATIO
+        )
+        criterion = "eef_motion_and_needle_follow_ratio"
+    else:
+        passed = bool(needle_displacement > OSC_GRASP_PROBE_MIN_NEEDLE_DISPLACEMENT)
+        criterion = "absolute_needle_displacement"
+    return {
+        "passed": passed,
+        "criterion": criterion,
+        "eef_displacement_m": eef_displacement,
+        "needle_displacement_m": needle_displacement,
+        "needle_follow_ratio": follow_ratio,
+    }
 
 
 def quadratic_bezier(start, control, end, t):
@@ -147,11 +294,19 @@ def geom_pose(env, name):
     return pos, mat
 
 
+def active_needle_shaft_half_length(env):
+    """Return the shaft half-length configured by the active environment."""
+    base_env = env.unwrapped if hasattr(env, "unwrapped") else env
+    needle = getattr(base_env, "needle", None)
+    return float(getattr(needle, "shaft_half_length", NEEDLE_SHAFT_HALF_LENGTH))
+
+
 def needle_state(env):
     """Return needle center, handle center, and local axes in world coordinates."""
     needle_center, needle_mat = geom_pose(env, "needle_obj_needle")
     handle_center, _ = geom_pose(env, "needle_obj_handle")
     yaxis = unit(needle_mat[:, 1])
+    shaft_half_length = active_needle_shaft_half_length(env)
     return {
         "needle_center": needle_center,
         "handle_center": handle_center,
@@ -159,8 +314,9 @@ def needle_state(env):
         "xaxis": unit(needle_mat[:, 0]),
         "yaxis": yaxis,
         "zaxis": unit(needle_mat[:, 2], fallback=[0.0, 0.0, 1.0]),
-        "tip": needle_center - NEEDLE_SHAFT_HALF_LENGTH * yaxis,
-        "handle_side": needle_center + NEEDLE_SHAFT_HALF_LENGTH * yaxis,
+        "shaft_half_length": shaft_half_length,
+        "tip": needle_center - shaft_half_length * yaxis,
+        "handle_side": needle_center + shaft_half_length * yaxis,
     }
 
 
@@ -213,7 +369,8 @@ def ring_frame_offsets(point, ring):
 def shaft_ring_distance(needle, ring):
     """Return the closest distance from the ring center to the needle shaft segment."""
     rel = ring["center"] - needle["needle_center"]
-    t = np.clip(np.dot(rel, needle["yaxis"]), -NEEDLE_SHAFT_HALF_LENGTH, NEEDLE_SHAFT_HALF_LENGTH)
+    half_length = needle.get("shaft_half_length", NEEDLE_SHAFT_HALF_LENGTH)
+    t = np.clip(np.dot(rel, needle["yaxis"]), -half_length, half_length)
     closest = needle["needle_center"] + t * needle["yaxis"]
     return float(np.linalg.norm(closest - ring["center"]))
 
@@ -234,6 +391,7 @@ def clean_ring_aperture_geometry(env):
         ring_pos=ring["center"],
         ring_mat=ring["mat"],
         ring_normal=ring["normal"],
+        needle_half_length=needle.get("shaft_half_length", NEEDLE_SHAFT_HALF_LENGTH),
     )
     if metrics["clean_aperture"]:
         reason = "clear"
@@ -410,7 +568,16 @@ def shortest_orientation_error(target_quat, current_quat):
     return T.quat2axisangle(quat_err)
 
 
-def target_action(env, target_pos, target_quat, gripper, prev_action, noise_state, noise_std, rng):
+def target_action(
+    env,
+    target_pos,
+    target_quat,
+    gripper,
+    prev_action,
+    noise_state,
+    noise_std,
+    rng,
+):
     """Convert a target pose into a smooth normalized OSC_POSE action."""
     eef_pos, eef_quat = get_eef_pose(env)
     pos_cmd = np.clip((target_pos - eef_pos) / POSITION_SCALE, -0.7, 0.7)
@@ -450,7 +617,9 @@ class JointPositionPoseAdapter:
 
         self.arm_dim = len(arm_controller.joint_names)
         self.qpos_indexes = np.asarray(arm_controller.qpos_index, dtype=int)
-        self.max_target_step = 0.04
+        self.max_target_step = 0.025
+        self.max_tracking_error = 0.04
+        self.noise_scale = JOINT_ACTION_NOISE_SCALE_RAD
         robot_config = {
             "joint_names": list(arm_controller.joint_names),
             "end_effector_sites": [arm_controller.ref_name],
@@ -491,15 +660,26 @@ class JointPositionPoseAdapter:
             noise_state[:] = noise_alpha * noise_state + np.sqrt(1.0 - noise_alpha**2) * policy_state["rng"].normal(
                 size=noise_state.shape
             )
-            q_des = q_des + noise_std * noise_state
+            # The CLI noise value is dimensionless OSC action noise. Convert it
+            # to the same 0.05-rad joint-delta reference used by saved labels;
+            # treating 0.01 as radians directly produces excessive EEF jitter.
+            q_des = q_des + noise_std * self.noise_scale * noise_state
 
+        current_q = self.current_qpos(env)
         previous = policy_state["prev_action"]
-        previous_q = self.current_qpos(env) if previous is None else previous[: self.arm_dim]
-        q_des = 0.45 * previous_q + 0.55 * q_des
-        q_des = np.clip(q_des, previous_q - self.max_target_step, previous_q + self.max_target_step)
+        previous_q = current_q if previous is None else previous[: self.arm_dim]
+        limits = joint_stage_motion_limits(policy_state.get("current_subgoal"))
+        ik_blend = limits["ik_blend"]
+        max_target_step = limits["max_target_step"]
+        max_tracking_error = limits["max_tracking_error"]
+        q_des = (1.0 - ik_blend) * previous_q + ik_blend * q_des
+        q_des = np.clip(q_des, previous_q - max_target_step, previous_q + max_target_step)
+        # Bound servo lag as well as command-to-command motion. Without this
+        # second bound, a moving task-space target can keep pulling the absolute
+        # joint command farther ahead while the physical arm is still catching up.
+        q_des = np.clip(q_des, current_q - max_tracking_error, current_q + max_tracking_error)
         joint_ranges = env.sim.model.jnt_range[self.ik.dof_ids]
         q_des = np.clip(q_des, joint_ranges[:, 0], joint_ranges[:, 1])
-
         action = np.empty(self.arm_dim + 1, dtype=float)
         action[: self.arm_dim] = q_des
         action[-1] = gripper
@@ -599,6 +779,9 @@ class ThreadingScriptedPolicy:
         self.collision_aware_threading = collision_aware_threading
         self.stats = []
 
+    def _limit_lift_height(self, lift_height):
+        return min(float(lift_height), MAX_LIFT_HEIGHT)
+
     def _new_policy_state(self, env, noise_std=None):
         action_adapter = JointPositionPoseAdapter(env) if self.control_mode == "joint_position" else None
         noise_dim = action_adapter.arm_dim if action_adapter is not None else env.action_spec[0].shape[0] - 1
@@ -616,6 +799,7 @@ class ThreadingScriptedPolicy:
             "action_adapter": action_adapter,
             "jacobian_conditions": [],
             "joint_target_step_norms": [],
+            "current_subgoal": None,
         }
 
     def _record_metrics(self, env, stats):
@@ -641,11 +825,19 @@ class ThreadingScriptedPolicy:
             policy_state["target_pos"] = current_pos
             policy_state["target_quat"] = current_quat
 
-        max_pos_step = 0.0052
-        max_angle_step = 0.044
-        if subgoal == "insert_through":
-            max_pos_step = 0.0045
-            max_angle_step = 0.034
+        if self.control_mode == "joint_position":
+            limits = joint_stage_motion_limits(subgoal)
+            max_pos_step = limits["max_position_step"]
+            max_angle_step = limits["max_angle_step"]
+        else:
+            max_pos_step = 0.0052
+            max_angle_step = 0.044
+            if subgoal == "insert_through":
+                max_pos_step = 0.0045
+                max_angle_step = 0.034
+            if subgoal in OSC_ACCELERATED_TARGET_STAGES:
+                max_pos_step *= OSC_MOTION_SPEEDUP
+                max_angle_step *= OSC_MOTION_SPEEDUP
 
         pos_delta = desired_pos - policy_state["target_pos"]
         pos_dist = np.linalg.norm(pos_delta)
@@ -709,6 +901,12 @@ class ThreadingScriptedPolicy:
         start_at_zero=False,
         completion_start_step=None,
         max_steps=None,
+        waypoint_position_tolerance=None,
+        waypoint_orientation_tolerance_deg=None,
+        stream_waypoints=False,
+        streaming_position_tolerance=None,
+        streaming_orientation_tolerance_deg=None,
+        abort_fn=None,
     ):
         """Follow a nominal trajectory, returning once its endpoint gate is stable."""
         nominal_steps = max(1, int(nominal_steps))
@@ -724,9 +922,18 @@ class ThreadingScriptedPolicy:
         path_command_complete = False
         command_position_error = float("inf")
         command_orientation_error_deg = float("inf")
+        waypoint_position_error = None
+        waypoint_orientation_error_deg = None
+        abort_details = None
 
         for step in range(max_steps):
-            if start_at_zero and nominal_steps > 1:
+            if stream_waypoints:
+                scheduled_index = min(step, nominal_steps - 1)
+                if start_at_zero and nominal_steps > 1:
+                    progress = scheduled_index / (nominal_steps - 1)
+                else:
+                    progress = (scheduled_index + 1) / nominal_steps
+            elif start_at_zero and nominal_steps > 1:
                 progress = path_index / (nominal_steps - 1)
             else:
                 progress = (path_index + 1) / nominal_steps
@@ -759,12 +966,47 @@ class ThreadingScriptedPolicy:
                 command_position_error <= PATH_COMMAND_POSITION_TOLERANCE
                 and command_orientation_error_deg <= PATH_COMMAND_ORIENTATION_TOLERANCE_DEG
             )
-            if waypoint_reached:
+            if waypoint_reached and waypoint_position_tolerance is not None:
+                waypoint_position_error, waypoint_orientation_error = self._pose_error(
+                    env, desired_pos, desired_quat
+                )
+                waypoint_orientation_error_deg = float(np.rad2deg(waypoint_orientation_error))
+                position_tolerance = (
+                    streaming_position_tolerance
+                    if stream_waypoints
+                    else waypoint_position_tolerance
+                )
+                orientation_tolerance_deg = (
+                    streaming_orientation_tolerance_deg
+                    if stream_waypoints
+                    else waypoint_orientation_tolerance_deg
+                )
+                physical_waypoint_reached = bool(
+                    waypoint_position_error <= position_tolerance
+                    and waypoint_orientation_error_deg <= orientation_tolerance_deg
+                )
+                # Streaming stages must keep moving along the curve. The physical
+                # corridor remains diagnostic; endpoint completion and abort gates
+                # still validate tracking, contact, and scene stability.
+                if not stream_waypoints:
+                    waypoint_reached = physical_waypoint_reached
+            if stream_waypoints:
+                path_waypoints_completed = max(path_waypoints_completed, scheduled_index + 1)
+                path_index = scheduled_index
+                path_command_complete = bool(
+                    scheduled_index >= nominal_steps - 1 and waypoint_reached
+                )
+            elif waypoint_reached:
                 path_waypoints_completed = max(path_waypoints_completed, path_index + 1)
                 if path_index < nominal_steps - 1:
                     path_index += 1
                 else:
                     path_command_complete = True
+
+            if abort_fn is not None:
+                abort_details = abort_fn(env)
+                if abort_details.get("abort", False):
+                    break
 
             if step + 1 < completion_start_step:
                 continue
@@ -779,6 +1021,13 @@ class ThreadingScriptedPolicy:
                     "command_orientation_error_deg": command_orientation_error_deg,
                 }
             )
+            if waypoint_position_tolerance is not None:
+                final_details.update(
+                    {
+                        "waypoint_position_error_m": waypoint_position_error,
+                        "waypoint_orientation_error_deg": waypoint_orientation_error_deg,
+                    }
+                )
             final_details["passed"] = bool(final_details["passed"] and path_command_complete)
             stable_steps = stable_steps + 1 if final_details["passed"] else 0
             if stable_steps >= required_stable_steps:
@@ -786,7 +1035,7 @@ class ThreadingScriptedPolicy:
 
         complete = stable_steps >= required_stable_steps
         actual_steps = int(stats["subgoal_durations"].get(subgoal, 0))
-        stats["stage_outcomes"][subgoal] = {
+        outcome = {
             "complete": bool(complete),
             "timed_out": bool(not complete and actual_steps >= max_steps),
             "nominal_steps": int(nominal_steps),
@@ -799,7 +1048,84 @@ class ThreadingScriptedPolicy:
             "path_waypoints_total": int(nominal_steps),
             "final": final_details,
         }
+        if waypoint_position_tolerance is not None or abort_fn is not None:
+            outcome.update(
+                {
+                    "waypoint_position_tolerance_m": waypoint_position_tolerance,
+                    "waypoint_orientation_tolerance_deg": waypoint_orientation_tolerance_deg,
+                    "stream_waypoints": bool(stream_waypoints),
+                    "streaming_position_tolerance_m": streaming_position_tolerance,
+                    "streaming_orientation_tolerance_deg": streaming_orientation_tolerance_deg,
+                    "aborted": bool(abort_details is not None and abort_details.get("abort", False)),
+                    "abort_details": abort_details,
+                }
+            )
+        stats["stage_outcomes"][subgoal] = outcome
         return complete
+
+    def _run_joint_bounded_trajectory_stage(
+        self,
+        env,
+        target_at_progress,
+        gripper,
+        nominal_steps,
+        policy_state,
+        stats,
+        subgoal,
+        completion_fn,
+        render=False,
+        max_fr=None,
+        required_stable_steps=2,
+        start_at_zero=False,
+        completion_start_step=None,
+        waypoint_position_tolerance=0.006,
+        waypoint_orientation_tolerance_deg=4.0,
+        stream_waypoints=False,
+        streaming_position_tolerance=None,
+        streaming_orientation_tolerance_deg=None,
+        abort_fn=None,
+    ):
+        """Run a stage with physical waypoint tracking for joint control."""
+        if self.control_mode != "joint_position":
+            raise ValueError("Joint-bounded stages are only valid in joint-position mode")
+        if stream_waypoints:
+            if streaming_position_tolerance is None or streaming_orientation_tolerance_deg is None:
+                raise ValueError("Streaming joint stages require position and orientation corridors")
+            if streaming_position_tolerance < waypoint_position_tolerance:
+                raise ValueError("Streaming position corridor cannot be tighter than endpoint tracking")
+            if streaming_orientation_tolerance_deg < waypoint_orientation_tolerance_deg:
+                raise ValueError("Streaming orientation corridor cannot be tighter than endpoint tracking")
+        return self._run_bounded_trajectory_stage(
+            env,
+            target_at_progress,
+            gripper,
+            nominal_steps,
+            policy_state,
+            stats,
+            subgoal,
+            completion_fn,
+            render,
+            max_fr,
+            required_stable_steps=required_stable_steps,
+            start_at_zero=start_at_zero,
+            completion_start_step=completion_start_step,
+            max_steps=JOINT_STAGE_MAX_STEPS[subgoal],
+            waypoint_position_tolerance=waypoint_position_tolerance,
+            waypoint_orientation_tolerance_deg=waypoint_orientation_tolerance_deg,
+            stream_waypoints=stream_waypoints,
+            streaming_position_tolerance=streaming_position_tolerance,
+            streaming_orientation_tolerance_deg=streaming_orientation_tolerance_deg,
+            abort_fn=abort_fn,
+        )
+
+    def _joint_contact_tripod_abort(self, env, stats, max_displacement=0.012):
+        tripod_motion = self._tripod_motion(env, stats, max_displacement=max_displacement)
+        contact = needle_grasp_contact(env)
+        return {
+            "abort": bool(not contact or not tripod_motion["stable"]),
+            "contact": bool(contact),
+            "tripod_motion": tripod_motion,
+        }
 
     def _track_target(
         self,
@@ -816,6 +1142,7 @@ class ThreadingScriptedPolicy:
         min_steps=12,
     ):
         start_t = int(env.t)
+        policy_state["current_subgoal"] = subgoal
         for _ in range(steps):
             desired_pos, desired_quat = target_fn()
             target_pos, target_quat = self._advance_target(env, desired_pos, desired_quat, policy_state, subgoal)
@@ -903,19 +1230,47 @@ class ThreadingScriptedPolicy:
         stats,
         render=False,
         max_fr=None,
+        motion_handoff_target_at_progress=None,
+        motion_handoff_total_steps=None,
     ):
-        """Close under OSC until the command, fingers, and grasp are stable."""
+        """Close until stable contact while overlapping the guarded lift entry."""
         previous_qpos = gripper_joint_positions(env)
         stable_steps = 0
         steps = 0
         finger_motion = float("inf")
         contact = False
-        command = float(policy_state["prev_action"][-1]) if policy_state["prev_action"] is not None else -1.0
+        command = (
+            float(policy_state["prev_action"][-1])
+            if policy_state["prev_action"] is not None
+            else -1.0
+        )
+        handoff_started = False
+        handoff_steps = 0
+        handoff_progress = 0.0
+        handoff_start_finger_motion = None
+        handoff_total_steps = max(
+            1,
+            int(
+                motion_handoff_total_steps
+                if motion_handoff_total_steps is not None
+                else nominal_stage_durations(self.control_mode)["grasp_probe_lift"]
+            ),
+        )
 
         for _ in range(GRIPPER_CLOSE_MAX_STEPS):
+            if handoff_started and contact:
+                handoff_steps += 1
+                handoff_progress = min(
+                    GRIPPER_CLOSE_HANDOFF_MAX_PROGRESS,
+                    handoff_steps / handoff_total_steps,
+                )
+            if handoff_started:
+                target_fn = lambda: motion_handoff_target_at_progress(handoff_progress)
+            else:
+                target_fn = self._fixed_target(target_pos, target_quat)
             self._track_target(
                 env,
-                self._fixed_target(target_pos, target_quat),
+                target_fn,
                 1.0,
                 1,
                 policy_state,
@@ -931,6 +1286,18 @@ class ThreadingScriptedPolicy:
             previous_qpos = current_qpos
             command = float(policy_state["prev_action"][-1])
             contact = needle_grasp_contact(env)
+            near_closed_contact = bool(
+                command >= GRIPPER_CLOSE_COMMAND_THRESHOLD
+                and finger_motion <= GRIPPER_CLOSE_HANDOFF_MOTION_THRESHOLD
+                and contact
+            )
+            if (
+                motion_handoff_target_at_progress is not None
+                and not handoff_started
+                and near_closed_contact
+            ):
+                handoff_started = True
+                handoff_start_finger_motion = finger_motion
             if (
                 command >= GRIPPER_CLOSE_COMMAND_THRESHOLD
                 and finger_motion <= GRIPPER_CLOSE_MOTION_THRESHOLD
@@ -955,6 +1322,16 @@ class ThreadingScriptedPolicy:
             "finger_motion_m": float(finger_motion),
             "finger_motion_threshold_m": float(GRIPPER_CLOSE_MOTION_THRESHOLD),
             "contact": bool(contact),
+            "motion_handoff_started": bool(handoff_started),
+            "motion_handoff_steps": int(handoff_steps),
+            "motion_handoff_progress": float(handoff_progress),
+            "motion_handoff_max_progress": float(GRIPPER_CLOSE_HANDOFF_MAX_PROGRESS),
+            "motion_handoff_start_finger_motion_m": (
+                None if handoff_start_finger_motion is None else float(handoff_start_finger_motion)
+            ),
+            "motion_handoff_finger_motion_threshold_m": float(
+                GRIPPER_CLOSE_HANDOFF_MOTION_THRESHOLD
+            ),
         }
         stats.setdefault("stage_outcomes", {})["close_gripper"] = dict(stats["gripper_close"])
         return complete
@@ -994,7 +1371,9 @@ class ThreadingScriptedPolicy:
                 + lateral_offset * side
                 + vertical_offset * vertical
             )
-            target_needle_center = desired_tip + NEEDLE_SHAFT_HALF_LENGTH * target_needle_mat[:, 1]
+            target_needle_center = (
+                desired_tip + active_needle_shaft_half_length(env) * target_needle_mat[:, 1]
+            )
             target_pos, target_quat = eef_from_needle_pose(target_needle_center, target_needle_mat, needle_to_eef)
             return target_pos, target_quat
 
@@ -1100,6 +1479,17 @@ class ThreadingScriptedPolicy:
                 and stats.get("insert_complete", False)
                 and stats.get("hold_complete", False)
             )
+        elif stats.get("control_mode") == "joint_position":
+            checks["stage_sequence_complete"] = bool(
+                stats.get("approach_complete", False)
+                and stats.get("gripper_close_complete", False)
+                and stats.get("probe_complete", False)
+                and stats.get("lift_complete", False)
+                and stats.get("align_complete", False)
+                and stats.get("pre_insert_complete", False)
+                and stats.get("insert_complete", False)
+                and stats.get("hold_complete", False)
+            )
         stats["policy_checks"] = checks
         failed = [name for name, passed in checks.items() if not passed]
         stats["failure_reason"] = "none" if not failed else ",".join(failed)
@@ -1136,6 +1526,10 @@ class ThreadingScriptedPolicy:
         finite_conditions = [value for value in policy_state["jacobian_conditions"] if np.isfinite(value)]
         stats["joint_control"] = {
             "enabled": self.control_mode == "joint_position",
+            "servo_kp": JOINT_SERVO_KP if self.control_mode == "joint_position" else None,
+            "servo_damping_ratio": (
+                JOINT_SERVO_DAMPING_RATIO if self.control_mode == "joint_position" else None
+            ),
             "max_jacobian_condition": float(max(finite_conditions)) if finite_conditions else None,
             "mean_jacobian_condition": float(np.mean(finite_conditions)) if finite_conditions else None,
             "singular_condition_count": int(
@@ -1147,6 +1541,23 @@ class ThreadingScriptedPolicy:
             "mean_joint_target_step": float(np.mean(policy_state["joint_target_step_norms"]))
             if policy_state["joint_target_step_norms"]
             else None,
+            "joint_noise_std_rad": float(stats["episode_noise_std"] * policy_state["action_adapter"].noise_scale)
+            if policy_state["action_adapter"] is not None
+            else None,
+        }
+        stats["command_shaping"] = {
+            "enabled": True,
+            "profile": (
+                JOINT_TRAJECTORY_TIMING_PROFILE
+                if self.control_mode == "joint_position"
+                else OSC_TRAJECTORY_TIMING_PROFILE
+            ),
+            "method": (
+                "first_order_ik_blend_with_step_and_tracking_bounds"
+                if self.control_mode == "joint_position"
+                else "first_order_action_blend_with_delta_bound"
+            ),
+            "hidden_velocity_state": False,
         }
         stats["initial_tripod_pos"] = stats["initial_tripod_pos"].tolist()
         stats["initial_tripod_mat"] = stats["initial_tripod_mat"].tolist()
@@ -1266,14 +1677,6 @@ class ThreadingScriptedPolicy:
             control_side = -side_sign * self.rng.uniform(0.045, 0.085)
             control_z_frac = self.rng.uniform(0.3, 0.6)
             lift_progress_power = self.rng.uniform(0.7, 1.05)
-        elif motion_style == "vertical_first":
-            lift_toward = self.rng.uniform(0.045, 0.09) * toward_ring
-            lift_lateral = self.rng.uniform(-0.018, 0.018) * lift_side
-            lift_height = self.rng.uniform(0.2, 0.27)
-            control_toward = self.rng.uniform(-0.05, 0.18)
-            control_side = self.rng.uniform(-0.018, 0.018)
-            control_z_frac = self.rng.uniform(0.8, 1.1)
-            lift_progress_power = self.rng.uniform(1.05, 1.45)
         elif motion_style == "shallow_sweep":
             lift_toward = self.rng.uniform(0.095, 0.17) * toward_ring
             lift_lateral = side_sign * self.rng.uniform(0.04, 0.08) * lift_side
@@ -1290,7 +1693,7 @@ class ThreadingScriptedPolicy:
             control_side = -side_sign * self.rng.uniform(0.02, 0.06)
             control_z_frac = self.rng.uniform(0.45, 0.85)
             lift_progress_power = self.rng.uniform(0.8, 1.2)
-        else:
+        elif motion_style == "short_direct":
             lift_toward = self.rng.uniform(0.055, 0.105) * toward_ring
             lift_lateral = self.rng.uniform(-0.012, 0.012) * lift_side
             lift_height = self.rng.uniform(0.11, 0.145)
@@ -1298,16 +1701,20 @@ class ThreadingScriptedPolicy:
             control_side = self.rng.uniform(-0.012, 0.012)
             control_z_frac = self.rng.uniform(0.35, 0.55)
             lift_progress_power = self.rng.uniform(0.7, 0.95)
+        else:
+            raise ValueError(f"Unknown threading motion style: {motion_style}")
         if self.collision_aware_threading:
             # The randomized D0.5 tripod can put the entry side behind a support
             # relative to the robot. Clear the full tripod before moving around it.
             lift_height = max(lift_height, 0.20)
+        sampled_lift_height = float(lift_height)
+        lift_height = self._limit_lift_height(sampled_lift_height)
         if full_quality_mode:
-            close_lift_rise = self.rng.uniform(0.006, 0.010)
-            close_lift_forward = self.rng.uniform(0.002, 0.006) * toward_ring
+            close_lift_rise = self.rng.uniform(0.016, 0.022)
+            close_lift_forward = self.rng.uniform(0.004, 0.008) * toward_ring
         else:
-            close_lift_rise = self.rng.uniform(0.003, 0.006)
-            close_lift_forward = self.rng.uniform(0.0, 0.002) * toward_ring
+            close_lift_rise = self.rng.uniform(0.012, 0.018)
+            close_lift_forward = self.rng.uniform(0.002, 0.005) * toward_ring
         close_lift_end_pos = close_pos + close_lift_forward + np.array([0.0, 0.0, close_lift_rise])
         lift_jitter = np.array([self.rng.uniform(-0.012, 0.012), self.rng.uniform(-0.012, 0.012), 0.0])
         lift_xy = lift_toward + lift_lateral + lift_jitter
@@ -1356,6 +1763,7 @@ class ThreadingScriptedPolicy:
         lift_control2_pos = lift_start_pos + lift_control2_xy + np.array([0.0, 0.0, lift_control2_z])
         lift_pos = lift_start_pos + lift_xy + np.array([0.0, 0.0, lift_height])
         lift_progress_power = float(np.clip(lift_progress_power, 0.55, 1.75))
+        lift_entry_slope = float(np.clip(1.0 / lift_progress_power, 0.75, 1.25))
         lift_yaw = 0.0
         lift_pitch = 0.0
         lift_roll = 0.0
@@ -1364,8 +1772,7 @@ class ThreadingScriptedPolicy:
         lift_align_rot = rotation_between(-needle["yaxis"], ring["normal"])
         lift_align_quat = T.mat2quat(lift_align_rot)
         lift_prealign_fraction = float(self.rng.uniform(0.28, 0.55))
-        durations = dict(NOMINAL_STAGE_STEPS)
-        durations["close_gripper_max"] = GRIPPER_CLOSE_MAX_STEPS
+        durations = nominal_stage_durations(self.control_mode)
         pre_insert_offset = float(self.rng.uniform(-0.052, -0.038))
         align_offset = float(self.rng.uniform(-0.082, -0.062))
         insert_start_offset = float(self.rng.uniform(-0.045, -0.035))
@@ -1416,6 +1823,10 @@ class ThreadingScriptedPolicy:
             "grasp_contact_after_lift": False,
             "grasp_rigid_after_probe": False,
             "grasp_rigid_after_lift": False,
+            "grasp_probe_eef_displacement_m": 0.0,
+            "grasp_probe_needle_displacement_m": 0.0,
+            "grasp_probe_needle_follow_ratio": 0.0,
+            "grasp_probe_motion_sufficient": False,
             "hold_complete": False,
             "grasp_settled": False,
             "approach_complete": False,
@@ -1460,10 +1871,13 @@ class ThreadingScriptedPolicy:
             "close_lift_rise": float(close_lift_rise),
             "close_lift_forward": close_lift_forward.tolist(),
             "close_lift_end_pos": close_lift_end_pos.tolist(),
+            "grasp_probe_profile": "overlapped_linear_guarded_lift",
             "lift_toward": lift_toward.tolist(),
             "lift_lateral": lift_lateral.tolist(),
             "lift_jitter": lift_jitter.tolist(),
+            "sampled_lift_height": float(sampled_lift_height),
             "lift_height": float(lift_height),
+            "lift_height_cap": MAX_LIFT_HEIGHT,
             "motion_style": str(motion_style),
             "style_variant": str(style_variant),
             "lift_control_toward": float(control_toward),
@@ -1476,6 +1890,8 @@ class ThreadingScriptedPolicy:
             "lift_control_pos": lift_control_pos.tolist(),
             "lift_control2_pos": lift_control2_pos.tolist(),
             "lift_progress_power": float(lift_progress_power),
+            "lift_entry_slope": float(lift_entry_slope),
+            "lift_progress_profile": "stationary_endpoint_power_smoothstep",
             "lift_pos": lift_pos.tolist(),
             "lift_yaw_deg": float(np.rad2deg(lift_yaw)),
             "lift_pitch_deg": float(np.rad2deg(lift_pitch)),
@@ -1487,6 +1903,12 @@ class ThreadingScriptedPolicy:
             },
             "action_noise_std": float(self.action_noise_std),
             "episode_noise_std": episode_noise_std,
+            "trajectory_timing_profile": (
+                JOINT_TRAJECTORY_TIMING_PROFILE
+                if self.control_mode == "joint_position"
+                else OSC_TRAJECTORY_TIMING_PROFILE
+            ),
+            "motion_speedup": OSC_MOTION_SPEEDUP if self.control_mode == "osc_pose" else 1.0,
             "planned_durations": durations,
             "planned_offsets": {
                 "align": align_offset,
@@ -1557,20 +1979,34 @@ class ThreadingScriptedPolicy:
                 stats["aborted_stage"] = "aim_continuous"
                 return self._finish_rollout(env, stats, policy_state, gripper_axes)
         else:
-            for i in range(approach_steps):
-                target_pos, target_quat = approach_target((i + 1) / approach_steps)
-                self._track_target(
-                    env,
-                    self._fixed_target(target_pos, target_quat),
-                    -1.0,
-                    1,
-                    policy_state,
-                    stats,
-                    "aim_continuous",
-                    render,
-                    max_fr,
-                    stop_on_reach=False,
-                )
+            stats["approach_complete"] = self._run_joint_bounded_trajectory_stage(
+                env,
+                approach_target,
+                -1.0,
+                approach_steps,
+                policy_state,
+                stats,
+                "aim_continuous",
+                lambda stage_env, target_pos, target_quat, motion: self._pose_completion(
+                    stage_env,
+                    target_pos,
+                    target_quat,
+                    motion,
+                    position_tolerance=0.005,
+                    orientation_tolerance_deg=3.0,
+                    motion_tolerance=0.003,
+                ),
+                render,
+                max_fr,
+                waypoint_position_tolerance=0.012,
+                waypoint_orientation_tolerance_deg=6.0,
+                stream_waypoints=True,
+                streaming_position_tolerance=0.018,
+                streaming_orientation_tolerance_deg=9.0,
+            )
+            if not stats["approach_complete"]:
+                stats["aborted_stage"] = "aim_continuous"
+                return self._finish_rollout(env, stats, policy_state, gripper_axes)
 
         # Closing is allowed only after the actual EEF pose has remained within
         # a tight tolerance for several consecutive control steps.
@@ -1594,47 +2030,57 @@ class ThreadingScriptedPolicy:
                 max_fr,
             )
             stats["grasp_settled"] = stats["pregrasp_pose_settled"]
-
-        # Require the rate-limited command, physical finger motion, and grasp
-        # contact to remain complete together before starting the probe lift.
-        if self.control_mode == "osc_pose":
-            stats["gripper_close_complete"] = self._close_gripper_until_stable_contact(
-                env,
-                close_pos,
-                close_target_quat,
-                policy_state,
-                stats,
-                render,
-                max_fr,
+            stats["approach_complete"] = bool(
+                stats["approach_complete"] and stats["pregrasp_pose_settled"]
             )
-            stats["gripper_command_closed"] = stats["gripper_close"]["command_fully_closed"]
-        else:
-            for _ in range(durations["close_gripper"]):
-                self._track_target(
-                    env,
-                    self._fixed_target(close_pos, close_target_quat),
-                    1.0,
-                    1,
-                    policy_state,
-                    stats,
-                    "close_gripper",
-                    render,
-                    max_fr,
-                    stop_on_reach=False,
-                )
-            stats["gripper_close_complete"] = True
-            stats["gripper_command_closed"] = True
+            if not stats["approach_complete"]:
+                stats["aborted_stage"] = "grasp_settle"
+                return self._finish_rollout(env, stats, policy_state, gripper_axes)
+
+        # Begin the guarded lift as the fingers converge, while still requiring
+        # stable physical closure and contact before leaving this stage.
+        def close_lift_target(progress):
+            target_pos = close_pos + progress * (close_lift_end_pos - close_pos)
+            return target_pos, close_target_quat
+
+        stats["gripper_close_complete"] = self._close_gripper_until_stable_contact(
+            env,
+            close_pos,
+            close_target_quat,
+            policy_state,
+            stats,
+            render,
+            max_fr,
+            motion_handoff_target_at_progress=close_lift_target,
+            motion_handoff_total_steps=(
+                JOINT_CLOSE_LIFT_HANDOFF_STEPS
+                if self.control_mode == "joint_position"
+                else OSC_CLOSE_LIFT_HANDOFF_STEPS
+            ),
+        )
+        stats["gripper_command_closed"] = stats["gripper_close"]["command_fully_closed"]
         stats["gripper_qpos_at_close"] = gripper_joint_positions(env).tolist()
         stats["grasp_contact_at_close"] = needle_grasp_contact(env)
-        if self.control_mode == "osc_pose" and not stats["gripper_close_complete"]:
+        if not stats["gripper_close_complete"]:
             stats["aborted_stage"] = "close_gripper"
             return self._finish_rollout(env, stats, policy_state, gripper_axes)
         close_grasp_transform = needle_to_eef_transform(env)
         close_needle_center = needle_state(env)["needle_center"].copy()
+        close_eef_pos = get_eef_pose(env)[0].copy()
+
+        close_handoff_progress = float(stats["gripper_close"]["motion_handoff_progress"])
+        remaining_probe_steps = max(
+            1,
+            int(np.ceil(durations["grasp_probe_lift"] * (1.0 - close_handoff_progress))),
+        )
+        stats["grasp_probe_handoff_progress"] = close_handoff_progress
+        stats["grasp_probe_remaining_nominal_steps"] = remaining_probe_steps
 
         def probe_target(progress):
-            target_pos = close_pos + smoothstep(progress) * (close_lift_end_pos - close_pos)
-            return target_pos, close_target_quat
+            probe_progress = (
+                close_handoff_progress + (1.0 - close_handoff_progress) * progress
+            )
+            return close_lift_target(probe_progress)
 
         def probe_completion(stage_env, target_pos, target_quat, motion):
             pose = self._pose_completion(
@@ -1642,14 +2088,20 @@ class ThreadingScriptedPolicy:
                 target_pos,
                 target_quat,
                 motion,
-                position_tolerance=0.003,
+                position_tolerance=0.012 if self.control_mode == "joint_position" else 0.006,
                 orientation_tolerance_deg=3.0,
-                motion_tolerance=0.003,
+                motion_tolerance=0.008,
             )
             measured_transform = needle_to_eef_transform(stage_env)
             transform_error = needle_to_eef_error(close_grasp_transform, measured_transform)
             needle_displacement = float(
                 np.linalg.norm(needle_state(stage_env)["needle_center"] - close_needle_center)
+            )
+            eef_displacement = float(np.linalg.norm(get_eef_pose(stage_env)[0] - close_eef_pos))
+            probe_motion = grasp_probe_motion_metrics(
+                self.control_mode,
+                needle_displacement,
+                eef_displacement,
             )
             contact = needle_grasp_contact(stage_env)
             tripod_motion = self._tripod_motion(stage_env, stats)
@@ -1657,6 +2109,10 @@ class ThreadingScriptedPolicy:
                 {
                     "contact": bool(contact),
                     "needle_displacement_m": needle_displacement,
+                    "eef_displacement_m": eef_displacement,
+                    "needle_follow_ratio": probe_motion["needle_follow_ratio"],
+                    "motion_criterion": probe_motion["criterion"],
+                    "motion_sufficient": probe_motion["passed"],
                     "transform_translation_error_m": float(transform_error["translation_m"]),
                     "transform_rotation_error_deg": float(transform_error["rotation_deg"]),
                     "tripod_motion": tripod_motion,
@@ -1667,7 +2123,7 @@ class ThreadingScriptedPolicy:
                 pose["passed"]
                 and contact
                 and tripod_motion["stable"]
-                and needle_displacement > 0.003
+                and probe_motion["passed"]
                 and transform_error["translation_m"] < 0.006
                 and transform_error["rotation_deg"] < 8.0
             )
@@ -1678,31 +2134,35 @@ class ThreadingScriptedPolicy:
                 env,
                 probe_target,
                 1.0,
-                durations["grasp_probe_lift"],
+                remaining_probe_steps,
                 policy_state,
                 stats,
                 "grasp_probe_lift",
                 probe_completion,
                 render,
                 max_fr,
+                required_stable_steps=1,
                 max_steps=OSC_STAGE_MAX_STEPS["grasp_probe_lift"],
             )
         else:
-            for i in range(durations["grasp_probe_lift"]):
-                target_pos, target_quat = probe_target((i + 1) / durations["grasp_probe_lift"])
-                self._track_target(
-                    env,
-                    self._fixed_target(target_pos, target_quat),
-                    1.0,
-                    1,
-                    policy_state,
-                    stats,
-                    "grasp_probe_lift",
-                    render,
-                    max_fr,
-                    stop_on_reach=False,
-                )
-            stats["probe_complete"] = True
+            stats["probe_complete"] = self._run_joint_bounded_trajectory_stage(
+                env,
+                probe_target,
+                1.0,
+                remaining_probe_steps,
+                policy_state,
+                stats,
+                "grasp_probe_lift",
+                probe_completion,
+                render,
+                max_fr,
+                required_stable_steps=1,
+                waypoint_position_tolerance=0.008,
+                waypoint_orientation_tolerance_deg=6.0,
+                abort_fn=lambda stage_env: self._joint_contact_tripod_abort(
+                    stage_env, stats, max_displacement=0.035
+                ),
+            )
         probe_grasp_transform = needle_to_eef_transform(env)
         probe_grasp_error = needle_to_eef_error(close_grasp_transform, probe_grasp_transform)
         stats["grasp_contact_after_probe"] = needle_grasp_contact(env)
@@ -1710,27 +2170,55 @@ class ThreadingScriptedPolicy:
         stats["grasp_probe_needle_displacement_m"] = float(
             np.linalg.norm(needle_state(env)["needle_center"] - close_needle_center)
         )
+        stats["grasp_probe_eef_displacement_m"] = float(
+            np.linalg.norm(get_eef_pose(env)[0] - close_eef_pos)
+        )
+        probe_motion = grasp_probe_motion_metrics(
+            self.control_mode,
+            stats["grasp_probe_needle_displacement_m"],
+            stats["grasp_probe_eef_displacement_m"],
+        )
+        stats["grasp_probe_needle_follow_ratio"] = probe_motion["needle_follow_ratio"]
+        stats["grasp_probe_motion_criterion"] = probe_motion["criterion"]
+        stats["grasp_probe_motion_sufficient"] = probe_motion["passed"]
         stats["grasp_transform_error_after_probe"] = probe_grasp_error
         stats["grasp_rigid_after_probe"] = bool(
             probe_grasp_error["translation_m"] < 0.006
             and probe_grasp_error["rotation_deg"] < 8.0
-            and stats["grasp_probe_needle_displacement_m"] > 0.003
+            and probe_motion["passed"]
         )
         stats["gripper_closed"] = bool(stats["grasp_contact_after_probe"])
         close_needle = needle_state(env)
         stats["actual_close_angle_deg"] = float(
             visual_grasp_angle_from_axis(eef_approach_axis(get_eef_mat(env), gripper_axes), close_needle)
         )
-        if self.control_mode == "osc_pose" and not stats["probe_complete"]:
+        if not stats["probe_complete"]:
             stats["aborted_stage"] = "grasp_probe_lift"
             return self._finish_rollout(env, stats, policy_state, gripper_axes)
 
         # lift: follow one continuous randomized arc and pre-rotate partway toward
         # the ring while moving, leaving less rotation for the align phase.
         def lift_target(progress):
-            lift_t = smoothstep(progress**lift_progress_power)
-            target_pos = cubic_bezier(lift_start_pos, lift_control_pos, lift_control2_pos, lift_pos, lift_t)
-            rot_fraction = lift_prealign_fraction * smoothstep(progress)
+            if self.control_mode == "joint_position":
+                # Keep some exit velocity for the alignment handoff. The lift
+                # safety gate still validates contact, rigidity, and tripod motion.
+                lift_t = endpoint_velocity_progress(
+                    progress, initial_slope=lift_entry_slope, final_slope=0.55
+                )
+                rotation_progress = endpoint_velocity_progress(
+                    progress, initial_slope=lift_entry_slope, final_slope=0.45
+                )
+            else:
+                lift_t = endpoint_smooth_progress(progress, lift_entry_slope)
+                rotation_progress = endpoint_smooth_progress(progress, lift_entry_slope)
+            target_pos = cubic_bezier(
+                lift_start_pos,
+                lift_control_pos,
+                lift_control2_pos,
+                lift_pos,
+                lift_t,
+            )
+            rot_fraction = lift_prealign_fraction * rotation_progress
             partial_lift_quat = T.quat_slerp(T.mat2quat(np.eye(3)), lift_align_quat, rot_fraction)
             partial_lift_rot = T.quat2mat(partial_lift_quat)
             target_quat = T.mat2quat(partial_lift_rot.dot(T.quat2mat(close_target_quat)))
@@ -1742,7 +2230,7 @@ class ThreadingScriptedPolicy:
                 target_pos,
                 target_quat,
                 motion,
-                position_tolerance=0.006,
+                position_tolerance=0.010 if self.control_mode == "joint_position" else 0.006,
                 orientation_tolerance_deg=4.0,
                 motion_tolerance=0.005,
             )
@@ -1780,25 +2268,32 @@ class ThreadingScriptedPolicy:
                 render,
                 max_fr,
                 required_stable_steps=2,
-                start_at_zero=True,
+                start_at_zero=False,
                 max_steps=OSC_STAGE_MAX_STEPS["lift_arc"],
             )
         else:
-            for i in range(durations["lift_arc"]):
-                progress = i / max(1, durations["lift_arc"] - 1)
-                target_pos, target_quat = lift_target(progress)
-                self._track_target(
-                    env,
-                    self._fixed_target(target_pos, target_quat),
-                    1.0,
-                    1,
-                    policy_state,
-                    stats,
-                    "lift_arc",
-                    render,
-                    max_fr,
-                )
-            stats["lift_complete"] = True
+            stats["lift_complete"] = self._run_joint_bounded_trajectory_stage(
+                env,
+                lift_target,
+                1.0,
+                durations["lift_arc"],
+                policy_state,
+                stats,
+                "lift_arc",
+                lift_completion,
+                render,
+                max_fr,
+                required_stable_steps=1,
+                start_at_zero=False,
+                waypoint_position_tolerance=0.012,
+                waypoint_orientation_tolerance_deg=8.0,
+                stream_waypoints=True,
+                streaming_position_tolerance=0.018,
+                streaming_orientation_tolerance_deg=10.0,
+                abort_fn=lambda stage_env: self._joint_contact_tripod_abort(
+                    stage_env, stats, max_displacement=0.035
+                ),
+            )
         lift_needle = needle_state(env)
         actual_lift_angle = visual_grasp_angle_from_axis(eef_approach_axis(get_eef_mat(env), gripper_axes), lift_needle)
         stats["actual_lift_angle_deg"] = float(actual_lift_angle)
@@ -1825,12 +2320,16 @@ class ThreadingScriptedPolicy:
         stats["actual_grasp_jaw_needle_axis_abs_dot"] = float(
             abs(np.dot(eef_jaw_axis(get_eef_mat(env), gripper_axes), lift_needle["yaxis"]))
         )
-        if self.control_mode == "osc_pose" and not stats["lift_complete"]:
+        if not stats["lift_complete"]:
             stats["aborted_stage"] = "lift_arc"
             return self._finish_rollout(env, stats, policy_state, gripper_axes)
         align_reference_needle_mat = lift_needle["mat"].copy()
         alignment_start = ring_frame_offsets(lift_needle["tip"], ring_state(env))
-        stats["alignment_profile"] = "measured_minimum_jerk"
+        stats["alignment_profile"] = (
+            "measured_nonzero_entry_smooth_stop"
+            if self.control_mode == "joint_position"
+            else "measured_minimum_jerk"
+        )
         stats["alignment_start_offsets"] = dict(alignment_start)
         if self.collision_aware_threading:
             # First move above the entry side, then descend while still well
@@ -1878,7 +2377,11 @@ class ThreadingScriptedPolicy:
         # lift hands control to alignment.
         align_end_offset = pre_insert_offset - 0.012
         def align_target(progress):
-            blend = minimum_jerk(progress)
+            blend = (
+                endpoint_velocity_progress(progress, initial_slope=0.65, final_slope=0.0)
+                if self.control_mode == "joint_position"
+                else minimum_jerk(progress)
+            )
             offset = (1.0 - blend) * alignment_start["normal"] + blend * align_end_offset
             lateral = (1.0 - blend) * alignment_start["lateral"] + blend * align_curve["lateral_end"]
             vertical = (1.0 - blend) * alignment_start["vertical"] + blend * align_curve["vertical_end"]
@@ -1902,7 +2405,7 @@ class ThreadingScriptedPolicy:
                 target_pos,
                 target_quat,
                 motion,
-                position_tolerance=0.006,
+                position_tolerance=0.008 if self.control_mode == "joint_position" else 0.006,
                 orientation_tolerance_deg=4.0,
                 motion_tolerance=0.005,
             )
@@ -1953,21 +2456,40 @@ class ThreadingScriptedPolicy:
                 stats["aborted_stage"] = "align"
                 return self._finish_rollout(env, stats, policy_state, gripper_axes)
         else:
-            for i in range(durations["align"]):
-                progress = i / max(1, durations["align"] - 1)
-                target_pos, target_quat = align_target(progress)
-                self._track_target(
-                    env,
-                    self._fixed_target(target_pos, target_quat),
-                    1.0,
-                    1,
-                    policy_state,
-                    stats,
-                    "align",
-                    render,
-                    max_fr,
-                )
-            stats["align_complete"] = True
+            stats["align_complete"] = self._run_joint_bounded_trajectory_stage(
+                env,
+                align_target,
+                1.0,
+                durations["align"],
+                policy_state,
+                stats,
+                "align",
+                align_completion,
+                render,
+                max_fr,
+                start_at_zero=False,
+                waypoint_position_tolerance=0.008,
+                waypoint_orientation_tolerance_deg=5.0,
+                stream_waypoints=True,
+                streaming_position_tolerance=0.012,
+                streaming_orientation_tolerance_deg=7.0,
+                abort_fn=lambda stage_env: self._joint_contact_tripod_abort(
+                    stage_env, stats
+                ),
+            )
+            if not stats["align_complete"]:
+                stats["aborted_stage"] = "align"
+                return self._finish_rollout(env, stats, policy_state, gripper_axes)
+        threading_needle_to_eef = (
+            needle_to_eef_transform(env)
+            if self.control_mode == "joint_position"
+            else measured_needle_to_eef
+        )
+        stats["threading_needle_to_eef_source"] = (
+            "measured_after_alignment"
+            if self.control_mode == "joint_position"
+            else "measured_after_lift"
+        )
         if self.collision_aware_threading:
             stable_steps = 0
             gate_errors = None
@@ -1980,7 +2502,7 @@ class ThreadingScriptedPolicy:
                         pre_insert_offset,
                         1.0,
                         align_curve,
-                        measured_needle_to_eef,
+                        threading_needle_to_eef,
                         align_reference_needle_mat,
                     )(env),
                     1.0,
@@ -2018,7 +2540,7 @@ class ThreadingScriptedPolicy:
                     pre_insert_offset,
                     1.0,
                     align_curve,
-                    measured_needle_to_eef,
+                    threading_needle_to_eef,
                     align_reference_needle_mat,
                 )(env)
 
@@ -2028,7 +2550,7 @@ class ThreadingScriptedPolicy:
                     target_pos,
                     target_quat,
                     motion,
-                    position_tolerance=0.005,
+                    position_tolerance=0.008 if self.control_mode == "joint_position" else 0.005,
                     orientation_tolerance_deg=3.5,
                     motion_tolerance=0.003,
                 )
@@ -2071,20 +2593,27 @@ class ThreadingScriptedPolicy:
                     max_steps=OSC_STAGE_MAX_STEPS["pre_insert"],
                 )
             else:
-                self._track_target(
+                stats["pre_insert_complete"] = self._run_joint_bounded_trajectory_stage(
                     env,
-                    lambda: pre_insert_target(1.0),
+                    pre_insert_target,
                     1.0,
                     durations["pre_insert"],
                     policy_state,
                     stats,
                     "pre_insert",
+                    pre_insert_completion,
                     render,
                     max_fr,
+                    required_stable_steps=3,
+                    completion_start_step=1,
+                    waypoint_position_tolerance=0.006,
+                    waypoint_orientation_tolerance_deg=4.0,
+                    abort_fn=lambda stage_env: self._joint_contact_tripod_abort(
+                        stage_env, stats
+                    ),
                 )
-                stats["pre_insert_complete"] = True
 
-        if self.control_mode == "osc_pose" and not stats["pre_insert_complete"]:
+        if not stats["pre_insert_complete"]:
             stats["aborted_stage"] = "pre_insert"
             return self._finish_rollout(env, stats, policy_state, gripper_axes)
 
@@ -2118,51 +2647,51 @@ class ThreadingScriptedPolicy:
                 offset,
                 progress,
                 insert_curve,
-                measured_needle_to_eef,
+                threading_needle_to_eef,
                 align_reference_needle_mat,
                 alignment_fraction=1.0,
             )(env)
 
-        if self.control_mode == "osc_pose" and not self.collision_aware_threading:
-            def insert_completion(stage_env, target_pos, target_quat, motion):
-                pose = self._pose_completion(
-                    stage_env,
-                    target_pos,
-                    target_quat,
-                    motion,
-                    position_tolerance=0.008,
-                    orientation_tolerance_deg=5.0,
-                    motion_tolerance=0.005,
-                )
-                tracking = self._needle_target_errors(stage_env, insert_end_offset)
-                geometry = clean_ring_aperture_geometry(stage_env)
-                current_progress = insertion_progress(needle_state(stage_env), ring_state(stage_env))
-                contact = needle_grasp_contact(stage_env)
-                tripod_motion = self._tripod_motion(stage_env, stats)
-                pose.update(
-                    {
-                        "needle_tracking": tracking,
-                        "clean_aperture": bool(geometry["clear"]),
-                        "insertion_progress_m": float(current_progress),
-                        "contact": bool(contact),
-                        "tripod_motion": tripod_motion,
-                        "tripod_stable": bool(tripod_motion["stable"]),
-                    }
-                )
-                pose["passed"] = bool(
-                    pose["passed"]
-                    and geometry["clear"]
-                    and stats["max_insert_progress"] > 0.026
-                    and current_progress > 0.014
-                    and contact
-                    and tripod_motion["stable"]
-                    and tracking["normal_error_m"] < 0.010
-                    and tracking["tangent_error_m"] < 0.003
-                    and tracking["vertical_error_m"] < 0.005
-                    and tracking["orientation_error_deg"] < 4.0
-                )
-                return pose
+        def insert_completion(stage_env, target_pos, target_quat, motion):
+            pose = self._pose_completion(
+                stage_env,
+                target_pos,
+                target_quat,
+                motion,
+                position_tolerance=0.010 if self.control_mode == "joint_position" else 0.008,
+                orientation_tolerance_deg=5.0,
+                motion_tolerance=0.005,
+            )
+            tracking = self._needle_target_errors(stage_env, insert_end_offset)
+            geometry = clean_ring_aperture_geometry(stage_env)
+            current_progress = insertion_progress(needle_state(stage_env), ring_state(stage_env))
+            contact = needle_grasp_contact(stage_env)
+            tripod_motion = self._tripod_motion(stage_env, stats)
+            pose.update(
+                {
+                    "needle_tracking": tracking,
+                    "clean_aperture": bool(geometry["clear"]),
+                    "insertion_progress_m": float(current_progress),
+                    "contact": bool(contact),
+                    "tripod_motion": tripod_motion,
+                    "tripod_stable": bool(tripod_motion["stable"]),
+                }
+            )
+            pose["passed"] = bool(
+                pose["passed"]
+                and geometry["clear"]
+                and stats["max_insert_progress"] > 0.026
+                and current_progress > 0.014
+                and contact
+                and tripod_motion["stable"]
+                and tracking["normal_error_m"] < 0.010
+                and tracking["tangent_error_m"] < 0.003
+                and tracking["vertical_error_m"] < 0.005
+                and tracking["orientation_error_deg"] < 4.0
+            )
+            return pose
 
+        if self.control_mode == "osc_pose" and not self.collision_aware_threading:
             stats["insert_complete"] = self._run_bounded_trajectory_stage(
                 env,
                 insert_target,
@@ -2187,6 +2716,44 @@ class ThreadingScriptedPolicy:
                 "offsets_completed": int(insert_index),
                 "offsets_total": int(len(insert_offsets)),
                 "tripod_abort": False,
+            }
+        elif self.control_mode == "joint_position" and not self.collision_aware_threading:
+            stats["insert_complete"] = self._run_joint_bounded_trajectory_stage(
+                env,
+                insert_target,
+                1.0,
+                durations["insert_through"],
+                policy_state,
+                stats,
+                "insert_through",
+                insert_completion,
+                render,
+                max_fr,
+                start_at_zero=True,
+                waypoint_position_tolerance=0.008,
+                waypoint_orientation_tolerance_deg=5.0,
+                stream_waypoints=True,
+                streaming_position_tolerance=0.012,
+                streaming_orientation_tolerance_deg=7.0,
+                abort_fn=lambda stage_env: self._joint_contact_tripod_abort(
+                    stage_env, stats
+                ),
+            )
+            insert_outcome = stats["stage_outcomes"]["insert_through"]
+            insert_steps = insert_outcome["actual_steps"]
+            insert_index = len(insert_offsets) if stats["insert_complete"] else len(insert_offsets) - 1
+            stats["closed_loop_insert"] = {
+                "enabled": True,
+                "completed": bool(stats["insert_complete"]),
+                "steps": int(insert_steps),
+                "offsets_completed": int(
+                    insert_outcome["path_waypoints_completed"]
+                ),
+                "offsets_total": int(len(insert_offsets)),
+                "tripod_abort": bool(
+                    insert_outcome["aborted"]
+                    and not insert_outcome["abort_details"]["tripod_motion"]["stable"]
+                ),
             }
         else:
             insert_index = 0
@@ -2237,7 +2804,7 @@ class ThreadingScriptedPolicy:
                 ),
             }
 
-        if self.control_mode == "osc_pose" and not stats["insert_complete"]:
+        if not stats["insert_complete"]:
             stats["aborted_stage"] = "insert_through"
             return self._finish_rollout(env, stats, policy_state, gripper_axes)
 
@@ -2253,14 +2820,15 @@ class ThreadingScriptedPolicy:
                 return target_pos, hold_quat
 
             def hold_completion(stage_env, target_pos, target_quat, motion):
+                # Final threading geometry, contact, and environment success
+                # provide the safety gates here. Avoid extending a valid hold
+                # solely to chase sub-millimeter controller residuals.
                 pose = self._pose_completion(
                     stage_env,
                     target_pos,
                     target_quat,
                     motion,
-                    # The commanded drift is only 1.5-4 mm, so this must be
-                    # tighter than the shortest drift to prevent an immediate pass.
-                    position_tolerance=0.0015,
+                    position_tolerance=TERMINAL_HOLD_POSITION_TOLERANCE,
                     orientation_tolerance_deg=4.0,
                     motion_tolerance=0.003,
                 )
@@ -2268,8 +2836,10 @@ class ThreadingScriptedPolicy:
                 current_progress = insertion_progress(needle_state(stage_env), ring_state(stage_env))
                 contact = needle_grasp_contact(stage_env)
                 tripod_motion = self._tripod_motion(stage_env, stats)
+                env_success = bool(stage_env._check_success())
                 pose.update(
                     {
+                        "env_success": env_success,
                         "clean_aperture": bool(geometry["clear"]),
                         "insertion_progress_m": float(current_progress),
                         "contact": bool(contact),
@@ -2279,6 +2849,7 @@ class ThreadingScriptedPolicy:
                 )
                 pose["passed"] = bool(
                     pose["passed"]
+                    and env_success
                     and geometry["clear"]
                     and current_progress > 0.014
                     and contact
@@ -2302,23 +2873,25 @@ class ThreadingScriptedPolicy:
                     max_steps=OSC_STAGE_MAX_STEPS["hold_after_insert"],
                 )
             else:
-                for i in range(durations["hold_after_insert"]):
-                    progress = i / max(1, durations["hold_after_insert"] - 1)
-                    target_pos, target_quat = hold_target(progress)
-                    self._track_target(
-                        env,
-                        self._fixed_target(target_pos, target_quat),
-                        1.0,
-                        1,
-                        policy_state,
-                        stats,
-                        "hold_after_insert",
-                        render,
-                        max_fr,
-                        stop_on_reach=False,
-                    )
-                stats["hold_complete"] = True
-        if self.control_mode == "osc_pose" and not stats["hold_complete"]:
+                stats["hold_complete"] = self._run_joint_bounded_trajectory_stage(
+                    env,
+                    hold_target,
+                    1.0,
+                    durations["hold_after_insert"],
+                    policy_state,
+                    stats,
+                    "hold_after_insert",
+                    hold_completion,
+                    render,
+                    max_fr,
+                    start_at_zero=True,
+                    waypoint_position_tolerance=TERMINAL_HOLD_POSITION_TOLERANCE,
+                    waypoint_orientation_tolerance_deg=5.0,
+                    abort_fn=lambda stage_env: self._joint_contact_tripod_abort(
+                        stage_env, stats
+                    ),
+                )
+        if not stats["hold_complete"]:
             stats["aborted_stage"] = "hold_after_insert"
         return self._finish_rollout(env, stats, policy_state, gripper_axes)
 
@@ -2494,7 +3067,6 @@ def choose_large_insert_motion_style(rng):
     styles = np.array(
         [
             "high_arc",
-            "vertical_first",
             "side_sweep",
             "shallow_sweep",
             "early_approach",
@@ -2506,13 +3078,13 @@ def choose_large_insert_motion_style(rng):
         ],
         dtype=object,
     )
-    weights = np.array([0.18, 0.17, 0.16, 0.13, 0.11, 0.10, 0.06, 0.04, 0.03, 0.02])
+    weights = np.array([0.18, 0.16, 0.13, 0.11, 0.10, 0.06, 0.04, 0.03, 0.02])
     return str(rng.choice(styles, p=weights / weights.sum()))
 
 
 def choose_full_quality_motion_style(rng):
     # Keep the same style vocabulary as the main policy, but avoid over-sampling
-    # the high-arc / vertical-first modes that made full demos look samey.
+    # high-arc modes that made full demos look samey.
     styles = np.array(
         [
             "direct_low",
@@ -2523,12 +3095,11 @@ def choose_full_quality_motion_style(rng):
             "delayed_approach",
             "side_sweep",
             "over_then_back",
-            "vertical_first",
             "high_arc",
         ],
         dtype=object,
     )
-    weights = np.array([0.15, 0.15, 0.14, 0.13, 0.12, 0.11, 0.09, 0.06, 0.03, 0.02])
+    weights = np.array([0.15, 0.15, 0.14, 0.13, 0.12, 0.11, 0.09, 0.06, 0.02])
     return str(rng.choice(styles, p=weights / weights.sum()))
 
 
@@ -2541,7 +3112,6 @@ def choose_split_motion_style(rng, split_counts, per_bin):
                 "delayed_approach",
                 "direct_low",
                 "low_s_curve",
-                "vertical_first",
                 "shallow_sweep",
                 "side_sweep",
                 "high_arc",
@@ -2549,7 +3119,7 @@ def choose_split_motion_style(rng, split_counts, per_bin):
             ],
             dtype=object,
         )
-        weights = np.array([0.22, 0.18, 0.14, 0.13, 0.10, 0.08, 0.06, 0.04, 0.03, 0.02])
+        weights = np.array([0.22, 0.18, 0.14, 0.13, 0.10, 0.06, 0.04, 0.03, 0.02])
         return str(rng.choice(styles, p=weights / weights.sum()))
     if split_counts["ge"] + 5 < split_counts["lt"] and split_counts["ge"] < per_bin:
         return choose_large_insert_motion_style(rng)
@@ -2740,15 +3310,20 @@ def make_controller_config(robot, control_mode):
         raise ValueError(f"Expected one Panda OSC arm to replace, found {arm_names}")
     arm_name = arm_names[0]
     gripper_config = config["body_parts"][arm_name].get("gripper", {"type": "GRIP"})
+    # Absolute joint actions are expressed in radians. Advertise Panda's
+    # physical joint limits so action_spec agrees with the values consumed by
+    # the controller and stored in demonstrations.
+    panda_joint_min = [-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973]
+    panda_joint_max = [2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973]
     config["body_parts"][arm_name] = {
         "type": "JOINT_POSITION",
         "input_type": "absolute",
-        "input_max": 1,
-        "input_min": -1,
+        "input_max": panda_joint_max,
+        "input_min": panda_joint_min,
         "output_max": 0.05,
         "output_min": -0.05,
-        "kp": 100,
-        "damping_ratio": 1,
+        "kp": JOINT_SERVO_KP,
+        "damping_ratio": JOINT_SERVO_DAMPING_RATIO,
         "impedance_mode": "fixed",
         "kp_limits": [0, 300],
         "damping_ratio_limits": [0, 10],

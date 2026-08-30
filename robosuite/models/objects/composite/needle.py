@@ -4,8 +4,9 @@ from robosuite.models.objects import CompositeObject
 from robosuite.utils.mjcf_utils import CustomMaterial, add_to_dict
 
 
-NEEDLE_SHAFT_HALF_SIZE = (0.005, 0.054, 0.005)
+NEEDLE_SHAFT_HALF_SIZE = (0.005, 0.06, 0.005)
 NEEDLE_SHAFT_HALF_LENGTH = NEEDLE_SHAFT_HALF_SIZE[1]
+SHORT_NEEDLE_SHAFT_HALF_LENGTH = 0.054
 NEEDLE_HANDLE_HALF_SIZE = (0.02, 0.02, 0.02)
 NEEDLE_TOTAL_HALF_SIZE = (
     max(NEEDLE_SHAFT_HALF_SIZE[0], NEEDLE_HANDLE_HALF_SIZE[0]),
@@ -17,10 +18,11 @@ NEEDLE_TOTAL_HALF_SIZE = (
 class NeedleObject(CompositeObject):
     """Procedural needle with a graspable handle."""
 
-    shaft_half_length = NEEDLE_SHAFT_HALF_LENGTH
-
-    def __init__(self, name):
+    def __init__(self, name, shaft_half_length=NEEDLE_SHAFT_HALF_LENGTH):
+        if shaft_half_length <= 0:
+            raise ValueError("shaft_half_length must be positive")
         self._name = name
+        self.shaft_half_length = float(shaft_half_length)
         self.needle_mat_name = "darkwood_mat"
         self._important_sites = {}
 
@@ -36,17 +38,25 @@ class NeedleObject(CompositeObject):
         self.append_material(needle_mat)
 
     def _get_geom_attrs(self):
+        needle_size = (
+            NEEDLE_SHAFT_HALF_SIZE[0],
+            self.shaft_half_length,
+            NEEDLE_SHAFT_HALF_SIZE[2],
+        )
+        handle_size = NEEDLE_HANDLE_HALF_SIZE
+        total_size = (
+            max(needle_size[0], handle_size[0]),
+            self.shaft_half_length + handle_size[1],
+            max(needle_size[2], handle_size[2]),
+        )
         base_args = {
-            "total_size": NEEDLE_TOTAL_HALF_SIZE,
+            "total_size": total_size,
             "name": self.name,
             "locations_relative_to_center": False,
             "obj_types": "all",
             "density": 100.0,
         }
         obj_args = {}
-
-        needle_size = NEEDLE_SHAFT_HALF_SIZE
-        handle_size = NEEDLE_HANDLE_HALF_SIZE
 
         add_to_dict(
             dic=obj_args,

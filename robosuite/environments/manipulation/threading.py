@@ -6,7 +6,10 @@ import robosuite.utils.transform_utils as T
 from robosuite.environments.manipulation.manipulation_env import ManipulationEnv
 from robosuite.models.arenas import TableArena
 from robosuite.models.objects import NeedleObject, RingTripodObject
-from robosuite.models.objects.composite.needle import NEEDLE_SHAFT_HALF_LENGTH
+from robosuite.models.objects.composite.needle import (
+    NEEDLE_SHAFT_HALF_LENGTH,
+    SHORT_NEEDLE_SHAFT_HALF_LENGTH,
+)
 from robosuite.models.tasks import ManipulationTask
 from robosuite.utils.mjcf_utils import string_to_array
 from robosuite.utils.observables import Observable, sensor
@@ -15,6 +18,8 @@ from robosuite.utils.placement_samplers import SequentialCompositeSampler, Unifo
 
 class Threading(ManipulationEnv):
     """Single-arm task where a robot inserts a needle through a small ring."""
+
+    needle_shaft_half_length = NEEDLE_SHAFT_HALF_LENGTH
 
     def __init__(
         self,
@@ -108,7 +113,10 @@ class Threading(ManipulationEnv):
         mujoco_arena.set_origin([0, 0, 0])
         self._add_agentview_full_camera(mujoco_arena)
 
-        self.needle = NeedleObject(name="needle_obj")
+        self.needle = NeedleObject(
+            name="needle_obj",
+            shaft_half_length=self.needle_shaft_half_length,
+        )
         self.tripod = RingTripodObject(name="tripod_obj")
 
         self._get_placement_initializer()
@@ -264,7 +272,7 @@ class Threading(ManipulationEnv):
         needle_pos = np.array(self.sim.data.geom_xpos[needle_id])
         needle_mat = np.array(self.sim.data.geom_xmat[needle_id]).reshape(3, 3)
         needle_axis = self._unit_vector(needle_mat[:, 1])
-        needle_tip = needle_pos - NEEDLE_SHAFT_HALF_LENGTH * needle_axis
+        needle_tip = needle_pos - self.needle.shaft_half_length * needle_axis
 
         ring_pos = np.zeros(3)
         ring_mat = None
@@ -290,6 +298,7 @@ class Threading(ManipulationEnv):
             ring_pos=ring_pos,
             ring_mat=ring_mat,
             ring_normal=ring_normal,
+            needle_half_length=self.needle.shaft_half_length,
         )
         insert_progress = float(np.dot(needle_tip - ring_pos, ring_normal))
         self._threading_max_insert_progress = max(
@@ -398,6 +407,8 @@ class Threading(ManipulationEnv):
 class Threading_D0(Threading):
     """D0 shell: fixed tripod, needle in a modest region with limited top-down rotation."""
 
+    needle_shaft_half_length = SHORT_NEEDLE_SHAFT_HALF_LENGTH
+
 
 class Threading_D05(Threading_D0):
     """D0.5: D0 needle distribution with modest tripod pose variation."""
@@ -413,8 +424,26 @@ class Threading_D05(Threading_D0):
         return bounds
 
 
+class Threading_D07(Threading_D0):
+    """D0.7: D0 needle distribution with wider tripod variation."""
+
+    needle_shaft_half_length = SHORT_NEEDLE_SHAFT_HALF_LENGTH
+
+    def _get_initial_placement_bounds(self):
+        bounds = super()._get_initial_placement_bounds()
+        bounds["tripod"] = {
+            "x": (-0.05, 0.05),
+            "y": (-0.20, -0.10),
+            "z_rot": (np.pi / 2.0 - np.pi / 4.0, np.pi / 2.0 + np.pi / 4.0),
+            "reference": self.table_offset,
+        }
+        return bounds
+
+
 class Threading_D1(Threading_D0):
     """D1 shell: needle and tripod randomized in larger left/right table regions."""
+
+    needle_shaft_half_length = NEEDLE_SHAFT_HALF_LENGTH
 
     def _get_initial_placement_bounds(self):
         return {
