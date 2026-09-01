@@ -2,9 +2,11 @@
 
 Each requested grasp angle starts with an independently sampled pool of initial
 states. A state is retried with policy randomness up to ``--max-retries`` times.
-Only trajectories that pass both the policy's composite success check and the
-final environment ``_check_success()`` call are retained. Exhausted states are
-replaced until the requested number of successful trajectories is reached.
+The acceptance gate is configurable. In strict environment / joint-margin
+mode, only trajectories for which the final environment ``_check_success()``
+is true and every measured robot joint remains safely inside its physical
+limit are retained. Exhausted states are replaced until the requested number
+of successful trajectories is reached.
 """
 
 import argparse
@@ -53,6 +55,15 @@ JOINT_ACTION_INFO_FIELDS = (
     "actions_joint_delta",
 )
 
+PANDA_JOINT_MIN = np.asarray(
+    [-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973],
+    dtype=float,
+)
+PANDA_JOINT_MAX = np.asarray(
+    [2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973],
+    dtype=float,
+)
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -95,6 +106,30 @@ def parse_args():
         help="Record absolute and delta joint labels. Defaults to enabled in joint-position mode.",
     )
     parser.add_argument("--joint-delta-scale", type=float, default=0.05)
+    parser.add_argument(
+        "--success-criterion",
+        choices=("policy_composite_and_env", "final_env_and_joint_margin"),
+        default="policy_composite_and_env",
+        help=(
+            "Retain the legacy composite+environment successes, or use only "
+            "the final environment success check plus a measured joint-margin gate."
+        ),
+    )
+    parser.add_argument(
+        "--min-joint-margin-rad",
+        type=float,
+        default=0.05,
+        help="Minimum actual Panda qpos distance from either physical limit.",
+    )
+    parser.add_argument(
+        "--require-clean-pregrasp-contact",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Require pregrasp_contact_check.passed=true and detected=false in "
+            "addition to the selected success criterion."
+        ),
+    )
     parser.add_argument(
         "--collision-aware-threading",
         action=argparse.BooleanOptionalAction,
@@ -139,6 +174,10 @@ def restore_initial_state(wrapped_env, initial_state):
     wrapped_env.sim.set_state_from_flattened(state)
     wrapped_env.sim.forward()
 
+    robot = wrapped_env.robots[0]
+    robot.composite_controller.update_state()
+    robot.composite_controller.reset()
+
     base_env = wrapped_env.unwrapped
     base_env._threading_initial_tripod_pos = None
     base_env._threading_max_insert_progress = -np.inf
@@ -154,6 +193,39 @@ def restore_initial_state(wrapped_env, initial_state):
         base_env._get_observations(force_update=True)
 
 
+def measured_joint_safety(wrapped_env):
+    """Measure the minimum actual Panda joint margin over the whole rollout."""
+    robot = wrapped_env.robots[0]
+    arm_name = robot.arms[0]
+    controller = robot.composite_controller.part_controllers[arm_name]
+    qpos_indexes = np.asarray(controller.qpos_index, dtype=int)
+
+    state_arrays = []
+    ep_dir = Path(wrapped_env.ep_directory) if wrapped_env.ep_directory else None
+    if ep_dir is not None and ep_dir.is_dir():
+        for state_path in sorted(ep_dir.glob("state_*.npz")):
+            state_arrays.extend(np.load(state_path, allow_pickle=True)["states"])
+    state_arrays.extend(wrapped_env.states)
+    if not state_arrays:
+        raise RuntimeError("Cannot measure joint margin: rollout recorded no simulator states")
+
+    # MjSimState.flatten() stores time first, followed by qpos.
+    states = np.asarray(state_arrays, dtype=float)
+    qpos = states[:, 1 + qpos_indexes]
+    margins = np.minimum(
+        qpos - PANDA_JOINT_MIN[None, :],
+        PANDA_JOINT_MAX[None, :] - qpos,
+    )
+    flat_index = int(np.argmin(margins))
+    step_index, joint_index = np.unravel_index(flat_index, margins.shape)
+    return {
+        "minimum_margin_rad": float(margins[step_index, joint_index]),
+        "minimum_margin_joint": int(joint_index + 1),
+        "minimum_margin_state_index": int(step_index),
+        "minimum_margin_by_joint_rad": np.min(margins, axis=0).tolist(),
+    }
+
+
 def empty_angle_summary(angle, target_successes, initial_count):
     return {
         "target_grasp_angle_deg": float(angle),
@@ -162,6 +234,12 @@ def empty_angle_summary(angle, target_successes, initial_count):
         "successful_trajectories": 0,
         "rollout_attempts": 0,
         "retry_attempt_success_rate": 0.0,
+        "final_env_success_attempts": 0,
+        "final_env_success_attempt_rate": 0.0,
+        "joint_margin_pass_attempts": 0,
+        "joint_margin_fail_attempts": 0,
+        "pregrasp_contact_pass_attempts": 0,
+        "pregrasp_contact_rejection_attempts": 0,
         "initial_states_sampled": int(initial_count),
         "initial_states_replaced": 0,
         "successful_initial_states": 0,
@@ -187,6 +265,9 @@ def update_rates(summary):
         attempts = item["rollout_attempts"]
         item["retry_attempt_success_rate"] = (
             float(item["successful_trajectories"] / attempts) if attempts else 0.0
+        )
+        item["final_env_success_attempt_rate"] = (
+            float(item.get("final_env_success_attempts", 0) / attempts) if attempts else 0.0
         )
 
 
@@ -219,6 +300,13 @@ def validate_resume_summary(summary, args, record_joint_training_fields):
         "initial_states_sampled_up_front_per_angle": int(args.initial_states_per_angle),
         "max_retries_per_initial_state": int(args.max_retries),
         "record_joint_training_fields": bool(record_joint_training_fields),
+        "success_criterion_mode": args.success_criterion,
+        "minimum_joint_margin_rad": (
+            float(args.min_joint_margin_rad)
+            if args.success_criterion == "final_env_and_joint_margin"
+            else None
+        ),
+        "require_clean_pregrasp_contact": bool(args.require_clean_pregrasp_contact),
     }
     if summary.get("status") != "in_progress":
         raise ValueError("--resume requires an in-progress collection_summary.json")
@@ -336,6 +424,25 @@ def write_hdf5(raw_dir, dataset_dir, env_info, partial_angles, full_angles):
             label = observability_label(angle, partial_angles, full_angles)
             demo.attrs["target_grasp_angle_deg"] = angle
             demo.attrs["observability"] = label
+            demo.attrs["approach_path_profile"] = episode["stats"].get(
+                "approach_path_profile", "unknown"
+            )
+            demo.attrs["grasp_offset_along_m"] = float(
+                episode["stats"].get("grasp_offset_along", np.nan)
+            )
+            pregrasp_contact = episode["stats"].get("pregrasp_contact_check", {})
+            demo.attrs["pregrasp_contact_passed"] = bool(pregrasp_contact.get("passed", False))
+            demo.attrs["pregrasp_contact_detected"] = bool(pregrasp_contact.get("detected", True))
+            approach_outcome = episode["stats"].get("stage_outcomes", {}).get("aim_continuous", {})
+            demo.attrs["joint_approach_stream_waypoints"] = bool(
+                approach_outcome.get("stream_waypoints", True)
+            )
+            demo.attrs["joint_approach_waypoint_position_tolerance_m"] = float(
+                approach_outcome.get("waypoint_position_tolerance_m", np.nan)
+            )
+            demo.attrs["joint_approach_waypoint_orientation_tolerance_deg"] = float(
+                approach_outcome.get("waypoint_orientation_tolerance_deg", np.nan)
+            )
             demo.attrs["initial_state_id"] = sampling["state_id"]
             demo.attrs["retry_index"] = int(sampling["retry_index"])
             demo.attrs["raw_episode"] = ep_dir.name
@@ -389,6 +496,10 @@ def main():
         raise ValueError("--max-retries must be positive")
     if args.joint_delta_scale <= 0:
         raise ValueError("--joint-delta-scale must be positive")
+    if args.min_joint_margin_rad <= 0:
+        raise ValueError("--min-joint-margin-rad must be positive")
+    if args.success_criterion == "final_env_and_joint_margin" and args.control_mode != "joint_position":
+        raise ValueError("final_env_and_joint_margin requires --control-mode joint_position")
     partial_angles = {float(angle) for angle in args.partial_angles}
     full_angles = {float(angle) for angle in args.full_angles}
     if partial_angles & full_angles:
@@ -461,7 +572,18 @@ def main():
         ),
         "record_joint_training_fields": bool(record_joint_training_fields),
         "joint_delta_scale": float(args.joint_delta_scale) if record_joint_training_fields else None,
-        "success_criterion": "policy composite success AND final env._check_success()",
+        "success_criterion": (
+            "final env._check_success() AND minimum actual Panda joint margin"
+            if args.success_criterion == "final_env_and_joint_margin"
+            else "policy composite success AND final env._check_success()"
+        ),
+        "success_criterion_mode": args.success_criterion,
+        "minimum_joint_margin_rad": (
+            float(args.min_joint_margin_rad)
+            if args.success_criterion == "final_env_and_joint_margin"
+            else None
+        ),
+        "require_clean_pregrasp_contact": bool(args.require_clean_pregrasp_contact),
         "angles_deg": [float(angle) for angle in args.angles],
         "partial_observability_angles_deg": sorted(partial_angles),
         "full_observability_angles_deg": sorted(full_angles),
@@ -575,19 +697,59 @@ def main():
                     stats = policy.stats[-1]
                     final_env_success = bool(collection_env._check_success())
                     composite_success = bool(stats.get("policy_success", False))
-                    accepted_success = bool(composite_success and final_env_success)
+                    joint_safety = measured_joint_safety(collection_env)
+                    joint_margin_passed = bool(
+                        joint_safety["minimum_margin_rad"] >= args.min_joint_margin_rad
+                    )
+                    pregrasp_contact = stats.get("pregrasp_contact_check", {})
+                    clean_pregrasp_contact = bool(
+                        pregrasp_contact.get("passed", False)
+                        and not pregrasp_contact.get("detected", True)
+                    )
+                    if args.success_criterion == "final_env_and_joint_margin":
+                        accepted_success = bool(
+                            final_env_success
+                            and joint_margin_passed
+                            and (not args.require_clean_pregrasp_contact or clean_pregrasp_contact)
+                        )
+                    else:
+                        accepted_success = bool(composite_success and final_env_success)
                     final_debug = dict(
                         getattr(collection_env.unwrapped, "_threading_success_debug", {})
                     )
 
                     angle_summary["rollout_attempts"] += 1
+                    angle_summary["final_env_success_attempts"] = int(
+                        angle_summary.get("final_env_success_attempts", 0)
+                    ) + int(final_env_success)
+                    angle_summary["joint_margin_pass_attempts"] = int(
+                        angle_summary.get("joint_margin_pass_attempts", 0)
+                    ) + int(joint_margin_passed)
+                    angle_summary["joint_margin_fail_attempts"] = int(
+                        angle_summary.get("joint_margin_fail_attempts", 0)
+                    ) + int(not joint_margin_passed)
+                    angle_summary["pregrasp_contact_pass_attempts"] = int(
+                        angle_summary.get("pregrasp_contact_pass_attempts", 0)
+                    ) + int(clean_pregrasp_contact)
+                    angle_summary["pregrasp_contact_rejection_attempts"] = int(
+                        angle_summary.get("pregrasp_contact_rejection_attempts", 0)
+                    ) + int(not clean_pregrasp_contact)
                     stats["env_check_success_final"] = final_env_success
                     stats["env_success_debug_final"] = final_debug
+                    stats["joint_safety"] = {
+                        **joint_safety,
+                        "required_margin_rad": float(args.min_joint_margin_rad),
+                        "passed": joint_margin_passed,
+                    }
                     stats["collection_success"] = accepted_success
                     stats["collection_success_source"] = (
-                        "policy_composite_and_final_env_check_success"
-                        if accepted_success
-                        else "failed_composite_or_final_env_check"
+                        (
+                            "final_env_check_success_joint_margin_and_clean_pregrasp"
+                            if args.require_clean_pregrasp_contact
+                            else "final_env_check_success_and_joint_margin"
+                        )
+                        if args.success_criterion == "final_env_and_joint_margin"
+                        else "policy_composite_and_final_env_check_success"
                     )
                     stats["episode_kept"] = accepted_success
                     stats["counted_toward_target"] = accepted_success
@@ -621,6 +783,13 @@ def main():
                         "retry_index": retry_index,
                         "env_check_success_final": final_env_success,
                         "policy_success": composite_success,
+                        "joint_margin_rad": joint_safety["minimum_margin_rad"],
+                        "joint_margin_joint": joint_safety["minimum_margin_joint"],
+                        "joint_margin_state_index": joint_safety["minimum_margin_state_index"],
+                        "joint_margin_passed": joint_margin_passed,
+                        "pregrasp_contact_passed": bool(pregrasp_contact.get("passed", False)),
+                        "pregrasp_contact_detected": bool(pregrasp_contact.get("detected", True)),
+                        "clean_pregrasp_contact": clean_pregrasp_contact,
                         "accepted_success": accepted_success,
                         "failure_reason": failure_reason,
                         "aborted_stage": aborted_stage,

@@ -49,6 +49,11 @@ TERMINAL_HOLD_POSITION_TOLERANCE = 0.005
 OSC_MOTION_SPEEDUP = 1.30
 OSC_TRAJECTORY_TIMING_PROFILE = "osc_overlapped_close_lift_1p3x_v5"
 JOINT_TRAJECTORY_TIMING_PROFILE = "joint_panda_servo_streaming_insert_v9"
+INSERT_TIME_WARP_SKEW_RANGE = (-0.12, 0.12)
+INSERT_LATERAL_BUMP_RANGE = (-0.00075, 0.00075)
+INSERT_VERTICAL_BUMP_RANGE = (-0.00050, 0.00050)
+INSERT_BUMP_CLEARANCE_HALF_WIDTH = 0.010
+INSERT_BUMP_CLEARANCE_RAMP = 0.010
 # Reference steps define curve speed; controller-specific caps bound convergence time.
 NOMINAL_STAGE_STEPS = {
     "aim_approach": 45,
@@ -186,6 +191,31 @@ def minimum_jerk(x):
     """Return a quintic blend with zero endpoint velocity and acceleration."""
     x = np.clip(x, 0.0, 1.0)
     return x**3 * (10.0 - 15.0 * x + 6.0 * x**2)
+
+
+def insertion_time_warp(x, skew):
+    """Return a smooth monotonic insertion clock with unchanged endpoint velocity."""
+    x = np.clip(x, 0.0, 1.0)
+    # This envelope and its first derivative vanish at both endpoints. For the
+    # sampled skew range, the warped clock remains strictly monotonic.
+    envelope = 16.0 * x**2 * (1.0 - x) ** 2
+    return np.clip(x + float(skew) * envelope, 0.0, 1.0)
+
+
+def insertion_spatial_bump_envelope(
+    progress,
+    normal_offset,
+    clearance_half_width=INSERT_BUMP_CLEARANCE_HALF_WIDTH,
+    clearance_ramp=INSERT_BUMP_CLEARANCE_RAMP,
+):
+    """Smooth insertion bump that vanishes at endpoints and near the ring plane."""
+    progress = np.clip(progress, 0.0, 1.0)
+    endpoint_envelope = 16.0 * progress**2 * (1.0 - progress) ** 2
+    clearance_progress = (
+        abs(float(normal_offset)) - float(clearance_half_width)
+    ) / max(float(clearance_ramp), 1e-8)
+    clearance_gate = smoothstep(clearance_progress)
+    return float(endpoint_envelope * clearance_gate)
 
 
 def endpoint_smooth_progress(x, initial_slope=1.0):
@@ -558,6 +588,32 @@ def gripper_joint_positions(env):
 def needle_grasp_contact(env):
     robot = env.robots[0]
     return bool(env._check_grasp(robot.gripper[robot.arms[0]], env.needle))
+
+
+def gripper_needle_contact_pairs(env):
+    """Return every active collision pair between the gripper and needle."""
+    robot = env.robots[0]
+    gripper = robot.gripper[robot.arms[0]]
+    gripper_geoms = set(gripper.contact_geoms)
+    needle_geoms = set(env.needle.contact_geoms)
+    pairs = []
+    for contact in env.sim.data.contact[: env.sim.data.ncon]:
+        geom1 = env.sim.model.geom_id2name(contact.geom1)
+        geom2 = env.sim.model.geom_id2name(contact.geom2)
+        if geom1 in gripper_geoms and geom2 in needle_geoms:
+            gripper_geom, needle_geom = geom1, geom2
+        elif geom2 in gripper_geoms and geom1 in needle_geoms:
+            gripper_geom, needle_geom = geom2, geom1
+        else:
+            continue
+        pairs.append(
+            {
+                "gripper_geom": gripper_geom,
+                "needle_geom": needle_geom,
+                "distance_m": float(contact.dist),
+            }
+        )
+    return pairs
 
 
 def shortest_orientation_error(target_quat, current_quat):
@@ -1169,6 +1225,7 @@ class ThreadingScriptedPolicy:
         max_fr=None,
         max_steps=6,
         required_stable_steps=2,
+        abort_fn=None,
     ):
         """Require a genuinely stable grasp pose before closing the fingers."""
         if self.control_mode == "joint_position":
@@ -1181,6 +1238,7 @@ class ThreadingScriptedPolicy:
         best_pos_err = float("inf")
         best_ori_err = float("inf")
         max_stable_speed = 0.003
+        abort_details = None
         try:
             for _ in range(max_steps):
                 self._track_target(
@@ -1195,6 +1253,10 @@ class ThreadingScriptedPolicy:
                     max_fr,
                     stop_on_reach=False,
                 )
+                if abort_fn is not None:
+                    abort_details = abort_fn(env)
+                    if abort_details.get("abort", False):
+                        break
                 eef_pos, _ = get_eef_pose(env)
                 step_motion = float(np.linalg.norm(eef_pos - previous_pos))
                 previous_pos = eef_pos
@@ -1214,6 +1276,8 @@ class ThreadingScriptedPolicy:
         settled = stable_steps >= required_stable_steps
         stats["grasp_settle"] = {
             "passed": bool(settled),
+            "aborted": bool(abort_details is not None and abort_details.get("abort", False)),
+            "abort_details": abort_details,
             "stable_steps": int(stable_steps),
             "required_stable_steps": int(required_stable_steps),
             "best_position_error": float(best_pos_err),
@@ -1463,6 +1527,9 @@ class ThreadingScriptedPolicy:
             "hold_complete": bool(stats["hold_complete"]),
             "gripper_close_complete": bool(stats.get("gripper_close_complete", False)),
             "gripper_closed": bool(stats["gripper_closed"]),
+            "pregrasp_contact_free": bool(
+                stats.get("pregrasp_contact_check", {}).get("passed", False)
+            ),
             "grasp_contact": bool(stats.get("grasp_contact_after_lift", False)),
             "grasp_rigid": bool(stats.get("grasp_rigid_after_lift", False)),
             "grasp_axis_perpendicular": stats.get("actual_grasp_jaw_needle_axis_abs_dot", 1.0) < 0.15,
@@ -1587,7 +1654,7 @@ class ThreadingScriptedPolicy:
         grasp_tilt_x = 0.0
         grasp_tilt_y = 0.0
         # Sample the lower handle region while retaining a margin from its edge.
-        grasp_offset_along = self.rng.uniform(-0.0040, -0.0015)
+        grasp_offset_along = self.rng.uniform(-0.0025, 0.0)
         grasp_offset_lateral = self.rng.uniform(-0.0003, 0.0003)
         grasp_offset_vertical = self.rng.uniform(-0.0003, 0.0003)
         grasp_offset = (
@@ -1773,9 +1840,13 @@ class ThreadingScriptedPolicy:
         lift_align_quat = T.mat2quat(lift_align_rot)
         lift_prealign_fraction = float(self.rng.uniform(0.28, 0.55))
         durations = nominal_stage_durations(self.control_mode)
-        pre_insert_offset = float(self.rng.uniform(-0.052, -0.038))
-        align_offset = float(self.rng.uniform(-0.082, -0.062))
-        insert_start_offset = float(self.rng.uniform(-0.045, -0.035))
+        pre_insert_offset = float(self.rng.uniform(-0.035, -0.020))
+        align_end_offset = float(self.rng.uniform(-0.064, -0.050))
+        # Keep insertion start at or ahead of the sampled pre-insertion pose so
+        # the handoff never moves backward along the ring normal.
+        insert_start_offset = float(
+            self.rng.uniform(max(-0.025, pre_insert_offset), -0.015)
+        )
         insert_end_offset = float(self.rng.uniform(0.036, 0.052))
         align_curve = {
             "lateral_start": float(self.rng.uniform(-0.002, 0.002)),
@@ -1786,7 +1857,7 @@ class ThreadingScriptedPolicy:
             "vertical_end": float(self.rng.uniform(-0.001, 0.0015)),
             "twist_start": 0.0,
             "twist_control": float(self.rng.uniform(np.deg2rad(-5.0), np.deg2rad(5.0))),
-            "twist_end": float(self.rng.uniform(np.deg2rad(-1.5), np.deg2rad(1.5))),
+            "twist_end": float(self.rng.uniform(np.deg2rad(-3.0), np.deg2rad(1.5))),
             "tilt_start": 0.0,
             "tilt_control": float(self.rng.uniform(np.deg2rad(-3.0), np.deg2rad(3.0))),
             "tilt_end": float(self.rng.uniform(np.deg2rad(-1.0), np.deg2rad(1.0))),
@@ -1821,6 +1892,14 @@ class ThreadingScriptedPolicy:
             "grasp_contact_at_close": False,
             "grasp_contact_after_probe": False,
             "grasp_contact_after_lift": False,
+            "pregrasp_contact_check": {
+                "passed": True,
+                "detected": False,
+                "steps_checked": 0,
+                "first_contact_step": None,
+                "first_contact_progress": None,
+                "first_contact_pairs": [],
+            },
             "grasp_rigid_after_probe": False,
             "grasp_rigid_after_lift": False,
             "grasp_probe_eef_displacement_m": 0.0,
@@ -1911,7 +1990,7 @@ class ThreadingScriptedPolicy:
             "motion_speedup": OSC_MOTION_SPEEDUP if self.control_mode == "osc_pose" else 1.0,
             "planned_durations": durations,
             "planned_offsets": {
-                "align": align_offset,
+                "align": align_end_offset,
                 "pre_insert": pre_insert_offset,
                 "insert_start": insert_start_offset,
                 "insert_end": insert_end_offset,
@@ -1920,18 +1999,61 @@ class ThreadingScriptedPolicy:
             "collision_aware_threading": bool(self.collision_aware_threading),
         }
 
-        # Follow one continuous approach curve instead of stopping at a
-        # pregrasp waypoint and starting a second descend phase from rest.
+        # Follow one continuous approach path through the safe descend pose.
+        # The quadratic portion cannot cut toward the needle because its
+        # endpoint is descend_pos; only the final straight segment enters the
+        # grasp region. Choose the transition fraction so the two segments have
+        # matching velocity along the approach axis, avoiding a stop or kink.
         approach_start_pos, approach_start_quat = get_eef_pose(env)
         approach_steps = durations["aim_approach"] + durations["aim_descend"]
+        curve_exit_distance = 2.0 * float(np.linalg.norm(descend_pos - pregrasp_pos))
+        final_descend_distance = float(np.linalg.norm(close_pos - descend_pos))
+        descend_transition = curve_exit_distance / max(
+            curve_exit_distance + final_descend_distance,
+            1e-8,
+        )
+        stats["approach_path_profile"] = "quadratic_to_descend_then_linear_close"
+        stats["descend_transition_fraction"] = float(descend_transition)
         high_angle_contact_mode = grasp_angle >= 108.0
         close_target_quat = grasp_quat
+        pregrasp_contact_state = {"step": 0}
+
+        def pregrasp_contact_abort(stage_env):
+            pregrasp_contact_state["step"] += 1
+            check = stats["pregrasp_contact_check"]
+            check["steps_checked"] = int(pregrasp_contact_state["step"])
+            pairs = gripper_needle_contact_pairs(stage_env)
+            if not pairs:
+                return {"abort": False, "contact_pairs": []}
+
+            check["passed"] = False
+            check["detected"] = True
+            if check["first_contact_step"] is None:
+                eef_pos, _ = get_eef_pose(stage_env)
+                check["first_contact_step"] = int(pregrasp_contact_state["step"])
+                check["first_contact_progress"] = float(
+                    min(pregrasp_contact_state["step"] / max(approach_steps, 1), 1.0)
+                )
+                check["first_contact_pairs"] = pairs
+                check["first_contact_eef_pos"] = eef_pos.tolist()
+                check["first_contact_gripper_qpos"] = gripper_joint_positions(stage_env).tolist()
+            return {"abort": True, "contact_pairs": pairs}
 
         def approach_target(progress):
-            # Do not ease to zero velocity at the former pregrasp boundary or
-            # before the short final verification window.
-            path_t = progress
-            target_pos = quadratic_bezier(approach_start_pos, pregrasp_pos, close_pos, path_t)
+            if progress < descend_transition:
+                path_t = progress / max(descend_transition, 1e-8)
+                target_pos = quadratic_bezier(
+                    approach_start_pos,
+                    pregrasp_pos,
+                    descend_pos,
+                    path_t,
+                )
+            else:
+                path_t = (progress - descend_transition) / max(
+                    1.0 - descend_transition,
+                    1e-8,
+                )
+                target_pos = descend_pos + path_t * (close_pos - descend_pos)
             if high_angle_contact_mode:
                 orientation_progress = smoothstep((progress - 0.82) / 0.18)
             else:
@@ -1960,6 +2082,7 @@ class ThreadingScriptedPolicy:
                 render,
                 max_fr,
                 max_steps=OSC_STAGE_MAX_STEPS["aim_continuous"],
+                abort_fn=pregrasp_contact_abort,
             )
             approach_outcome = stats["stage_outcomes"]["aim_continuous"]
             stats["pregrasp_pose_settled"] = stats["approach_complete"]
@@ -1998,11 +2121,10 @@ class ThreadingScriptedPolicy:
                 ),
                 render,
                 max_fr,
-                waypoint_position_tolerance=0.012,
-                waypoint_orientation_tolerance_deg=6.0,
-                stream_waypoints=True,
-                streaming_position_tolerance=0.018,
-                streaming_orientation_tolerance_deg=9.0,
+                waypoint_position_tolerance=0.006,
+                waypoint_orientation_tolerance_deg=4.0,
+                stream_waypoints=False,
+                abort_fn=pregrasp_contact_abort,
             )
             if not stats["approach_complete"]:
                 stats["aborted_stage"] = "aim_continuous"
@@ -2028,6 +2150,7 @@ class ThreadingScriptedPolicy:
                 stats,
                 render,
                 max_fr,
+                abort_fn=pregrasp_contact_abort,
             )
             stats["grasp_settled"] = stats["pregrasp_pose_settled"]
             stats["approach_complete"] = bool(
@@ -2373,9 +2496,8 @@ class ThreadingScriptedPolicy:
                 )
 
         # Start from the measured post-lift tip pose and blend monotonically to
-        # the pre-insertion pose. This avoids a one-off target reversal when the
-        # lift hands control to alignment.
-        align_end_offset = pre_insert_offset - 0.012
+        # an alignment staging pose that remains independent of the closer
+        # pre-insertion pose.
         def align_target(progress):
             blend = (
                 endpoint_velocity_progress(progress, initial_slope=0.65, final_slope=0.0)
@@ -2514,7 +2636,12 @@ class ThreadingScriptedPolicy:
                     max_fr,
                     stop_on_reach=False,
                 )
-                gate_errors = self._needle_target_errors(env, pre_insert_offset)
+                gate_errors = self._needle_target_errors(
+                    env,
+                    pre_insert_offset,
+                    lateral_offset=align_curve["lateral_end"],
+                    vertical_offset=align_curve["vertical_end"],
+                )
                 gate_tripod_motion = self._tripod_motion(env, stats, max_displacement=0.012)
                 within_gate = (
                     gate_errors["normal_error_m"] < 0.008
@@ -2554,7 +2681,12 @@ class ThreadingScriptedPolicy:
                     orientation_tolerance_deg=3.5,
                     motion_tolerance=0.003,
                 )
-                tracking = self._needle_target_errors(stage_env, pre_insert_offset)
+                tracking = self._needle_target_errors(
+                    stage_env,
+                    pre_insert_offset,
+                    lateral_offset=align_curve["lateral_end"],
+                    vertical_offset=align_curve["vertical_end"],
+                )
                 contact = needle_grasp_contact(stage_env)
                 tripod_motion = self._tripod_motion(stage_env, stats)
                 pose.update(
@@ -2618,34 +2750,70 @@ class ThreadingScriptedPolicy:
             return self._finish_rollout(env, stats, policy_state, gripper_axes)
 
         # insert_through: keep inserting past sparse env success instead of terminating early.
-        insert_offsets = np.linspace(insert_start_offset, insert_end_offset, durations["insert_through"])
+        # Sample here so the added RNG draws cannot alter this episode's grasp,
+        # lift, alignment, or pre-insertion trajectory.
+        insert_time_warp_skew = float(self.rng.uniform(*INSERT_TIME_WARP_SKEW_RANGE))
+        insert_lateral_bump = float(self.rng.uniform(*INSERT_LATERAL_BUMP_RANGE))
+        insert_vertical_bump = float(self.rng.uniform(*INSERT_VERTICAL_BUMP_RANGE))
+        stats["insertion_diversity"] = {
+            "time_warp_profile": "endpoint_preserving_quartic",
+            "time_warp_skew": insert_time_warp_skew,
+            "lateral_bump_amplitude_m": insert_lateral_bump,
+            "vertical_bump_amplitude_m": insert_vertical_bump,
+            "bump_profile": "quartic_endpoint_clearance_gated",
+            "clearance_half_width_m": INSERT_BUMP_CLEARANCE_HALF_WIDTH,
+            "clearance_ramp_m": INSERT_BUMP_CLEARANCE_RAMP,
+        }
+        insert_nominal_progress = np.linspace(0.0, 1.0, durations["insert_through"])
+        insert_path_progress = np.asarray(
+            [
+                insertion_time_warp(progress, insert_time_warp_skew)
+                for progress in insert_nominal_progress
+            ]
+        )
+        insert_offsets = insert_start_offset + insert_path_progress * (
+            insert_end_offset - insert_start_offset
+        )
         gate_passed = (
             not self.collision_aware_threading
             or bool(stats.get("pre_insert_gate", {}).get("passed", False))
         )
 
         def insert_target(progress):
-            offset = insert_start_offset + progress * (insert_end_offset - insert_start_offset)
+            path_progress = float(insertion_time_warp(progress, insert_time_warp_skew))
+            offset = insert_start_offset + path_progress * (
+                insert_end_offset - insert_start_offset
+            )
+            bump_envelope = insertion_spatial_bump_envelope(path_progress, offset)
+            lateral_bump = insert_lateral_bump * bump_envelope
+            vertical_bump = insert_vertical_bump * bump_envelope
             insert_curve = {
                 **align_curve,
                 "lateral_start": align_curve["lateral_end"],
-                "lateral_control": align_curve["lateral_end"] * (1.0 - progress),
+                "lateral_control": align_curve["lateral_end"] * (1.0 - path_progress),
                 "lateral_end": 0.0,
                 "vertical_start": align_curve["vertical_end"],
-                "vertical_control": align_curve["vertical_end"] * (1.0 - progress),
+                "vertical_control": align_curve["vertical_end"] * (1.0 - path_progress),
                 "vertical_end": 0.0,
                 "twist_start": align_curve["twist_end"],
-                "twist_control": align_curve["twist_end"] * (1.0 - progress),
+                "twist_control": align_curve["twist_end"] * (1.0 - path_progress),
                 "twist_end": 0.0,
                 "tilt_start": align_curve["tilt_end"],
-                "tilt_control": align_curve["tilt_end"] * (1.0 - progress),
+                "tilt_control": align_curve["tilt_end"] * (1.0 - path_progress),
                 "tilt_end": 0.0,
                 "rotation_delay": 0.0,
                 "rotation_span": 0.35,
             }
+            # Adding the same displacement to all Bezier control values shifts
+            # the current target by exactly the requested bump without changing
+            # the existing alignment-decay curve.
+            for key in ("lateral_start", "lateral_control", "lateral_end"):
+                insert_curve[key] += lateral_bump
+            for key in ("vertical_start", "vertical_control", "vertical_end"):
+                insert_curve[key] += vertical_bump
             return self._curved_alignment_target(
                 offset,
-                progress,
+                path_progress,
                 insert_curve,
                 threading_needle_to_eef,
                 align_reference_needle_mat,

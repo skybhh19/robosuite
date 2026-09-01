@@ -163,7 +163,10 @@ def write_html_index(output_dir, rendered_videos):
     for video_path, frame_count, stats in rendered_videos:
         name = os.path.basename(video_path)
         rel_path = os.path.relpath(video_path, output_dir)
-        success = bool(stats.get("collection_success", stats.get("policy_success", False)))
+        # ``collection_success`` can mean "kept for analysis" when collection
+        # runs use --allow-failures. Prefer the actual task-policy outcome so
+        # retained failures are labeled correctly in review pages.
+        success = bool(stats.get("policy_success", stats.get("collection_success", False)))
         outcome = "SUCCESS" if success else "FAILED"
         failure_reason = stats.get("failure_reason", "unknown")
         angle = stats.get("grasp_approach_angle_deg")

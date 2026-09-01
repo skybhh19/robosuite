@@ -440,6 +440,22 @@ class Threading_D07(Threading_D0):
         return bounds
 
 
+class Threading_D08(Threading_D0):
+    """D0.8: D0 needle distribution with wider tripod variation."""
+
+    needle_shaft_half_length = SHORT_NEEDLE_SHAFT_HALF_LENGTH
+
+    def _get_initial_placement_bounds(self):
+        bounds = super()._get_initial_placement_bounds()
+        bounds["tripod"] = {
+            "x": (-0.07, 0.07),
+            "y": (-0.22, -0.12),
+            "z_rot": (np.pi / 2.0 - np.pi / 12.0, np.pi / 2.0 + np.pi / 4.0),
+            "reference": self.table_offset,
+        }
+        return bounds
+
+
 class Threading_D1(Threading_D0):
     """D1 shell: needle and tripod randomized in larger left/right table regions."""
 
