@@ -28,6 +28,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--sources", nargs="+", type=Path, required=True)
+    parser.add_argument("--environment", type=str, default="Threading_D08")
     parser.add_argument("--angles", nargs="+", type=float, required=True)
     parser.add_argument("--partial-angles", nargs="+", type=float, required=True)
     parser.add_argument("--full-angles", nargs="+", type=float, required=True)
@@ -37,6 +38,7 @@ def parse_args():
     parser.add_argument("--grasp-offset-along-min-m", type=float, default=None)
     parser.add_argument("--grasp-offset-along-max-m", type=float, default=None)
     parser.add_argument("--require-clean-pregrasp-contact", action="store_true")
+    parser.add_argument("--require-policy-composite-success", action="store_true")
     parser.add_argument("--require-joint-approach-nonstreaming", action="store_true")
     parser.add_argument(
         "--joint-approach-waypoint-position-tolerance-m", type=float, default=None
@@ -72,6 +74,11 @@ def main():
     for source_arg in args.sources:
         source = source_arg.resolve()
         summary = load_json(source / "collection_summary.json")
+        if summary.get("environment") != args.environment:
+            raise ValueError(
+                f"Source environment {summary.get('environment')} does not match "
+                f"requested {args.environment}: {source}"
+            )
         attempts = []
         with (source / "attempt_log.jsonl").open() as stream:
             attempts = [json.loads(line) for line in stream if line.strip()]
@@ -92,6 +99,8 @@ def main():
                 raise ValueError(f"Unaccepted episode present in source: {episode_dir}")
             if not bool(stats.get("env_check_success_final")):
                 raise ValueError(f"Episode lacks final env success: {episode_dir}")
+            if args.require_policy_composite_success and not bool(stats.get("policy_success")):
+                raise ValueError(f"Episode lacks policy composite success: {episode_dir}")
             safety = stats.get("joint_safety", {})
             if not bool(safety.get("passed")) or float(safety["minimum_margin_rad"]) < args.joint_margin_rad:
                 raise ValueError(f"Episode violates joint margin: {episode_dir}")
@@ -211,6 +220,13 @@ def main():
                 bool(item["env_check_success_final"]) for item in attempts
             )
             / len(attempts),
+            "policy_composite_success_attempts": sum(
+                bool(item["policy_success"]) for item in attempts
+            ),
+            "policy_composite_success_attempt_rate": sum(
+                bool(item["policy_success"]) for item in attempts
+            )
+            / len(attempts),
             "joint_margin_pass_attempts": sum(bool(item["joint_margin_passed"]) for item in attempts),
             "joint_margin_fail_attempts": sum(not bool(item["joint_margin_passed"]) for item in attempts),
             "pregrasp_contact_pass_attempts": sum(
@@ -238,7 +254,7 @@ def main():
 
     controller = make_controller_config("Panda", "joint_position")
     env_info = {
-        "env_name": "Threading_D08",
+        "env_name": args.environment,
         "robots": ["Panda"],
         "controller_configs": controller,
         "control_mode": "joint_position",
@@ -259,11 +275,20 @@ def main():
 
     summary = {
         "status": "complete",
-        "environment": "Threading_D08",
+        "environment": args.environment,
         "controller": "JOINT_POSITION",
         "control_mode": "joint_position",
         "action_representation": "absolute_joint_position",
-        "success_criterion": "final env._check_success() AND minimum actual Panda joint margin",
+        "success_criterion": (
+            "policy composite success AND final env._check_success() AND minimum actual Panda joint margin"
+            if args.require_policy_composite_success
+            else "final env._check_success() AND minimum actual Panda joint margin"
+        ),
+        "success_criterion_mode": (
+            "policy_composite_env_and_joint_margin"
+            if args.require_policy_composite_success
+            else "final_env_and_joint_margin"
+        ),
         "minimum_joint_margin_rad": args.joint_margin_rad,
         "approach_path_profile": args.required_approach_path_profile,
         "grasp_offset_along_range_m": [
@@ -271,6 +296,7 @@ def main():
             args.grasp_offset_along_max_m,
         ],
         "require_clean_pregrasp_contact": args.require_clean_pregrasp_contact,
+        "require_policy_composite_success": args.require_policy_composite_success,
         "joint_approach_stream_waypoints": (
             False if args.require_joint_approach_nonstreaming else None
         ),
@@ -298,6 +324,9 @@ def main():
             ),
             "joint_margin_fail_attempts": sum(
                 item["joint_margin_fail_attempts"] for item in by_angle.values()
+            ),
+            "policy_composite_success_attempts": sum(
+                item["policy_composite_success_attempts"] for item in by_angle.values()
             ),
         },
         "hdf5_path": str(hdf5_path),

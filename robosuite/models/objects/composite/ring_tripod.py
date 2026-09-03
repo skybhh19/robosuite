@@ -10,10 +10,25 @@ from robosuite.utils.mjcf_utils import CustomMaterial, add_to_dict
 class RingTripodObject(CompositeObject):
     """Procedural tripod with a small ring that the needle must pass through."""
 
-    def __init__(self, name):
+    def __init__(self, name, ring_outer_size=None, ring_inner_size=None):
+        if (ring_outer_size is None) != (ring_inner_size is None):
+            raise ValueError("ring_outer_size and ring_inner_size must be specified together")
+        if ring_outer_size is not None:
+            ring_outer_size = float(ring_outer_size)
+            ring_inner_size = float(ring_inner_size)
+            if ring_outer_size <= 0.0 or ring_inner_size <= 0.0:
+                raise ValueError("Ring dimensions must be positive")
+            if ring_inner_size >= ring_outer_size:
+                raise ValueError("ring_inner_size must be smaller than ring_outer_size")
+
         self._name = name
         self.tripod_mat_name = "lightwood_mat"
         self._important_sites = {}
+        self._use_legacy_ring_geometry = ring_outer_size is None
+        self.ring_outer_size = 0.024 if ring_outer_size is None else ring_outer_size
+        self.ring_inner_size = 0.016 if ring_inner_size is None else ring_inner_size
+        self.ring_depth = 0.010
+        self.aperture_half_extent = 0.5 * self.ring_inner_size
 
         super().__init__(**self._get_geom_attrs())
 
@@ -39,46 +54,95 @@ class RingTripodObject(CompositeObject):
         }
         obj_args = {}
 
-        unit_size = [0.005, 0.002, 0.002]
-        pattern = np.ones((6, 1, 6))
+        legacy_unit_size = np.array([0.005, 0.002, 0.002])
+        legacy_pattern = np.ones((6, 1, 6))
         for i in range(1, 5):
-            pattern[i][0][1:5] = np.zeros(4)
-        ring_size = [
-            unit_size[0] * pattern.shape[1],
-            unit_size[1] * pattern.shape[2],
-            unit_size[2] * pattern.shape[0],
-        ]
-        self.ring_size = np.array(ring_size)
+            legacy_pattern[i][0][1:5] = np.zeros(4)
+        legacy_ring_size = legacy_unit_size * np.array(
+            [legacy_pattern.shape[1], legacy_pattern.shape[2], legacy_pattern.shape[0]]
+        )
+        legacy_ring_offset = np.array(
+            [
+                total_size[0] - legacy_ring_size[0],
+                total_size[1] - legacy_ring_size[1],
+                2.0 * (total_size[2] - legacy_ring_size[2]),
+            ]
+        )
 
-        ring_offset = [
-            total_size[0] - ring_size[0],
-            total_size[1] - ring_size[1],
-            2.0 * (total_size[2] - ring_size[2]),
-        ]
-
-        nz, nx, ny = pattern.shape
         self.num_ring_geoms = 0
-        for k in range(nz):
-            for i in range(nx):
-                for j in range(ny):
-                    if pattern[k, i, j] <= 0:
-                        continue
-                    add_to_dict(
-                        dic=obj_args,
-                        geom_types="box",
-                        geom_locations=(
-                            (i * 2.0 * unit_size[0]) + ring_offset[0],
-                            (j * 2.0 * unit_size[1]) + ring_offset[1],
-                            (k * 2.0 * unit_size[2]) + ring_offset[2],
-                        ),
-                        geom_quats=(1, 0, 0, 0),
-                        geom_sizes=tuple(unit_size),
-                        geom_names=f"ring_{self.num_ring_geoms}",
-                        geom_rgbas=None,
-                        geom_materials=self.tripod_mat_name,
-                        geom_frictions=(0.3, 5e-3, 1e-4),
-                    )
-                    self.num_ring_geoms += 1
+        if self._use_legacy_ring_geometry:
+            # Preserve the original 20-box ring exactly for all existing tasks.
+            self.ring_size = legacy_ring_size
+            nz, nx, ny = legacy_pattern.shape
+            for k in range(nz):
+                for i in range(nx):
+                    for j in range(ny):
+                        if legacy_pattern[k, i, j] <= 0:
+                            continue
+                        add_to_dict(
+                            dic=obj_args,
+                            geom_types="box",
+                            geom_locations=tuple(
+                                np.array(
+                                    [
+                                        i * 2.0 * legacy_unit_size[0],
+                                        j * 2.0 * legacy_unit_size[1],
+                                        k * 2.0 * legacy_unit_size[2],
+                                    ]
+                                )
+                                + legacy_ring_offset
+                            ),
+                            geom_quats=(1, 0, 0, 0),
+                            geom_sizes=tuple(legacy_unit_size),
+                            geom_names=f"ring_{self.num_ring_geoms}",
+                            geom_rgbas=None,
+                            geom_materials=self.tripod_mat_name,
+                            geom_frictions=(0.3, 5e-3, 1e-4),
+                        )
+                        self.num_ring_geoms += 1
+        else:
+            # Keep the new ring centered at the original ring center while
+            # constructing exact outer and inner dimensions from four bars.
+            ring_center = (
+                -np.array(total_size)
+                + legacy_unit_size
+                + legacy_ring_offset
+                + np.array(
+                    [
+                        0.0,
+                        (legacy_pattern.shape[2] - 1) * legacy_unit_size[1],
+                        (legacy_pattern.shape[0] - 1) * legacy_unit_size[2],
+                    ]
+                )
+            )
+            outer_half = 0.5 * self.ring_outer_size
+            inner_half = 0.5 * self.ring_inner_size
+            border_half = 0.5 * (outer_half - inner_half)
+            bar_offset = inner_half + border_half
+            depth_half = 0.5 * self.ring_depth
+            self.ring_size = np.array([depth_half, outer_half, outer_half])
+            ring_bars = (
+                (ring_center + np.array([0.0, 0.0, -bar_offset]), (depth_half, outer_half, border_half)),
+                (ring_center + np.array([0.0, 0.0, bar_offset]), (depth_half, outer_half, border_half)),
+                (ring_center + np.array([0.0, -bar_offset, 0.0]), (depth_half, border_half, inner_half)),
+                (ring_center + np.array([0.0, bar_offset, 0.0]), (depth_half, border_half, inner_half)),
+            )
+            for center, size in ring_bars:
+                # CompositeObject expects locations from the lower corner of
+                # its bounding box, rather than center-relative positions.
+                location = center + np.array(total_size) - np.array(size)
+                add_to_dict(
+                    dic=obj_args,
+                    geom_types="box",
+                    geom_locations=tuple(location),
+                    geom_quats=(1, 0, 0, 0),
+                    geom_sizes=size,
+                    geom_names=f"ring_{self.num_ring_geoms}",
+                    geom_rgbas=None,
+                    geom_materials=self.tripod_mat_name,
+                    geom_frictions=(0.3, 5e-3, 1e-4),
+                )
+                self.num_ring_geoms += 1
 
         tripod_capsule_r = 0.01
         tripod_capsule_h = 0.03
@@ -117,7 +181,15 @@ class RingTripodObject(CompositeObject):
         post_size = 0.005
         post_geom_sizes = [
             (total_size[0], total_size[1], base_thickness),
-            (post_size, post_size, total_size[2] - ring_size[2] - base_thickness - tripod_capsule_r - tripod_capsule_h),
+            (
+                post_size,
+                post_size,
+                total_size[2]
+                - self.ring_size[2]
+                - base_thickness
+                - tripod_capsule_r
+                - tripod_capsule_h,
+            ),
         ]
         post_geom_locations = [
             (0.0, 0.0, 2.0 * (tripod_capsule_r + tripod_capsule_h)),

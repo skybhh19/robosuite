@@ -20,6 +20,8 @@ class Threading(ManipulationEnv):
     """Single-arm task where a robot inserts a needle through a small ring."""
 
     needle_shaft_half_length = NEEDLE_SHAFT_HALF_LENGTH
+    tripod_ring_outer_size = None
+    tripod_ring_inner_size = None
 
     def __init__(
         self,
@@ -117,7 +119,11 @@ class Threading(ManipulationEnv):
             name="needle_obj",
             shaft_half_length=self.needle_shaft_half_length,
         )
-        self.tripod = RingTripodObject(name="tripod_obj")
+        self.tripod = RingTripodObject(
+            name="tripod_obj",
+            ring_outer_size=self.tripod_ring_outer_size,
+            ring_inner_size=self.tripod_ring_inner_size,
+        )
 
         self._get_placement_initializer()
         self.model = ManipulationTask(
@@ -299,6 +305,7 @@ class Threading(ManipulationEnv):
             ring_mat=ring_mat,
             ring_normal=ring_normal,
             needle_half_length=self.needle.shaft_half_length,
+            aperture_half_extent=self.tripod.aperture_half_extent,
         )
         insert_progress = float(np.dot(needle_tip - ring_pos, ring_normal))
         self._threading_max_insert_progress = max(
@@ -454,6 +461,33 @@ class Threading_D08(Threading_D0):
             "reference": self.table_offset,
         }
         return bounds
+
+
+class Threading_D06(Threading_D08):
+    """D0.6: D0.8 tripod variation with a narrower needle yaw range."""
+
+    def _get_initial_placement_bounds(self):
+        return {
+            "needle": {
+                "x": (-0.10, 0.00),
+                "y": (0.15, 0.25),
+                "z_rot": (np.deg2rad(80.0), np.deg2rad(100.0)),
+                "reference": self.table_offset,
+            },
+            "tripod": {
+                "x": (-0.07, 0.07),
+                "y": (-0.22, -0.12),
+                "z_rot": (np.deg2rad(75.0), np.deg2rad(135.0)),
+                "reference": self.table_offset,
+            },
+        }
+
+
+class Threading_D06_Hard(Threading_D06):
+    """D0.6 with a 22 mm outer ring and a 14 mm square aperture."""
+
+    tripod_ring_outer_size = 0.022
+    tripod_ring_inner_size = 0.014
 
 
 class Threading_D1(Threading_D0):

@@ -108,11 +108,16 @@ def parse_args():
     parser.add_argument("--joint-delta-scale", type=float, default=0.05)
     parser.add_argument(
         "--success-criterion",
-        choices=("policy_composite_and_env", "final_env_and_joint_margin"),
+        choices=(
+            "policy_composite_and_env",
+            "final_env_and_joint_margin",
+            "policy_composite_env_and_joint_margin",
+        ),
         default="policy_composite_and_env",
         help=(
             "Retain the legacy composite+environment successes, or use only "
-            "the final environment success check plus a measured joint-margin gate."
+            "the final environment success check plus a measured joint-margin gate, "
+            "or require composite and environment success plus the joint-margin gate."
         ),
     )
     parser.add_argument(
@@ -236,6 +241,8 @@ def empty_angle_summary(angle, target_successes, initial_count):
         "retry_attempt_success_rate": 0.0,
         "final_env_success_attempts": 0,
         "final_env_success_attempt_rate": 0.0,
+        "policy_composite_success_attempts": 0,
+        "policy_composite_success_attempt_rate": 0.0,
         "joint_margin_pass_attempts": 0,
         "joint_margin_fail_attempts": 0,
         "pregrasp_contact_pass_attempts": 0,
@@ -268,6 +275,11 @@ def update_rates(summary):
         )
         item["final_env_success_attempt_rate"] = (
             float(item.get("final_env_success_attempts", 0) / attempts) if attempts else 0.0
+        )
+        item["policy_composite_success_attempt_rate"] = (
+            float(item.get("policy_composite_success_attempts", 0) / attempts)
+            if attempts
+            else 0.0
         )
 
 
@@ -303,7 +315,8 @@ def validate_resume_summary(summary, args, record_joint_training_fields):
         "success_criterion_mode": args.success_criterion,
         "minimum_joint_margin_rad": (
             float(args.min_joint_margin_rad)
-            if args.success_criterion == "final_env_and_joint_margin"
+            if args.success_criterion
+            in ("final_env_and_joint_margin", "policy_composite_env_and_joint_margin")
             else None
         ),
         "require_clean_pregrasp_contact": bool(args.require_clean_pregrasp_contact),
@@ -498,8 +511,12 @@ def main():
         raise ValueError("--joint-delta-scale must be positive")
     if args.min_joint_margin_rad <= 0:
         raise ValueError("--min-joint-margin-rad must be positive")
-    if args.success_criterion == "final_env_and_joint_margin" and args.control_mode != "joint_position":
-        raise ValueError("final_env_and_joint_margin requires --control-mode joint_position")
+    if (
+        args.success_criterion
+        in ("final_env_and_joint_margin", "policy_composite_env_and_joint_margin")
+        and args.control_mode != "joint_position"
+    ):
+        raise ValueError(f"{args.success_criterion} requires --control-mode joint_position")
     partial_angles = {float(angle) for angle in args.partial_angles}
     full_angles = {float(angle) for angle in args.full_angles}
     if partial_angles & full_angles:
@@ -573,14 +590,19 @@ def main():
         "record_joint_training_fields": bool(record_joint_training_fields),
         "joint_delta_scale": float(args.joint_delta_scale) if record_joint_training_fields else None,
         "success_criterion": (
-            "final env._check_success() AND minimum actual Panda joint margin"
-            if args.success_criterion == "final_env_and_joint_margin"
-            else "policy composite success AND final env._check_success()"
+            "policy composite success AND final env._check_success() AND minimum actual Panda joint margin"
+            if args.success_criterion == "policy_composite_env_and_joint_margin"
+            else (
+                "final env._check_success() AND minimum actual Panda joint margin"
+                if args.success_criterion == "final_env_and_joint_margin"
+                else "policy composite success AND final env._check_success()"
+            )
         ),
         "success_criterion_mode": args.success_criterion,
         "minimum_joint_margin_rad": (
             float(args.min_joint_margin_rad)
-            if args.success_criterion == "final_env_and_joint_margin"
+            if args.success_criterion
+            in ("final_env_and_joint_margin", "policy_composite_env_and_joint_margin")
             else None
         ),
         "require_clean_pregrasp_contact": bool(args.require_clean_pregrasp_contact),
@@ -706,7 +728,14 @@ def main():
                         pregrasp_contact.get("passed", False)
                         and not pregrasp_contact.get("detected", True)
                     )
-                    if args.success_criterion == "final_env_and_joint_margin":
+                    if args.success_criterion == "policy_composite_env_and_joint_margin":
+                        accepted_success = bool(
+                            composite_success
+                            and final_env_success
+                            and joint_margin_passed
+                            and (not args.require_clean_pregrasp_contact or clean_pregrasp_contact)
+                        )
+                    elif args.success_criterion == "final_env_and_joint_margin":
                         accepted_success = bool(
                             final_env_success
                             and joint_margin_passed
@@ -722,6 +751,9 @@ def main():
                     angle_summary["final_env_success_attempts"] = int(
                         angle_summary.get("final_env_success_attempts", 0)
                     ) + int(final_env_success)
+                    angle_summary["policy_composite_success_attempts"] = int(
+                        angle_summary.get("policy_composite_success_attempts", 0)
+                    ) + int(composite_success)
                     angle_summary["joint_margin_pass_attempts"] = int(
                         angle_summary.get("joint_margin_pass_attempts", 0)
                     ) + int(joint_margin_passed)
@@ -742,15 +774,23 @@ def main():
                         "passed": joint_margin_passed,
                     }
                     stats["collection_success"] = accepted_success
-                    stats["collection_success_source"] = (
-                        (
+                    if args.success_criterion == "policy_composite_env_and_joint_margin":
+                        stats["collection_success_source"] = (
+                            "policy_composite_final_env_check_success_"
+                            "joint_margin_and_clean_pregrasp"
+                            if args.require_clean_pregrasp_contact
+                            else "policy_composite_final_env_check_success_and_joint_margin"
+                        )
+                    elif args.success_criterion == "final_env_and_joint_margin":
+                        stats["collection_success_source"] = (
                             "final_env_check_success_joint_margin_and_clean_pregrasp"
                             if args.require_clean_pregrasp_contact
                             else "final_env_check_success_and_joint_margin"
                         )
-                        if args.success_criterion == "final_env_and_joint_margin"
-                        else "policy_composite_and_final_env_check_success"
-                    )
+                    else:
+                        stats["collection_success_source"] = (
+                            "policy_composite_and_final_env_check_success"
+                        )
                     stats["episode_kept"] = accepted_success
                     stats["counted_toward_target"] = accepted_success
                     stats["initial_state_sampling"] = {

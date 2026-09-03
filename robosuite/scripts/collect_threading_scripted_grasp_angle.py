@@ -422,6 +422,7 @@ def clean_ring_aperture_geometry(env):
         ring_mat=ring["mat"],
         ring_normal=ring["normal"],
         needle_half_length=needle.get("shaft_half_length", NEEDLE_SHAFT_HALF_LENGTH),
+        aperture_half_extent=base_env.tripod.aperture_half_extent,
     )
     if metrics["clean_aperture"]:
         reason = "clear"

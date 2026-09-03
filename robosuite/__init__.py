@@ -13,7 +13,10 @@ from robosuite.environments.manipulation.threading import (
     Threading,
     Threading_D0,
     Threading_D05,
+    Threading_D06,
     Threading_D07,
+    Threading_D08,
+    Threading_D06_Hard,
     Threading_D1,
     Threading_D2,
 )
