@@ -14,18 +14,28 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from robosuite.scripts.collect_tool_hang_balanced_state_retries import (
+    GRASP_BIN_COUNT,
     freeze_manifest_fixtures,
     generate_state_pool,
+    infer_grasp_bin_index,
     make_env,
     write_dataset_metadata,
     write_json,
 )
 from robosuite.scripts.collect_tool_hang_wrench_joint import (
+    DEFAULT_INSERTION_CORRECTION_STEPS,
+    DEFAULT_MIN_JOINT_MARGIN_RAD,
+    DEFAULT_PRE_RELEASE_INSERTION_TARGET,
+    DEFAULT_WAYPOINT_ORIENTATION_TOLERANCE_DEG,
+    DEFAULT_WAYPOINT_POSITION_TOLERANCE_M,
+    DEFAULT_WAYPOINT_TRACKING_MAX_STEPS,
     GeometricJointPolicy,
+    INSERT_RELEASE_PREOPEN_STEPS,
     VideoRecorder,
     collection_acceptance,
     controller_metadata,
     finalize_episode,
+    parse_policy_preset_args,
 )
 from robosuite.wrappers import DataCollectionWrapper
 
@@ -42,6 +52,16 @@ def parse_args():
         type=float,
         default=0.10,
         help="Reject final assembly if full / partial per-attempt success rates differ by more than this fraction.",
+    )
+    parser.add_argument(
+        "--min-full-minus-partial-success-rate",
+        type=float,
+        help="Optional lower bound on the signed Full minus Partial attempt-success rate.",
+    )
+    parser.add_argument(
+        "--max-full-minus-partial-success-rate",
+        type=float,
+        help="Optional upper bound on the signed Full minus Partial attempt-success rate.",
     )
     parser.add_argument(
         "--fixed-attempts-per-state",
@@ -64,6 +84,61 @@ def parse_args():
     parser.add_argument("--high-hole-height-m", type=float, default=0.060)
     parser.add_argument("--seat-along-fraction", type=float, default=0.10)
     parser.add_argument("--hang-yaw-deg", type=float, default=0.0)
+    parser.add_argument("--grasp-yaw-deg", type=float, default=None)
+    parser.add_argument("--grasp-ik-yaw-fallback-deg", type=float, default=None)
+    parser.add_argument("--joint-precision-frame-scale", type=float, default=1.0)
+    parser.add_argument("--joint-line-correction-gain", type=float, default=0.65)
+    parser.add_argument("--transfer-retime", action="store_true")
+    parser.add_argument("--lift-retime", action="store_true")
+    parser.add_argument("--lift-endpoint-recovery", action="store_true")
+    parser.add_argument("--lift-endpoint-retime", action="store_true")
+    parser.add_argument("--hang-cant-deg", type=float, default=-25.0)
+    parser.add_argument("--release-support-pivot", action="store_true")
+    parser.add_argument("--line-correction-memory", action="store_true")
+    parser.add_argument("--line-correction-memory-unseated-only", action="store_true")
+    parser.add_argument("--insertion-retime", action="store_true")
+    parser.add_argument("--transfer-ik-recovery-restarts", type=int, default=None)
+    parser.add_argument("--insertion-tool-orientation-gain", type=float, default=0.0)
+    parser.add_argument(
+        "--threading-pregrasp-frames", type=int, choices=range(40, 51), default=50,
+        help="Shared approach timing; all contact, tracking and smoothness gates remain unchanged.",
+    )
+    parser.add_argument("--joint-seated-geometry-only", action="store_true")
+    parser.add_argument(
+        "--pre-release-insertion-target",
+        type=float,
+        default=DEFAULT_PRE_RELEASE_INSERTION_TARGET,
+    )
+    parser.add_argument(
+        "--insertion-correction-steps",
+        type=int,
+        default=DEFAULT_INSERTION_CORRECTION_STEPS,
+    )
+    parser.add_argument(
+        "--pre-release-validation-steps",
+        type=int,
+        default=INSERT_RELEASE_PREOPEN_STEPS,
+    )
+    parser.add_argument(
+        "--min-joint-margin-rad",
+        type=float,
+        default=DEFAULT_MIN_JOINT_MARGIN_RAD,
+    )
+    parser.add_argument(
+        "--waypoint-position-tolerance-m",
+        type=float,
+        default=DEFAULT_WAYPOINT_POSITION_TOLERANCE_M,
+    )
+    parser.add_argument(
+        "--waypoint-orientation-tolerance-deg",
+        type=float,
+        default=DEFAULT_WAYPOINT_ORIENTATION_TOLERANCE_DEG,
+    )
+    parser.add_argument(
+        "--waypoint-tracking-max-steps",
+        type=int,
+        default=DEFAULT_WAYPOINT_TRACKING_MAX_STEPS,
+    )
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--source-manifest", type=Path)
@@ -80,9 +155,19 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--keep-failed-videos",
+        action="store_true",
+        help=(
+            "Keep diagnostic videos for failed attempts under _candidate_videos. "
+            "Failed raw demonstrations are still discarded and never enter the dataset."
+        ),
+    )
+    parser.add_argument(
         "--regime", choices=("all", "full_visible", "partial_hidden"), default="all"
     )
-    parser.add_argument("--grasp-bin-index", type=int, choices=range(5))
+    parser.add_argument(
+        "--grasp-bin-index", type=int, choices=range(GRASP_BIN_COUNT)
+    )
     parser.add_argument(
         "--motion-style",
         choices=GeometricJointPolicy.VARIATION_STYLES,
@@ -91,8 +176,12 @@ def parse_args():
     parser.add_argument(
         "--policy-motion-style",
         choices=GeometricJointPolicy.VARIATION_STYLES,
-        default="high_arc",
-        help="Override the policy style while preserving each frozen reset and grasp state.",
+        default=None,
+        help=(
+            "Override the manifest-assigned policy style. By default every "
+            "state uses its assigned style; setting this deliberately collapses "
+            "the collection to one path family."
+        ),
     )
     parser.add_argument(
         "--vertical-fallback-every",
@@ -116,7 +205,7 @@ def parse_args():
         "--state-ids",
         help="Comma-separated frozen state ids to collect, for focused regression tests.",
     )
-    return parser.parse_args()
+    return parse_policy_preset_args(parser)
 
 
 def insert_stage(stats):
@@ -150,6 +239,9 @@ def quality_components(stats):
         "pre_release_line_distance_m": float(
             pre_hold.get("line_distance_m", float("inf"))
         ),
+        "negative_minimum_actual_joint_margin_rad": -float(
+            stats.get("joint_safety", {}).get("minimum_margin_rad", float("-inf"))
+        ),
         "max_actual_joint_second_difference": float(
             smooth.get("max_actual_joint_second_difference", float("inf"))
         ),
@@ -172,6 +264,7 @@ def quality_key(stats):
     values = quality_components(stats)
     return (
         values["pre_release_line_distance_m"],
+        values["negative_minimum_actual_joint_margin_rad"],
         values["max_actual_joint_second_difference"],
         values["max_joint_target_jerk"],
         values["transfer_final_ik_error"],
@@ -207,8 +300,28 @@ def progress_payload(args, states, records, attempts):
     }
 
 
+def correction_memory_options(args):
+    """One shared option mapping for recorded metadata and policy construction."""
+    if args.line_correction_memory_unseated_only and not args.line_correction_memory:
+        raise ValueError("unseated-only gate requires line correction memory")
+    if args.line_correction_memory and args.controller_backend != "joint_position":
+        raise ValueError("line correction memory requires joint_position")
+    return {
+        "line_correction_memory": args.line_correction_memory,
+        "line_correction_memory_unseated_only": args.line_correction_memory_unseated_only,
+    }
+
+
 def main():
     args = parse_args()
+    memory_options = correction_memory_options(args)
+    if (
+        args.min_full_minus_partial_success_rate is not None
+        and args.max_full_minus_partial_success_rate is not None
+        and args.min_full_minus_partial_success_rate
+        > args.max_full_minus_partial_success_rate
+    ):
+        raise ValueError("signed success-rate lower bound exceeds upper bound")
     if args.states <= 0 or args.states % 2:
         raise ValueError("--states must be a positive even number")
     if args.final_states <= 0 or args.final_states % 2 or args.final_states > args.states:
@@ -290,9 +403,30 @@ def main():
     manifest["controller_backend"] = args.controller_backend
     manifest["controller_config"] = controller_metadata(args.controller_backend)
     manifest["placement"] = {
+        "threading_pregrasp_frames": args.threading_pregrasp_frames,
+        "transfer_retime": args.transfer_retime,
+        "insertion_tool_orientation_gain": args.insertion_tool_orientation_gain,
         "high_hole_height_m": args.high_hole_height_m,
         "seat_along_fraction": args.seat_along_fraction,
         "hang_yaw_deg": args.hang_yaw_deg,
+        "grasp_yaw_deg": args.grasp_yaw_deg,
+        "grasp_ik_yaw_fallback_deg": args.grasp_ik_yaw_fallback_deg,
+        "lift_retime": args.lift_retime,
+        "lift_endpoint_recovery": args.lift_endpoint_recovery,
+        "lift_endpoint_retime": args.lift_endpoint_retime,
+        "hang_cant_deg": args.hang_cant_deg,
+        "release_support_pivot": args.release_support_pivot,
+        **memory_options,
+    }
+    manifest["quality_gates"] = {
+        "clean_pregrasp_contact": True,
+        "minimum_actual_joint_margin_rad": args.min_joint_margin_rad,
+        "joint_waypoint_tracking": {
+            "position_tolerance_m": args.waypoint_position_tolerance_m,
+            "orientation_tolerance_deg": args.waypoint_orientation_tolerance_deg,
+            "max_steps": args.waypoint_tracking_max_steps,
+            "stream_waypoints": False,
+        },
     }
     manifest["states"] = state_pool
     write_json(manifest_path, manifest)
@@ -319,14 +453,18 @@ def main():
                 f"{sorted(requested_state_ids - found_state_ids)}"
             )
     if args.grasp_bin_index is not None:
-        low = -0.055 + 0.009 * args.grasp_bin_index
-        high = low + 0.009
         state_pool = [
             entry
             for entry in state_pool
-            if low
-            <= 0.5 * sum(entry["grasp_offset_range_m"])
-            <= high + 1e-12
+            if int(
+                entry.get(
+                    "grasp_bin_index",
+                    infer_grasp_bin_index(
+                        entry["regime"], 0.5 * sum(entry["grasp_offset_range_m"])
+                    ),
+                )
+            )
+            == args.grasp_bin_index
         ]
     if args.motion_style is not None:
         state_pool = [
@@ -346,6 +484,7 @@ def main():
     env = DataCollectionWrapper(
         env,
         str(raw_dir),
+        joint_position_label_source="sim_qpos",
         collect_freq=1,
         flush_freq=701,
         record_joint_position_fields=args.controller_backend == "joint_position",
@@ -363,12 +502,39 @@ def main():
                 {
                     "state_id": state_id,
                     "assigned_regime": entry["regime"],
-                    "motion_style": entry["motion_style"],
+                    "assigned_motion_style": entry["motion_style"],
+                    "assigned_grasp_bin_index": int(
+                        entry.get(
+                            "grasp_bin_index",
+                            infer_grasp_bin_index(
+                                entry["regime"],
+                                0.5 * sum(entry["grasp_offset_range_m"]),
+                            ),
+                        )
+                    ),
                     "attempts": 0,
                     "candidates": [],
                     "attempt_history": [],
                     "status": "pending",
                 },
+            )
+            # Backward-compatible normalization for resumable manifests made
+            # before joint style/bin stratification was recorded explicitly.
+            record.setdefault(
+                "assigned_motion_style",
+                record.get("motion_style", entry["motion_style"]),
+            )
+            record.setdefault(
+                "assigned_grasp_bin_index",
+                int(
+                    entry.get(
+                        "grasp_bin_index",
+                        infer_grasp_bin_index(
+                            entry["regime"],
+                            0.5 * sum(entry["grasp_offset_range_m"]),
+                        ),
+                    )
+                ),
             )
             if record.get("status") in ("eligible", "failed"):
                 continue
@@ -435,6 +601,29 @@ def main():
                     high_hole_height_m=args.high_hole_height_m,
                     seat_along_fraction=args.seat_along_fraction,
                     hang_yaw_deg=args.hang_yaw_deg,
+                    grasp_yaw_deg=args.grasp_yaw_deg,
+                    grasp_ik_yaw_fallback_deg=args.grasp_ik_yaw_fallback_deg,
+                    lift_retime=args.lift_retime,
+                    lift_endpoint_recovery=args.lift_endpoint_recovery,
+                    lift_endpoint_retime=args.lift_endpoint_retime,
+                    hang_cant_deg=args.hang_cant_deg,
+                    release_support_pivot=args.release_support_pivot,
+                    **memory_options,
+                    insertion_retime=args.insertion_retime,
+                    transfer_ik_recovery_restarts=args.transfer_ik_recovery_restarts,
+                    joint_precision_frame_scale=args.joint_precision_frame_scale,
+                    joint_line_correction_gain=args.joint_line_correction_gain,
+                    joint_seated_geometry_only=args.joint_seated_geometry_only,
+                    pre_release_insertion_target=args.pre_release_insertion_target,
+                    insertion_correction_steps=args.insertion_correction_steps,
+                    pre_release_validation_steps=args.pre_release_validation_steps,
+                    min_joint_margin_rad=args.min_joint_margin_rad,
+                    waypoint_position_tolerance_m=args.waypoint_position_tolerance_m,
+                    waypoint_orientation_tolerance_deg=args.waypoint_orientation_tolerance_deg,
+                    waypoint_tracking_max_steps=args.waypoint_tracking_max_steps,
+                    threading_pregrasp_frames=args.threading_pregrasp_frames,
+                    transfer_retime=args.transfer_retime,
+                    insertion_tool_orientation_gain=args.insertion_tool_orientation_gain,
                 )
                 candidate_video = candidate_video_dir / (
                     f"state_{state_id:03d}_candidate_{candidate_index:02d}_try_{retry:02d}.mp4"
@@ -456,8 +645,14 @@ def main():
                         "success": bool(accepted),
                         "state_id": state_id,
                         "assigned_regime": entry["regime"],
+                        "assigned_grasp_bin_index": record[
+                            "assigned_grasp_bin_index"
+                        ],
                         "retry": retry,
                         "assigned_motion_style": entry["motion_style"],
+                        "assigned_grasp_bin_index": record[
+                            "assigned_grasp_bin_index"
+                        ],
                         "attempt_motion_style": attempt_motion_style,
                         "style_retry": style_retry,
                         "max_retries": args.max_attempts,
@@ -483,13 +678,26 @@ def main():
                         "assigned_motion_style": entry["motion_style"],
                         "attempt_motion_style": attempt_motion_style,
                         "style_retry": style_retry,
+                        "policy_seed": int(policy.seed),
+                        "requested_grasp_range_m": list(entry["grasp_offset_range_m"]),
                         "native_success": bool(native_success),
                         "accepted": bool(accepted),
+                        "steps": stats.get("steps", 0),
+                        "training_recorded_steps": stats.get("training_recorded_steps", stats.get("steps", 0)),
+                        "controller_backend": stats.get("controller_backend", args.controller_backend),
+                        "recording_integrity": stats.get("recording_integrity", {}),
+                        "wrench_pose_assist_count": stats.get("wrench_pose_assist_count"),
                         "failure_reason": stats.get("failure_reason"),
                         "variation": stats.get("variation", {}),
                         "final_debug": stats.get("final_debug", {}),
                         "stage_checks": stats.get("stage_checks", []),
                         "smoothness": stats.get("smoothness", {}),
+                        "pregrasp_contact_check": stats.get(
+                            "pregrasp_contact_check", {}
+                        ),
+                        "waypoint_tracking": stats.get("waypoint_tracking", {}),
+                        "joint_safety": stats.get("joint_safety", {}),
+                        "acceptance_checks": stats.get("acceptance_checks", {}),
                         "visibility_diagnostics": stats.get(
                             "visibility_diagnostics", {}
                         ),
@@ -508,7 +716,8 @@ def main():
                         flush=True,
                     )
                 else:
-                    candidate_video.unlink(missing_ok=True)
+                    if not args.keep_failed_videos:
+                        candidate_video.unlink(missing_ok=True)
                     print(
                         f"state={state_id:03d}/{args.states} regime={entry['regime']} "
                         f"attempt={retry}/{args.max_attempts} "
@@ -616,9 +825,22 @@ def main():
             record["status"] = "overflow_not_selected"
 
     selected.sort(key=lambda item: int(item["state_id"]))
+    # When a fixed-attempt prefix is configured, use only that common prefix
+    # for regime-rate estimation. Later retries are conditional on early
+    # failures and are useful for coverage, but would bias the measured rate.
+    def rate_attempts(record):
+        history = record.get("attempt_history", [])
+        if args.fixed_attempts_per_state > 0:
+            return [
+                attempt
+                for attempt in history
+                if int(attempt["retry"]) <= args.fixed_attempts_per_state
+            ]
+        return history
+
     regime_attempts = {
         regime: sum(
-            len(record.get("attempt_history", []))
+            len(rate_attempts(record))
             for record in records.values()
             if record.get("assigned_regime") == regime
         )
@@ -629,7 +851,7 @@ def main():
             bool(attempt.get("accepted"))
             for record in records.values()
             if record.get("assigned_regime") == regime
-            for attempt in record.get("attempt_history", [])
+            for attempt in rate_attempts(record)
         )
         for regime in regime_attempts
     }
@@ -648,7 +870,24 @@ def main():
     regime_rate_balanced = bool(
         regime_success_rate_gap <= args.max_regime_success_rate_gap
     )
+    full_minus_partial_success_rate = (
+        regime_attempt_success_rates["full_visible"]
+        - regime_attempt_success_rates["partial_hidden"]
+    )
+    regime_rate_direction_passed = bool(
+        (
+            args.min_full_minus_partial_success_rate is None
+            or full_minus_partial_success_rate
+            >= args.min_full_minus_partial_success_rate
+        )
+        and (
+            args.max_full_minus_partial_success_rate is None
+            or full_minus_partial_success_rate
+            <= args.max_full_minus_partial_success_rate
+        )
+    )
     summary = {
+        "policy_preset": args.policy_preset,
         "seed": args.seed,
         "assignment_seed": args.assignment_seed,
         "sampled_states": args.states,
@@ -656,6 +895,11 @@ def main():
         "successes_per_state_required": args.successes_per_state,
         "max_attempts_per_state": args.max_attempts,
         "attempts": attempts_total,
+        "success_rate_estimation": (
+            f"fixed first {args.fixed_attempts_per_state} attempts per state"
+            if args.fixed_attempts_per_state > 0
+            else "all attempts"
+        ),
         "eligible_state_count": sum(
             record.get("status") in ("eligible", "overflow_not_selected")
             for record in records.values()
@@ -670,6 +914,40 @@ def main():
         "regime_success_rate_gap": regime_success_rate_gap,
         "max_regime_success_rate_gap": args.max_regime_success_rate_gap,
         "regime_success_rates_balanced": regime_rate_balanced,
+        "full_minus_partial_success_rate": full_minus_partial_success_rate,
+        "min_full_minus_partial_success_rate": args.min_full_minus_partial_success_rate,
+        "max_full_minus_partial_success_rate": args.max_full_minus_partial_success_rate,
+        "regime_success_rate_direction_passed": regime_rate_direction_passed,
+        "quality_gate_attempts": {
+            "pregrasp_contact_rejections": sum(
+                bool(attempt.get("pregrasp_contact_check", {}).get("detected", False))
+                for record in records.values()
+                for attempt in record.get("attempt_history", [])
+            ),
+            "joint_margin_rejections": sum(
+                not bool(attempt.get("joint_safety", {}).get("passed", False))
+                for record in records.values()
+                for attempt in record.get("attempt_history", [])
+            ),
+            "waypoint_tracking_rejections": sum(
+                any(
+                    outcome.get("applied", False)
+                    and not outcome.get("passed", False)
+                    for outcome in attempt.get("waypoint_tracking", {}).values()
+                )
+                for record in records.values()
+                for attempt in record.get("attempt_history", [])
+            ),
+            "minimum_accepted_joint_margin_rad": min(
+                (
+                    item.get("joint_safety", {}).get(
+                        "minimum_margin_rad", float("inf")
+                    )
+                    for item in selected
+                ),
+                default=None,
+            ),
+        },
         "regime_counts": dict(Counter(item["assigned_regime"] for item in selected)),
         "motion_style_counts": dict(
             Counter(item["variation"]["motion_style"] for item in selected)
@@ -682,7 +960,11 @@ def main():
         "rollouts": selected,
     }
     write_json(summary_path, summary)
-    if len(selected) == args.final_states and regime_rate_balanced:
+    if (
+        len(selected) == args.final_states
+        and regime_rate_balanced
+        and regime_rate_direction_passed
+    ):
         write_dataset_metadata(output_dir, raw_dir, selected)
     print(json.dumps({
         "selected": len(selected),
@@ -695,6 +977,8 @@ def main():
         raise SystemExit(2)
     if not regime_rate_balanced:
         raise SystemExit(3)
+    if not regime_rate_direction_passed:
+        raise SystemExit(4)
 
 
 if __name__ == "__main__":

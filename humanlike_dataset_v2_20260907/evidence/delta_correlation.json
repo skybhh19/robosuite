@@ -1,0 +1,230 @@
+{
+  "old_thread": {
+    "path": "/iris/u/tiangao/projects/robosuite/output/threading_d06_hard_joint_position_strict_clean_40x10_seed20260901/dataset/demo.hdf5",
+    "episodes": 400,
+    "metrics": {
+      "q_to_command_delta": {
+        "mean": 0.19338830736129273,
+        "seeds": [
+          0.1991410019320823,
+          0.19556222939246065,
+          0.18546169075933516
+        ]
+      },
+      "q_to_executed_delta": {
+        "mean": 0.1969732720495363,
+        "seeds": [
+          0.2026592683114239,
+          0.19952016583078894,
+          0.18874038200639606
+        ]
+      },
+      "previous_executed_delta_to_next": {
+        "mean": 0.9843215294209654,
+        "seeds": [
+          0.9845064876284783,
+          0.9844215481995526,
+          0.9840365524348657
+        ]
+      },
+      "executed_delta_to_command_delta": {
+        "mean": 0.9903117223718851,
+        "seeds": [
+          0.9904082823603096,
+          0.990425235943856,
+          0.99010164881149
+        ]
+      }
+    }
+  },
+  "new_thread": {
+    "path": "/iris/u/jasonyan/data/humanlike_dataset_v2_20260907/production_v8/threading/dataset_image84_14hz.hdf5",
+    "episodes": 400,
+    "metrics": {
+      "q_to_command_delta": {
+        "mean": 0.16720271579652138,
+        "seeds": [
+          0.17728828115281184,
+          0.15425618423358184,
+          0.17006368200317046
+        ]
+      },
+      "q_to_executed_delta": {
+        "mean": 0.14885178729899606,
+        "seeds": [
+          0.15762817272619278,
+          0.13736654509777618,
+          0.15156064407301925
+        ]
+      },
+      "previous_executed_delta_to_next": {
+        "mean": 0.6048786741492881,
+        "seeds": [
+          0.6028574944071285,
+          0.6074139314014989,
+          0.6043645966392365
+        ]
+      },
+      "executed_delta_to_command_delta": {
+        "mean": 0.8745604233288381,
+        "seeds": [
+          0.8738997992980541,
+          0.8755879479354897,
+          0.8741935227529708
+        ]
+      }
+    }
+  },
+  "old_tool": {
+    "path": "/iris/u/jasonyan/data/tool_hang_robust_joint_dataset400_20260904/dataset/tool_hang_robust_joint_400_image84.hdf5",
+    "episodes": 400,
+    "metrics": {
+      "q_to_command_delta": {
+        "mean": 0.15332620114505854,
+        "seeds": [
+          0.15531491470803177,
+          0.15656919000996355,
+          0.14809449871718025
+        ]
+      },
+      "q_to_executed_delta": {
+        "mean": 0.15273881587407004,
+        "seeds": [
+          0.15516792612713828,
+          0.15604164564217513,
+          0.14700687585289668
+        ]
+      },
+      "previous_executed_delta_to_next": {
+        "mean": 0.9870755183321713,
+        "seeds": [
+          0.987406718928513,
+          0.9868763097729941,
+          0.9869435262950068
+        ]
+      },
+      "executed_delta_to_command_delta": {
+        "mean": 0.9902343313069791,
+        "seeds": [
+          0.9904685783771471,
+          0.9900766107140017,
+          0.9901578048297885
+        ]
+      }
+    }
+  },
+  "new_tool": {
+    "path": "/iris/u/jasonyan/data/humanlike_dataset_v2_20260907/production/toolhang/dataset_image84_14hz.hdf5",
+    "episodes": 400,
+    "metrics": {
+      "q_to_command_delta": {
+        "mean": 0.14029268496867872,
+        "seeds": [
+          0.13217177088183318,
+          0.14918612652114568,
+          0.1395201575030572
+        ]
+      },
+      "q_to_executed_delta": {
+        "mean": 0.1246498171624874,
+        "seeds": [
+          0.11690986776774244,
+          0.1329531020008873,
+          0.12408648171883241
+        ]
+      },
+      "previous_executed_delta_to_next": {
+        "mean": 0.6305641032848627,
+        "seeds": [
+          0.6301928237534268,
+          0.6310639112957966,
+          0.6304355748053647
+        ]
+      },
+      "executed_delta_to_command_delta": {
+        "mean": 0.8833294033398333,
+        "seeds": [
+          0.8831714362192873,
+          0.8834396078920935,
+          0.8833771659081192
+        ]
+      }
+    }
+  },
+  "real_wrench": {
+    "path": "/iliad/u/jasonyan/data/real_wrench_0828_0830_pomdp_v4_jointpos_minmax_triview_20260903/hdf5/wrench_0828_0830_triview_jointpos_raw.hdf5",
+    "episodes": 100,
+    "metrics": {
+      "q_to_command_delta": {
+        "mean": 0.36990367731188223,
+        "seeds": [
+          0.3660751323319979,
+          0.35693683277226274,
+          0.38669906683138616
+        ]
+      },
+      "q_to_executed_delta": {
+        "mean": 0.2708978687907753,
+        "seeds": [
+          0.2639971282093331,
+          0.26795807926763965,
+          0.28073839889535324
+        ]
+      },
+      "previous_executed_delta_to_next": {
+        "mean": 0.8843015612200875,
+        "seeds": [
+          0.8786186439884636,
+          0.8902051832485073,
+          0.8840808564232917
+        ]
+      },
+      "executed_delta_to_command_delta": {
+        "mean": 0.8578388577862492,
+        "seeds": [
+          0.8583253296061705,
+          0.858640493435656,
+          0.8565507503169213
+        ]
+      }
+    }
+  },
+  "real_holder": {
+    "path": "/iliad/u/jasonyan/data/real_tool_holder_0831_pomdp_v4_jointpos_minmax_triview_20260903/hdf5/tool_holder_0831_triview_jointpos_raw.hdf5",
+    "episodes": 100,
+    "metrics": {
+      "q_to_command_delta": {
+        "mean": 0.5438526750857486,
+        "seeds": [
+          0.5664552538863673,
+          0.5440976738513911,
+          0.5210050975194875
+        ]
+      },
+      "q_to_executed_delta": {
+        "mean": 0.45469139439463463,
+        "seeds": [
+          0.46831214096542506,
+          0.4533073900848847,
+          0.4424546521335942
+        ]
+      },
+      "previous_executed_delta_to_next": {
+        "mean": 0.905878825242576,
+        "seeds": [
+          0.8914927439629664,
+          0.9148752108625171,
+          0.9112685209022445
+        ]
+      },
+      "executed_delta_to_command_delta": {
+        "mean": 0.8598499322822887,
+        "seeds": [
+          0.8657567506504341,
+          0.8538797591513776,
+          0.8599132870450539
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "protocol": "same frozen initial states; at most two independently seeded attempts per regime; stop after success",
+  "first_attempt": {
+    "full": 241,
+    "partial": 260,
+    "n_pairs": 260,
+    "full_rate": 0.926923076923077,
+    "partial_rate": 1.0,
+    "full_minus_partial": -0.07307692307692308,
+    "paired_bootstrap95": [
+      -0.1076923076923077,
+      -0.04230769230769231
+    ],
+    "discordant": 19
+  },
+  "within_two_attempts": {
+    "full": 254,
+    "partial": 260,
+    "n_pairs": 260,
+    "full_rate": 0.9769230769230769,
+    "partial_rate": 1.0,
+    "full_minus_partial": -0.023076923076923078,
+    "paired_bootstrap95": [
+      -0.04230769230769231,
+      -0.007692307692307693
+    ],
+    "discordant": 6
+  },
+  "conditional_retry_recoveries": {
+    "full": 13,
+    "partial": 0
+  },
+  "retry_files_expected_only_for_first_attempt_failures": true
+}

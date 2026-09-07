@@ -1,5 +1,9 @@
 # ToolHang Phase-2 Scripted Collection
 
+For the shared joint-position policy, use the
+[robust joint preset and paired evaluation](tool_hang_robust_joint.md).
+The OSC collection commands below describe the earlier OSC workflow.
+
 `ToolHangWrenchOnly` isolates the wrench-hanging phase of ToolHang. On every
 reset, the stand and frame are placed in their assembled configuration and
 fixed with MuJoCo mocap welds. The wrench remains a normal simulated free body:

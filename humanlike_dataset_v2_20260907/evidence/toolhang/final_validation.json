@@ -1,0 +1,23 @@
+{
+  "passed": true,
+  "files": {
+    "dataset_image84.hdf5": {
+      "bytes": 3586227636,
+      "sha256": "0d4225213f07cd42e236134684b170bfaa3202413bd73cf3c77002f0293f3a03"
+    },
+    "dataset_image84_14hz.hdf5": {
+      "bytes": 1833077606,
+      "sha256": "af6925a835a701c16fa1de431e0c4fada95c18398cc83b098836f6a57e839382"
+    }
+  },
+  "mask_counts": {
+    "all": 400,
+    "fully_observable": 200,
+    "partially_observable": 200,
+    "train": 320,
+    "valid": 80
+  },
+  "episodes": 400,
+  "steps_20hz": 142461,
+  "steps_14hz": 100019
+}

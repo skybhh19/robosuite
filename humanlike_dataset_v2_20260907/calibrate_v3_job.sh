@@ -1,0 +1,22 @@
+#!/bin/bash
+#SBATCH --partition=sc-freecpu
+#SBATCH --account=default
+#SBATCH --time=04:00:00
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=6G
+#SBATCH --job-name=human_v3
+set -euo pipefail
+ROOT=/iris/u/jasonyan/data/humanlike_dataset_v2_20260907
+KIND=$1
+MODE=$2
+export PYTHONPATH="/iris/u/jasonyan/repos/robosuite-${KIND}-humanlike-v3-20260907:${ROOT}"
+export MUJOCO_GL=egl OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1
+PY=/iris/u/jasonyan/miniforge3/envs/openx/bin/python
+cd "/iris/u/jasonyan/repos/robosuite-${KIND}-humanlike-v3-20260907"
+if [ "$MODE" = prepare ]; then
+  "$PY" "$ROOT/collect.py" prepare --kind "$KIND" --human-version human_v3 \
+    --root "$ROOT/calibration_v3/$KIND" --seed 202609074 --pairs 20
+else
+  "$PY" "$ROOT/collect.py" run --kind "$KIND" --human-version human_v3 \
+    --root "$ROOT/calibration_v3/$KIND" --index "${SLURM_ARRAY_TASK_ID:-0}" --shards 20
+fi

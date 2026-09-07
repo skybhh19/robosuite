@@ -38,6 +38,36 @@ from robosuite.scripts.collect_tool_hang_wrench_joint import (
 )
 from robosuite.wrappers import DataCollectionWrapper
 
+GRASP_BIN_COUNT = 5
+BALANCED_MOTION_STYLES = (
+    "direct_low",
+    "high_arc",
+    "left_sweep",
+    "right_sweep",
+)
+
+
+def grasp_range_for_regime(regime):
+    if regime == "full_visible":
+        return FULL_VISIBLE_GRASP_RANGE
+    if regime == "partial_hidden":
+        return PARTIAL_HIDDEN_GRASP_RANGE
+    raise ValueError(f"unknown grasp regime: {regime}")
+
+
+def grasp_bin_bounds(regime, bin_index):
+    if not 0 <= int(bin_index) < GRASP_BIN_COUNT:
+        raise ValueError(f"grasp bin must be in [0, {GRASP_BIN_COUNT - 1}]")
+    low, high = grasp_range_for_regime(regime)
+    edges = np.linspace(low, high, GRASP_BIN_COUNT + 1)
+    return float(edges[bin_index]), float(edges[bin_index + 1])
+
+
+def infer_grasp_bin_index(regime, grasp_x):
+    low, high = grasp_range_for_regime(regime)
+    normalized = (float(grasp_x) - low) / (high - low)
+    return int(np.clip(np.floor(normalized * GRASP_BIN_COUNT), 0, GRASP_BIN_COUNT - 1))
+
 
 def make_env(
     seed,
@@ -103,57 +133,41 @@ def generate_state_pool(env, count, assignment_seed):
         regimes[int(index)] = "full_visible"
     for index in permutation[half:]:
         regimes[int(index)] = "partial_hidden"
-    # Assign grasp coordinates and motion families only after the complete
-    # physical state pool exists. Each motion family receives equal full and
-    # partial counts, so neither factor changes the reset-state distribution.
+    # Assign the joint motion-style x grasp-bin grid only after the complete
+    # physical state pool exists. Cycling through all 25 cells within each
+    # regime makes path topology and grasp position jointly balanced rather
+    # than merely balanced in their separate marginals.
     style_rng = np.random.RandomState(assignment_seed + 1)
     grasp_rng = np.random.RandomState(assignment_seed + 2)
     by_regime = {
         regime: [index for index, value in enumerate(regimes) if value == regime]
         for regime in ("full_visible", "partial_hidden")
     }
-    styles = GeometricJointPolicy.VARIATION_STYLES
+    styles = BALANCED_MOTION_STYLES
     motion_styles = [None] * count
     grasp_positions = [None] * count
+    grasp_bin_indexes = [None] * count
+    grasp_ranges = [None] * count
     for regime, indexes in by_regime.items():
         indexes = np.asarray(indexes, dtype=int)
         style_rng.shuffle(indexes)
         for rank, index in enumerate(indexes):
-            motion_styles[int(index)] = styles[rank % len(styles)]
-        low, high = (
-            FULL_VISIBLE_GRASP_RANGE
-            if regime == "full_visible"
-            else PARTIAL_HIDDEN_GRASP_RANGE
-        )
-        # Stratification guarantees broad accepted coverage rather than
-        # relying on 50 independent draws that can cluster by chance.
-        bins = np.linspace(low, high, len(indexes) + 1)
-        samples = np.asarray(
-            [grasp_rng.uniform(bins[i], bins[i + 1]) for i in range(len(indexes))]
-        )
-        grasp_rng.shuffle(samples)
-        for index, grasp_x in zip(indexes, samples):
-            grasp_positions[int(index)] = float(grasp_x)
+            cell = rank % (len(styles) * GRASP_BIN_COUNT)
+            style_index = cell // GRASP_BIN_COUNT
+            grasp_bin_index = cell % GRASP_BIN_COUNT
+            bin_low, bin_high = grasp_bin_bounds(regime, grasp_bin_index)
+            motion_styles[int(index)] = styles[style_index]
+            grasp_bin_indexes[int(index)] = grasp_bin_index
+            grasp_positions[int(index)] = float(grasp_rng.uniform(bin_low, bin_high))
+            grasp_ranges[int(index)] = [bin_low, bin_high]
     return [
         {
             "state_id": index + 1,
             "regime": regimes[index],
             "motion_style": motion_styles[index],
+            "grasp_bin_index": grasp_bin_indexes[index],
             "grasp_offset_local_x_m": grasp_positions[index],
-            "grasp_offset_range_m": [
-                max(
-                    FULL_VISIBLE_GRASP_RANGE[0]
-                    if regimes[index] == "full_visible"
-                    else PARTIAL_HIDDEN_GRASP_RANGE[0],
-                    grasp_positions[index] - 0.0025,
-                ),
-                min(
-                    FULL_VISIBLE_GRASP_RANGE[1]
-                    if regimes[index] == "full_visible"
-                    else PARTIAL_HIDDEN_GRASP_RANGE[1],
-                    grasp_positions[index] + 0.0025,
-                ),
-            ],
+            "grasp_offset_range_m": grasp_ranges[index],
             "reset_variation": state,
         }
         for index, state in enumerate(states)
@@ -202,6 +216,11 @@ def write_dataset_metadata(output_dir, raw_dir, results):
         "video",
         "controller_backend",
         "action_space",
+        "pregrasp_contact_detected",
+        "joint_margin_rad",
+        "joint_margin_joint",
+        "joint_margin_state_index",
+        "joint_waypoint_tracking_passed",
     ]
     labels_path = output_dir / "labels.csv"
     with labels_path.open("w", newline="") as stream:
@@ -210,6 +229,12 @@ def write_dataset_metadata(output_dir, raw_dir, results):
         for stats in sorted(results, key=lambda item: int(item["state_id"])):
             state_id = int(stats["state_id"])
             grasp_x = float(stats["variation"]["grasp_offset_local_x_m"])
+            joint_safety = stats.get("joint_safety", {})
+            waypoint_outcomes = [
+                outcome
+                for outcome in stats.get("waypoint_tracking", {}).values()
+                if outcome.get("applied", False)
+            ]
             writer.writerow(
                 {
                     "state_id": state_id,
@@ -230,6 +255,22 @@ def write_dataset_metadata(output_dir, raw_dir, results):
                     "controller_backend": stats.get("controller_backend", "joint_position"),
                     "action_space": stats.get(
                         "action_space", "absolute_joint_position_plus_gripper"
+                    ),
+                    "pregrasp_contact_detected": bool(
+                        stats.get("pregrasp_contact_check", {}).get(
+                            "detected", False
+                        )
+                    ),
+                    "joint_margin_rad": joint_safety.get("minimum_margin_rad"),
+                    "joint_margin_joint": joint_safety.get(
+                        "minimum_margin_joint_name"
+                    ),
+                    "joint_margin_state_index": joint_safety.get(
+                        "minimum_margin_state_index"
+                    ),
+                    "joint_waypoint_tracking_passed": all(
+                        outcome.get("passed", False)
+                        for outcome in waypoint_outcomes
                     ),
                 }
             )
@@ -266,7 +307,8 @@ fixed at zero.
 - `raw_demos/ep_*/policy_stats.json`: stage gates, reset variation, trajectory
   variation, native success, and smoothness diagnostics.
 - `labels.csv`: one flat row per retained demonstration, including the raw
-  episode directory, grasp regime, continuous grasp coordinate, and motion style.
+  episode directory, grasp regime, continuous grasp coordinate, motion style,
+  measured joint margin, pre-grasp contact result, and waypoint tracking result.
 - `state_manifest.json`: the pre-generated reset-state pool and assignments.
 - `tool_hang_wrench_joint_summary.json`: collection-level and rollout summaries.
 - `controller_metadata.json`: exact action dimensions, frames, scaling, gains,
