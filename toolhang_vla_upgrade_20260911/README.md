@@ -27,6 +27,15 @@ places the Full grasp range entirely inside a higher-friction center segment.
 The three grip collision boxes are adjacent and non-overlapping, and their
 combined volume and mass equal the original single grip box.
 
+## Pilot result
+
+The selected production condition is `production_random_f2`: randomized
+fixture pose with the original grip friction of 2.0. On 40 pairs, first-attempt
+physical success was 34/40 Full and 37/40 Partial. With at most two independent
+policy attempts it was 40/40 Full and 39/40 Partial. Uniform friction 4.0 and
+center-only friction 4.0 were both rejected because neither reliably improved
+Full. Exact counts are in `pilot_results.json`.
+
 Run on Sherlock with `pilot_job.sh`. Do not scale to the final dataset until
 all three pilots finish, videos show the intended pose coverage, and Full and
 Partial completion remain close enough for a balanced paired release.

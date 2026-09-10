@@ -1,0 +1,25 @@
+{
+  "date": "2026-09-11",
+  "pairs_per_variant": 40,
+  "variants": {
+    "fixed_f2": {
+      "full": {"physical": 36, "accepted": 35},
+      "partial": {"physical": 37, "accepted": 36}
+    },
+    "random_f2": {
+      "full": {"physical": 34, "accepted": 34},
+      "partial": {"physical": 37, "accepted": 35},
+      "within_two_attempts": {"full": 40, "partial": 39}
+    },
+    "random_f4": {
+      "full": {"physical": 35, "accepted": 33},
+      "partial": {"physical": 35, "accepted": 35}
+    },
+    "random_center_f4": {
+      "full": {"physical": 33, "accepted": 33},
+      "partial": {"physical": 37, "accepted": 35}
+    }
+  },
+  "selected_variant": "random_f2",
+  "reason": "It adds the required fixture pose diversity while preserving the original wrench contact model. With at most two attempts, Full completed 40/40 and Partial 39/40. Both friction modifications were rejected because they did not improve Full reliably."
+}

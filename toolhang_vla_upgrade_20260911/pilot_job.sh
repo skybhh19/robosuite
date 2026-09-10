@@ -22,6 +22,8 @@ case "$VARIANT" in
     X=(-0.0 0.0); Y=(-0.0 0.0); YAW=(-0.0 0.0); FRICTION=2.0 ;;
   random_f2)
     X=(-0.035 0.035); Y=(-0.025 0.025); YAW=(-20.0 20.0); FRICTION=2.0 ;;
+  production_random_f2)
+    X=(-0.035 0.035); Y=(-0.025 0.025); YAW=(-20.0 20.0); FRICTION=2.0 ;;
   random_f4)
     X=(-0.035 0.035); Y=(-0.025 0.025); YAW=(-20.0 20.0); FRICTION=4.0 ;;
   random_center_f4)
@@ -45,6 +47,20 @@ elif [ "$MODE" = run ]; then
   "$PY" "$PIPELINE_ROOT/collect.py" run \
     --human-version toolhang_vla_v1 --kind toolhang --root "$TARGET" \
     --index "${SLURM_ARRAY_TASK_ID:-0}" --shards "$PAIRS"
+elif [ "$MODE" = retry_full ] || [ "$MODE" = retry_partial ]; then
+  REGIME=${MODE#retry_}
+  "$PY" "$PIPELINE_ROOT/collect.py" run \
+    --human-version toolhang_vla_v1 --kind toolhang --root "$TARGET" \
+    --index "${SLURM_ARRAY_TASK_ID:-0}" --shards "$PAIRS" \
+    --attempt 1 --output-dir retry1 --retry-regime "$REGIME" \
+    --failed-from "$TARGET/trials"
+elif [ "$MODE" = retry_audit ]; then
+  "$PY" "$PIPELINE_ROOT/audit_retry_completion.py" --root "$TARGET" \
+    --version toolhang_vla_v1
+elif [ "$MODE" = render ]; then
+  export MUJOCO_GL=osmesa
+  "$PY" "$PIPELINE_ROOT/render.py" --root "$TARGET" \
+    --index "${SLURM_ARRAY_TASK_ID:-0}"
 elif [ "$MODE" = summary ]; then
   "$PY" "$PIPELINE_ROOT/summarize.py" --root "$TARGET"
 else
