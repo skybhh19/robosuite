@@ -39,6 +39,7 @@ def parse_args():
     parser.add_argument("--grasp-offset-along-max-m", type=float, default=None)
     parser.add_argument("--require-clean-pregrasp-contact", action="store_true")
     parser.add_argument("--require-policy-composite-success", action="store_true")
+    parser.add_argument("--require-smooth-filter", action="store_true")
     parser.add_argument("--require-joint-approach-nonstreaming", action="store_true")
     parser.add_argument(
         "--joint-approach-waypoint-position-tolerance-m", type=float, default=None
@@ -71,6 +72,7 @@ def main():
     source_payloads = []
     all_attempts = []
     episode_records = []
+    initial_states_up_front = {}
     for source_arg in args.sources:
         source = source_arg.resolve()
         summary = load_json(source / "collection_summary.json")
@@ -88,6 +90,15 @@ def main():
             if float(item["target_grasp_angle_deg"]) in allowed_angles
         ]
         all_attempts.extend(selected_attempts)
+        for angle_key, angle_summary in summary.get("angles", {}).items():
+            angle = float(angle_key)
+            if angle not in allowed_angles:
+                continue
+            if angle in initial_states_up_front:
+                raise ValueError(f"Angle {angle:g} appears in more than one source shard")
+            initial_states_up_front[angle] = int(
+                angle_summary["initial_states_sampled_up_front"]
+            )
 
         selected_episode_count = 0
         for episode_dir in sorted((source / "raw").glob("ep_*")):
@@ -101,6 +112,10 @@ def main():
                 raise ValueError(f"Episode lacks final env success: {episode_dir}")
             if args.require_policy_composite_success and not bool(stats.get("policy_success")):
                 raise ValueError(f"Episode lacks policy composite success: {episode_dir}")
+            if args.require_smooth_filter and not bool(
+                stats.get("smooth_filter", {}).get("passed", False)
+            ):
+                raise ValueError(f"Episode failed smoothness gate: {episode_dir}")
             safety = stats.get("joint_safety", {})
             if not bool(safety.get("passed")) or float(safety["minimum_margin_rad"]) < args.joint_margin_rad:
                 raise ValueError(f"Episode violates joint margin: {episode_dir}")
@@ -169,6 +184,9 @@ def main():
                     "joint_approach_stream_waypoints": stream_waypoints,
                     "joint_approach_waypoint_position_tolerance_m": waypoint_position_tolerance_m,
                     "joint_approach_waypoint_orientation_tolerance_deg": waypoint_orientation_tolerance_deg,
+                    "smooth_filter_passed": bool(
+                        stats.get("smooth_filter", {}).get("passed", False)
+                    ),
                 }
             )
             selected_episode_count += 1
@@ -211,7 +229,7 @@ def main():
         by_angle[f"{angle:g}"] = {
             "target_grasp_angle_deg": angle,
             "target_successes": args.rollouts_per_angle,
-            "initial_states_sampled_up_front": args.rollouts_per_angle,
+            "initial_states_sampled_up_front": initial_states_up_front[angle],
             "successful_trajectories": len(accepted),
             "rollout_attempts": len(attempts),
             "retry_attempt_success_rate": len(accepted) / len(attempts),
@@ -235,15 +253,37 @@ def main():
             "pregrasp_contact_rejection_attempts": sum(
                 not bool(item.get("clean_pregrasp_contact", False)) for item in attempts
             ),
+            "smooth_pass_attempts": sum(
+                bool(item.get("smooth_passed", False)) for item in attempts
+            ),
+            "smooth_rejection_attempts": sum(
+                not bool(item.get("smooth_passed", False)) for item in attempts
+            ),
+            "recovery_used_attempts": sum(
+                int(item.get("stall_recovery_count", 0)) > 0 for item in attempts
+            ),
+            "recovery_events": sum(
+                int(item.get("stall_recovery_count", 0)) for item in attempts
+            ),
+            "accepted_recovery_trajectories": sum(
+                bool(item["accepted_success"])
+                and int(item.get("stall_recovery_count", 0)) > 0
+                for item in attempts
+            ),
+            "accepted_recovery_events": sum(
+                int(item.get("stall_recovery_count", 0))
+                for item in attempts
+                if bool(item["accepted_success"])
+            ),
             "rejected_attempt_reasons": dict(
                 Counter(
-                    str(item.get("failure_reason", "unknown"))
+                    str(item.get("rejection_reason", item.get("failure_reason", "unknown")))
                     for item in attempts
                     if not bool(item["accepted_success"])
                 )
             ),
             "initial_states_replaced": len(replaced),
-            "initial_states_sampled": args.rollouts_per_angle + len(replaced),
+            "initial_states_sampled": initial_states_up_front[angle] + len(replaced),
             "retry_histogram": dict(Counter(str(item["retry_index"]) for item in accepted)),
             "minimum_accepted_joint_margin_rad": min(
                 item["minimum_joint_margin_rad"]
@@ -297,6 +337,7 @@ def main():
         ],
         "require_clean_pregrasp_contact": args.require_clean_pregrasp_contact,
         "require_policy_composite_success": args.require_policy_composite_success,
+        "require_smooth_filter": args.require_smooth_filter,
         "joint_approach_stream_waypoints": (
             False if args.require_joint_approach_nonstreaming else None
         ),
@@ -325,8 +366,21 @@ def main():
             "joint_margin_fail_attempts": sum(
                 item["joint_margin_fail_attempts"] for item in by_angle.values()
             ),
+            "smooth_rejection_attempts": sum(
+                item["smooth_rejection_attempts"] for item in by_angle.values()
+            ),
             "policy_composite_success_attempts": sum(
                 item["policy_composite_success_attempts"] for item in by_angle.values()
+            ),
+            "recovery_used_attempts": sum(
+                item["recovery_used_attempts"] for item in by_angle.values()
+            ),
+            "recovery_events": sum(item["recovery_events"] for item in by_angle.values()),
+            "accepted_recovery_trajectories": sum(
+                item["accepted_recovery_trajectories"] for item in by_angle.values()
+            ),
+            "accepted_recovery_events": sum(
+                item["accepted_recovery_events"] for item in by_angle.values()
             ),
         },
         "hdf5_path": str(hdf5_path),

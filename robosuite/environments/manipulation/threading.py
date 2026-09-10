@@ -1,5 +1,7 @@
 """Single-arm needle-threading task."""
 
+import xml.etree.ElementTree as ET
+
 import numpy as np
 
 import robosuite.utils.transform_utils as T
@@ -11,7 +13,7 @@ from robosuite.models.objects.composite.needle import (
     SHORT_NEEDLE_SHAFT_HALF_LENGTH,
 )
 from robosuite.models.tasks import ManipulationTask
-from robosuite.utils.mjcf_utils import string_to_array
+from robosuite.utils.mjcf_utils import array_to_string, string_to_array
 from robosuite.utils.observables import Observable, sensor
 from robosuite.utils.placement_samplers import SequentialCompositeSampler, UniformRandomSampler
 
@@ -22,6 +24,14 @@ class Threading(ManipulationEnv):
     needle_shaft_half_length = NEEDLE_SHAFT_HALF_LENGTH
     tripod_ring_outer_size = None
     tripod_ring_inner_size = None
+    gripper_contact_friction = None
+
+    _GRIPPER_CONTACT_GEOM_SUFFIXES = (
+        "finger1_collision",
+        "finger2_collision",
+        "finger1_pad_collision",
+        "finger2_pad_collision",
+    )
 
     def __init__(
         self,
@@ -106,6 +116,7 @@ class Threading(ManipulationEnv):
 
         xpos = self.robots[0].robot_model.base_xpos_offset["table"](self.table_full_size[0])
         self.robots[0].robot_model.set_base_xpos(xpos)
+        self._apply_gripper_contact_friction(self.robots[0].robot_model.worldbody)
 
         mujoco_arena = TableArena(
             table_full_size=self.table_full_size,
@@ -131,6 +142,33 @@ class Threading(ManipulationEnv):
             mujoco_robots=[robot.robot_model for robot in self.robots],
             mujoco_objects=[self.needle, self.tripod],
         )
+
+    @classmethod
+    def _apply_gripper_contact_friction(cls, root):
+        """Apply a variant's fixed friction to Panda finger collision geoms."""
+        if cls.gripper_contact_friction is None:
+            return 0
+        friction = np.asarray(cls.gripper_contact_friction, dtype=float)
+        if friction.shape != (3,) or np.any(friction < 0.0):
+            raise ValueError("gripper_contact_friction must contain three non-negative values")
+        changed = 0
+        for geom in root.iter("geom"):
+            name = geom.get("name", "")
+            if name.endswith(cls._GRIPPER_CONTACT_GEOM_SUFFIXES):
+                geom.set("friction", array_to_string(friction))
+                changed += 1
+        if changed != 4:
+            raise ValueError(f"Expected four Panda gripper contact geoms, found {changed}")
+        return changed
+
+    def edit_model_xml(self, xml_str):
+        """Preserve variant-specific gripper friction when replaying model XML."""
+        xml_str = super().edit_model_xml(xml_str)
+        if self.gripper_contact_friction is None:
+            return xml_str
+        root = ET.fromstring(xml_str)
+        self._apply_gripper_contact_friction(root)
+        return ET.tostring(root, encoding="unicode")
 
     def _add_agentview_full_camera(self, arena):
         """Add MimicGen's wider tabletop camera."""
@@ -483,11 +521,129 @@ class Threading_D06(Threading_D08):
         }
 
 
+class Threading_D06_WristUp(Threading_D06):
+    """D0.6 with the wrist camera pitched 10 degrees toward image-up.
+
+    The task geometry and initial-state distribution are identical to
+    :class:`Threading_D06`; only the eye-in-hand camera orientation changes.
+    """
+
+    wrist_camera_pitch_deg = 10.0
+
+    @classmethod
+    def _get_wrist_camera_pos(cls):
+        """Return the Panda wrist-camera mount position in the hand frame."""
+        return np.array([0.05, 0.0, 0.0])
+
+    @classmethod
+    def _get_wrist_camera_quat(cls):
+        """Return the pitched Panda wrist-camera quaternion in MuJoCo WXYZ order."""
+        half_pitch = np.deg2rad(cls.wrist_camera_pitch_deg) / 2.0
+        sin_half = np.sin(half_pitch)
+        cos_half = np.cos(half_pitch)
+        inv_sqrt_two = 1.0 / np.sqrt(2.0)
+
+        # Panda's default eye-in-hand quaternion is [0, 1/sqrt(2),
+        # 1/sqrt(2), 0]. Post-multiplying it by a local +X rotation pitches
+        # the optical axis toward +Y (up in the camera image).
+        return np.array(
+            [
+                -inv_sqrt_two * sin_half,
+                inv_sqrt_two * cos_half,
+                inv_sqrt_two * cos_half,
+                -inv_sqrt_two * sin_half,
+            ]
+        )
+
+    def _setup_references(self):
+        super()._setup_references()
+        wrist_camera_id = self.sim.model.camera_name2id("robot0_eye_in_hand")
+        self.sim.model.cam_pos[wrist_camera_id] = self._get_wrist_camera_pos()
+        self.sim.model.cam_quat[wrist_camera_id] = self._get_wrist_camera_quat()
+        self.sim.forward()
+
+    def edit_model_xml(self, xml_str):
+        """Persist the wrist-camera mount in freshly built and replayed MuJoCo XML."""
+        xml_str = super().edit_model_xml(xml_str)
+        root = ET.fromstring(xml_str)
+        wrist_camera = root.find(".//camera[@name='robot0_eye_in_hand']")
+        if wrist_camera is None:
+            raise ValueError("Threading_D06_WristUp requires robot0_eye_in_hand")
+        wrist_camera.set("pos", array_to_string(self._get_wrist_camera_pos()))
+        wrist_camera.set("quat", array_to_string(self._get_wrist_camera_quat()))
+        return ET.tostring(root, encoding="unicode")
+
+
 class Threading_D06_Hard(Threading_D06):
     """D0.6 with a 22 mm outer ring and a 14 mm square aperture."""
 
     tripod_ring_outer_size = 0.022
     tripod_ring_inner_size = 0.014
+
+
+class Threading_D06_Hard_WristUp(Threading_D06_WristUp):
+    """D0.6 Hard geometry with the wrist camera pitched 5 degrees upward."""
+
+    tripod_ring_outer_size = 0.022
+    tripod_ring_inner_size = 0.014
+    wrist_camera_pitch_deg = 5.0
+
+
+class Threading_D06_Harder(Threading_D06):
+    """D0.6 with a 20 mm outer ring and a 12 mm square aperture."""
+
+    tripod_ring_outer_size = 0.020
+    tripod_ring_inner_size = 0.012
+
+
+class Threading_D06_Harder_WristUp(Threading_D06_Harder, Threading_D06_WristUp):
+    """D0.6 Harder geometry with the same wrist camera as D0.6 Hard WristUp."""
+
+    wrist_camera_pitch_deg = Threading_D06_Hard_WristUp.wrist_camera_pitch_deg
+
+
+class Threading_D09_Harder_WristUp(Threading_D06_Harder_WristUp):
+    """D0.6 Harder WristUp with limited tripod yaw and a forward-shifted needle."""
+
+    def _get_initial_placement_bounds(self):
+        bounds = super()._get_initial_placement_bounds()
+        bounds["needle"]["y"] = (0.17, 0.27)
+        bounds["tripod"]["z_rot"] = (np.deg2rad(75.0), np.deg2rad(115.0))
+        return bounds
+
+
+class Threading_D09_Harder_WristUp_GripperFriction3(Threading_D09_Harder_WristUp):
+    """D09 with fixed higher-friction Panda finger and fingertip collision geoms."""
+
+    gripper_contact_friction = (3.0, 0.075, 0.0001)
+
+
+class Threading_D09_Harder_WristUp_GripperFriction1p5(Threading_D09_Harder_WristUp):
+    """D09 with friction 1.5, reversed needle yaw, and a mirrored wrist camera."""
+
+    gripper_contact_friction = (1.5, 0.0375, 0.0001)
+    # Keep this mirrored camera 2 degrees below the parent's +5-degree mount.
+    wrist_camera_pitch_deg = 3.0
+
+    def _get_initial_placement_bounds(self):
+        bounds = super()._get_initial_placement_bounds()
+        bounds["needle"]["z_rot"] = (np.deg2rad(260.0), np.deg2rad(280.0))
+        return bounds
+
+    @classmethod
+    def _get_wrist_camera_pos(cls):
+        """Mount the camera on the opposite side of the Panda hand."""
+        return np.array([-0.05, 0.0, 0.0])
+
+    @classmethod
+    def _get_wrist_camera_quat(cls):
+        """Flip the wrist camera 180 degrees about the gripper's local Z axis."""
+        base_quat = np.asarray(super()._get_wrist_camera_quat(), dtype=float)
+        # Left-multiply the WXYZ camera quaternion by the local gripper-axis
+        # half-turn [0, 0, 0, 1]. This mirrors the camera mounting to the
+        # opposite side without turning its optical axis back into the wrist.
+        w, x, y, z = base_quat
+        return np.array([-z, -y, x, w])
 
 
 class Threading_D1(Threading_D0):

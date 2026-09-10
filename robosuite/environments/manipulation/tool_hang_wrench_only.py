@@ -278,7 +278,10 @@ class ToolHangWrenchOnly(ToolHang):
         # start from different controller / velocity state than every demo.
         # Make settling part of the registered environment reset so bare
         # training and evaluation resets reproduce the demonstrated state.
-        settle_action = np.r_[robot_qpos, -1.0]
+        # Settle the active controller without commanding motion. The collected
+        # demonstrations use a 7-D OSC_POSE action (6-D pose delta + gripper),
+        # so concatenating the 7 joint positions produced an invalid 8-D action.
+        settle_action = np.r_[np.zeros(self.action_dim - 1), -1.0]
         for _ in range(self.RESET_CONTROLLER_SETTLE_STEPS):
             super().step(settle_action)
         self.timestep = 0

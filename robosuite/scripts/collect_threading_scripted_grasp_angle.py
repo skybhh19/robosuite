@@ -48,12 +48,34 @@ JOINT_GRASP_PROBE_MIN_FOLLOW_RATIO = 0.70
 TERMINAL_HOLD_POSITION_TOLERANCE = 0.005
 OSC_MOTION_SPEEDUP = 1.30
 OSC_TRAJECTORY_TIMING_PROFILE = "osc_overlapped_close_lift_1p3x_v5"
-JOINT_TRAJECTORY_TIMING_PROFILE = "joint_panda_servo_streaming_insert_v9"
-INSERT_TIME_WARP_SKEW_RANGE = (-0.12, 0.12)
-INSERT_LATERAL_BUMP_RANGE = (-0.00075, 0.00075)
-INSERT_VERTICAL_BUMP_RANGE = (-0.00050, 0.00050)
+JOINT_TRAJECTORY_TIMING_PROFILE = "joint_panda_humanized_alignment_insert_v10"
+ACTION_NOISE_ALPHA_RANGE = (0.82, 0.94)
+INSERT_TIME_WARP_SKEW_RANGE = (-0.20, 0.20)
+INSERT_LATERAL_BUMP_RANGE = (-0.0020, 0.0020)
+INSERT_VERTICAL_BUMP_RANGE = (-0.0015, 0.0015)
+INSERT_LATERAL_CORRECTION_RANGE = (-0.0010, 0.0010)
+INSERT_VERTICAL_CORRECTION_RANGE = (-0.00075, 0.00075)
 INSERT_BUMP_CLEARANCE_HALF_WIDTH = 0.010
 INSERT_BUMP_CLEARANCE_RAMP = 0.010
+INSERT_RECOVERY_PROGRESS_WINDOW_STEPS = 6
+INSERT_RECOVERY_PROGRESS_SPAN_M = 0.0005
+INSERT_RECOVERY_MIN_COMMAND_GAP_M = 0.001
+INSERT_RECOVERY_CONTACT_ZONE_M = (-0.020, 0.010)
+INSERT_RECOVERY_STAGE_TRIPOD_DISPLACEMENT_M = 0.006
+INSERT_MAX_RECOVERY_ATTEMPTS = 3
+TIGHT_APERTURE_HALF_EXTENT = 0.006
+TIGHT_APERTURE_LATERAL_END_RANGE = (-0.00025, 0.00025)
+TIGHT_APERTURE_VERTICAL_END_RANGE = (-0.00025, 0.00025)
+TIGHT_APERTURE_TWIST_END_RANGE = (np.deg2rad(-0.35), np.deg2rad(0.35))
+TIGHT_APERTURE_TILT_END_RANGE = (np.deg2rad(-0.25), np.deg2rad(0.25))
+TIGHT_APERTURE_HEADING_END_RANGE = (np.deg2rad(-0.40), np.deg2rad(0.40))
+TIGHT_APERTURE_INSERT_LATERAL_BUMP_RANGE = (-0.0010, 0.0010)
+TIGHT_APERTURE_INSERT_VERTICAL_BUMP_RANGE = (-0.00070, 0.00070)
+TIGHT_APERTURE_INSERT_LATERAL_CORRECTION_RANGE = (-0.00050, 0.00050)
+TIGHT_APERTURE_INSERT_VERTICAL_CORRECTION_RANGE = (-0.00035, 0.00035)
+TIGHT_APERTURE_CENTERED_BY_OFFSET = -0.010
+ALIGN_DURATION_SCALE_RANGE = (0.90, 1.20)
+INSERT_DURATION_SCALE_RANGE = (0.85, 1.20)
 # Reference steps define curve speed; controller-specific caps bound convergence time.
 NOMINAL_STAGE_STEPS = {
     "aim_approach": 45,
@@ -193,6 +215,13 @@ def minimum_jerk(x):
     return x**3 * (10.0 - 15.0 * x + 6.0 * x**2)
 
 
+def delayed_smooth_progress(progress, delay, span):
+    """Smooth delayed progress that is guaranteed to reach one at the endpoint."""
+    delay = float(np.clip(delay, 0.0, 1.0 - 1e-6))
+    effective_span = min(max(float(span), 1e-6), 1.0 - delay)
+    return float(smoothstep((float(progress) - delay) / effective_span))
+
+
 def insertion_time_warp(x, skew):
     """Return a smooth monotonic insertion clock with unchanged endpoint velocity."""
     x = np.clip(x, 0.0, 1.0)
@@ -216,6 +245,29 @@ def insertion_spatial_bump_envelope(
     ) / max(float(clearance_ramp), 1e-8)
     clearance_gate = smoothstep(clearance_progress)
     return float(endpoint_envelope * clearance_gate)
+
+
+def insertion_correction_envelope(
+    progress,
+    normal_offset,
+    clearance_half_width=INSERT_BUMP_CLEARANCE_HALF_WIDTH,
+    clearance_ramp=INSERT_BUMP_CLEARANCE_RAMP,
+):
+    """Return a second, sign-changing correction basis with safe endpoints.
+
+    Combining this with :func:`insertion_spatial_bump_envelope` produces a
+    curved approach that can overshoot and correct like a teleoperator. Both
+    position and velocity perturbations still vanish at the trajectory
+    endpoints and throughout the guarded ring-plane neighborhood.
+    """
+    progress = np.clip(progress, 0.0, 1.0)
+    envelope = insertion_spatial_bump_envelope(
+        progress,
+        normal_offset,
+        clearance_half_width=clearance_half_width,
+        clearance_ramp=clearance_ramp,
+    )
+    return float(envelope * (2.0 * progress - 1.0))
 
 
 def endpoint_smooth_progress(x, initial_slope=1.0):
@@ -634,6 +686,7 @@ def target_action(
     noise_state,
     noise_std,
     rng,
+    noise_alpha=0.90,
 ):
     """Convert a target pose into a smooth normalized OSC_POSE action."""
     eef_pos, eef_quat = get_eef_pose(env)
@@ -648,7 +701,6 @@ def target_action(
     action[-1] = gripper
 
     if noise_std > 0:
-        noise_alpha = 0.96
         noise_state[:] = noise_alpha * noise_state + np.sqrt(1.0 - noise_alpha**2) * rng.normal(size=noise_state.shape)
         action[:-1] += noise_std * noise_state
 
@@ -712,14 +764,15 @@ class JointPositionPoseAdapter:
 
         noise_std = policy_state["noise_std"]
         if noise_std > 0:
-            noise_alpha = 0.96
+            noise_alpha = policy_state["noise_alpha"]
             noise_state = policy_state["noise_state"]
             noise_state[:] = noise_alpha * noise_state + np.sqrt(1.0 - noise_alpha**2) * policy_state["rng"].normal(
                 size=noise_state.shape
             )
             # The CLI noise value is dimensionless OSC action noise. Convert it
             # to the same 0.05-rad joint-delta reference used by saved labels;
-            # treating 0.01 as radians directly produces excessive EEF jitter.
+            # treating the dimensionless value as radians produces excessive
+            # EEF jitter.
             q_des = q_des + noise_std * self.noise_scale * noise_state
 
         current_q = self.current_qpos(env)
@@ -761,6 +814,7 @@ def hold_pose_steps(env, target_pos, target_quat, gripper, steps, policy_state, 
                 noise_state=policy_state["noise_state"],
                 noise_std=policy_state["noise_std"],
                 rng=policy_state["rng"],
+                noise_alpha=policy_state["noise_alpha"],
             )
         else:
             action = action_adapter.action(env, target_pos, target_quat, gripper, policy_state)
@@ -824,16 +878,22 @@ class ThreadingScriptedPolicy:
     def __init__(
         self,
         rng,
-        action_noise_std=0.01,
+        action_noise_std=0.02,
         grasp_angle_range=(80.0, 120.0),
         control_mode="osc_pose",
         collision_aware_threading=False,
+        insert_stall_recovery=False,
+        grasp_offset_along_range=(-0.0025, -0.0020),
     ):
         self.rng = rng
         self.action_noise_std = action_noise_std
         self.grasp_angle_range = grasp_angle_range
         self.control_mode = control_mode
         self.collision_aware_threading = collision_aware_threading
+        self.insert_stall_recovery = bool(insert_stall_recovery)
+        if len(grasp_offset_along_range) != 2 or grasp_offset_along_range[0] > grasp_offset_along_range[1]:
+            raise ValueError("grasp_offset_along_range must be an ordered (min, max) pair")
+        self.grasp_offset_along_range = tuple(float(value) for value in grasp_offset_along_range)
         self.stats = []
 
     def _limit_lift_height(self, lift_height):
@@ -848,6 +908,7 @@ class ThreadingScriptedPolicy:
             "target_quat": None,
             "noise_state": np.zeros(noise_dim),
             "noise_std": self.action_noise_std if noise_std is None else noise_std,
+            "noise_alpha": float(self.rng.uniform(*ACTION_NOISE_ALPHA_RANGE)),
             "rng": self.rng,
             "last_action_for_metrics": None,
             "last_delta_for_metrics": None,
@@ -1411,6 +1472,7 @@ class ThreadingScriptedPolicy:
         rotation_fraction=1.0,
         needle_to_eef=None,
         reference_needle_mat=None,
+        heading=0.0,
     ):
         if needle_to_eef is None or reference_needle_mat is None:
             raise ValueError("Alignment targets require a measured grasp transform and fixed reference needle frame")
@@ -1427,6 +1489,8 @@ class ThreadingScriptedPolicy:
             wobble_rot = (
                 T.rotation_matrix(twist, current_ring["normal"])[:3, :3].dot(
                     T.rotation_matrix(tilt, side)[:3, :3]
+                ).dot(
+                    T.rotation_matrix(heading, vertical)[:3, :3]
                 )
             )
             target_needle_mat = wobble_rot.dot(partial_align_rot).dot(reference_mat)
@@ -1454,11 +1518,21 @@ class ThreadingScriptedPolicy:
         alignment_fraction=None,
     ):
         path_t = smoothstep(progress)
-        rot_t = smoothstep((progress - curve["rotation_delay"]) / curve["rotation_span"])
+        rot_t = delayed_smooth_progress(
+            progress,
+            curve["rotation_delay"],
+            curve["rotation_span"],
+        )
         lateral = quadratic_bezier(curve["lateral_start"], curve["lateral_control"], curve["lateral_end"], path_t)
         vertical = quadratic_bezier(curve["vertical_start"], curve["vertical_control"], curve["vertical_end"], path_t)
         twist = quadratic_bezier(curve["twist_start"], curve["twist_control"], curve["twist_end"], rot_t)
         tilt = quadratic_bezier(curve["tilt_start"], curve["tilt_control"], curve["tilt_end"], rot_t)
+        heading = quadratic_bezier(
+            curve.get("heading_start", 0.0),
+            curve.get("heading_control", 0.0),
+            curve.get("heading_end", 0.0),
+            rot_t,
+        )
         return self._alignment_target(
             offset,
             lateral,
@@ -1468,6 +1542,7 @@ class ThreadingScriptedPolicy:
             rot_t if alignment_fraction is None else alignment_fraction,
             needle_to_eef,
             reference_needle_mat,
+            heading=heading,
         )
 
     def _needle_target_errors(self, env, offset, lateral_offset=0.0, vertical_offset=0.0):
@@ -1649,13 +1724,23 @@ class ThreadingScriptedPolicy:
         base_eef_mat = T.quat2mat(eef_quat)
         needle = needle_state(env)
         ring = ring_state(env)
+        aperture_half_extent = float(env.unwrapped.tripod.aperture_half_extent)
+        tight_aperture_profile = bool(
+            aperture_half_extent <= TIGHT_APERTURE_HALF_EXTENT + 1e-9
+        )
+        # A 12 mm aperture leaves only 1 mm of nominal clearance around the
+        # 10 mm needle shaft. Automatically use the guarded, closed-loop path
+        # for this geometry even when the general collision-aware flag is off.
+        collision_aware_threading = bool(
+            self.collision_aware_threading or tight_aperture_profile
+        )
         gripper_axes = calibrate_gripper_axes(base_eef_mat, needle)
 
         grasp_angle = float(target_grasp_angle) if target_grasp_angle is not None else self.rng.uniform(*self.grasp_angle_range)
         grasp_tilt_x = 0.0
         grasp_tilt_y = 0.0
         # Sample the lower handle region while retaining a margin from its edge.
-        grasp_offset_along = self.rng.uniform(-0.0025, 0.0)
+        grasp_offset_along = self.rng.uniform(*self.grasp_offset_along_range)
         grasp_offset_lateral = self.rng.uniform(-0.0003, 0.0003)
         grasp_offset_vertical = self.rng.uniform(-0.0003, 0.0003)
         grasp_offset = (
@@ -1771,7 +1856,7 @@ class ThreadingScriptedPolicy:
             lift_progress_power = self.rng.uniform(0.7, 0.95)
         else:
             raise ValueError(f"Unknown threading motion style: {motion_style}")
-        if self.collision_aware_threading:
+        if collision_aware_threading:
             # The randomized D0.5 tripod can put the entry side behind a support
             # relative to the robot. Clear the full tripod before moving around it.
             lift_height = max(lift_height, 0.20)
@@ -1841,6 +1926,12 @@ class ThreadingScriptedPolicy:
         lift_align_quat = T.mat2quat(lift_align_rot)
         lift_prealign_fraction = float(self.rng.uniform(0.28, 0.55))
         durations = nominal_stage_durations(self.control_mode)
+        duration_scales = {
+            "align": float(self.rng.uniform(*ALIGN_DURATION_SCALE_RANGE)),
+            "insert_through": float(self.rng.uniform(*INSERT_DURATION_SCALE_RANGE)),
+        }
+        for stage, scale in duration_scales.items():
+            durations[stage] = max(2, int(round(durations[stage] * scale)))
         pre_insert_offset = float(self.rng.uniform(-0.035, -0.020))
         align_end_offset = float(self.rng.uniform(-0.064, -0.050))
         # Keep insertion start at or ahead of the sampled pre-insertion pose so
@@ -1849,24 +1940,57 @@ class ThreadingScriptedPolicy:
             self.rng.uniform(max(-0.025, pre_insert_offset), -0.015)
         )
         insert_end_offset = float(self.rng.uniform(0.036, 0.052))
+        lateral_end_range = (
+            TIGHT_APERTURE_LATERAL_END_RANGE
+            if tight_aperture_profile
+            else (-0.002, 0.002)
+        )
+        vertical_end_range = (
+            TIGHT_APERTURE_VERTICAL_END_RANGE
+            if tight_aperture_profile
+            else (-0.001, 0.0015)
+        )
+        twist_end_range = (
+            TIGHT_APERTURE_TWIST_END_RANGE
+            if tight_aperture_profile
+            else (np.deg2rad(-3.0), np.deg2rad(1.5))
+        )
+        tilt_end_range = (
+            TIGHT_APERTURE_TILT_END_RANGE
+            if tight_aperture_profile
+            else (np.deg2rad(-1.0), np.deg2rad(1.0))
+        )
+        heading_end_range = (
+            TIGHT_APERTURE_HEADING_END_RANGE
+            if tight_aperture_profile
+            else (np.deg2rad(-1.25), np.deg2rad(1.25))
+        )
         align_curve = {
             "lateral_start": float(self.rng.uniform(-0.002, 0.002)),
             "lateral_control": float(self.rng.uniform(-0.012, 0.012)),
-            "lateral_end": float(self.rng.uniform(-0.002, 0.002)),
+            "lateral_end": float(self.rng.uniform(*lateral_end_range)),
             "vertical_start": float(self.rng.uniform(-0.001, 0.002)),
             "vertical_control": float(self.rng.uniform(-0.004, 0.008)),
-            "vertical_end": float(self.rng.uniform(-0.001, 0.0015)),
+            "vertical_end": float(self.rng.uniform(*vertical_end_range)),
             "twist_start": 0.0,
             "twist_control": float(self.rng.uniform(np.deg2rad(-5.0), np.deg2rad(5.0))),
-            "twist_end": float(self.rng.uniform(np.deg2rad(-3.0), np.deg2rad(1.5))),
+            "twist_end": float(self.rng.uniform(*twist_end_range)),
             "tilt_start": 0.0,
             "tilt_control": float(self.rng.uniform(np.deg2rad(-3.0), np.deg2rad(3.0))),
-            "tilt_end": float(self.rng.uniform(np.deg2rad(-1.0), np.deg2rad(1.0))),
+            "tilt_end": float(self.rng.uniform(*tilt_end_range)),
+            "heading_start": 0.0,
+            "heading_control": float(self.rng.uniform(np.deg2rad(-4.0), np.deg2rad(4.0))),
+            "heading_end": float(self.rng.uniform(*heading_end_range)),
             "rotation_delay": float(self.rng.uniform(0.08, 0.28)),
             "rotation_span": float(self.rng.uniform(0.58, 0.85)),
+            "rotation_fraction_control": float(self.rng.uniform(0.20, 0.80)),
+        }
+        safe_alignment_fractions = {
+            "above": float(self.rng.uniform(0.35, 0.60)),
+            "entry": float(self.rng.uniform(0.65, 0.85)),
         }
 
-        episode_noise_std = float(self.action_noise_std * self.rng.uniform(0.8, 1.25))
+        episode_noise_std = float(self.action_noise_std * self.rng.uniform(0.75, 1.35))
         policy_state = self._new_policy_state(env, noise_std=episode_noise_std)
         stats = {
             "success": False,
@@ -1978,11 +2102,12 @@ class ThreadingScriptedPolicy:
             "lift_roll_deg": float(np.rad2deg(lift_roll)),
             "lift_prealign_fraction": float(lift_prealign_fraction),
             "align_curve": {
-                key: float(np.rad2deg(value)) if "twist" in key or "tilt" in key else float(value)
+                key: float(np.rad2deg(value)) if any(axis in key for axis in ("twist", "tilt", "heading")) else float(value)
                 for key, value in align_curve.items()
             },
             "action_noise_std": float(self.action_noise_std),
             "episode_noise_std": episode_noise_std,
+            "action_noise_alpha": float(policy_state["noise_alpha"]),
             "trajectory_timing_profile": (
                 JOINT_TRAJECTORY_TIMING_PROFILE
                 if self.control_mode == "joint_position"
@@ -1990,6 +2115,8 @@ class ThreadingScriptedPolicy:
             ),
             "motion_speedup": OSC_MOTION_SPEEDUP if self.control_mode == "osc_pose" else 1.0,
             "planned_durations": durations,
+            "duration_scales": duration_scales,
+            "safe_alignment_fractions": safe_alignment_fractions,
             "planned_offsets": {
                 "align": align_end_offset,
                 "pre_insert": pre_insert_offset,
@@ -1997,7 +2124,10 @@ class ThreadingScriptedPolicy:
                 "insert_end": insert_end_offset,
             },
             "full_quality_mode": bool(full_quality_mode),
-            "collision_aware_threading": bool(self.collision_aware_threading),
+            "collision_aware_threading": collision_aware_threading,
+            "collision_aware_threading_requested": bool(self.collision_aware_threading),
+            "tight_aperture_profile": tight_aperture_profile,
+            "aperture_half_extent_m": aperture_half_extent,
         }
 
         # Follow one continuous approach path through the safe descend pose.
@@ -2447,15 +2577,13 @@ class ThreadingScriptedPolicy:
         if not stats["lift_complete"]:
             stats["aborted_stage"] = "lift_arc"
             return self._finish_rollout(env, stats, policy_state, gripper_axes)
-        align_reference_needle_mat = lift_needle["mat"].copy()
-        alignment_start = ring_frame_offsets(lift_needle["tip"], ring_state(env))
+        safe_stage_reference_needle_mat = lift_needle["mat"].copy()
         stats["alignment_profile"] = (
-            "measured_nonzero_entry_smooth_stop"
+            "humanized_bezier_coupled_position_orientation"
             if self.control_mode == "joint_position"
-            else "measured_minimum_jerk"
+            else "humanized_bezier_minimum_jerk"
         )
-        stats["alignment_start_offsets"] = dict(alignment_start)
-        if self.collision_aware_threading:
+        if collision_aware_threading:
             # First move above the entry side, then descend while still well
             # outside the ring. This avoids sweeping through a rotated support.
             self._track_target(
@@ -2463,9 +2591,9 @@ class ThreadingScriptedPolicy:
                 lambda: self._alignment_target(
                     -0.075,
                     vertical_offset=0.080,
-                    rotation_fraction=1.0,
+                    rotation_fraction=safe_alignment_fractions["above"],
                     needle_to_eef=measured_needle_to_eef,
-                    reference_needle_mat=align_reference_needle_mat,
+                    reference_needle_mat=safe_stage_reference_needle_mat,
                 )(env),
                 1.0,
                 100,
@@ -2482,9 +2610,9 @@ class ThreadingScriptedPolicy:
                     lambda: self._alignment_target(
                         -0.075,
                         vertical_offset=0.025,
-                        rotation_fraction=1.0,
+                        rotation_fraction=safe_alignment_fractions["entry"],
                         needle_to_eef=measured_needle_to_eef,
-                        reference_needle_mat=align_reference_needle_mat,
+                        reference_needle_mat=safe_stage_reference_needle_mat,
                     )(env),
                     1.0,
                     80,
@@ -2496,9 +2624,18 @@ class ThreadingScriptedPolicy:
                     min_steps=20,
                 )
 
-        # Start from the measured post-lift tip pose and blend monotonically to
-        # an alignment staging pose that remains independent of the closer
-        # pre-insertion pose.
+        # Re-measure after optional collision-clearance staging. Otherwise the
+        # alignment path begins by commanding the old post-lift pose and briefly
+        # reverses the safe-stage motion. Human operators instead continue from
+        # wherever their previous correction ended.
+        staged_needle = needle_state(env)
+        align_reference_needle_mat = staged_needle["mat"].copy()
+        alignment_start = ring_frame_offsets(staged_needle["tip"], ring_state(env))
+        stats["alignment_start_offsets"] = dict(alignment_start)
+
+        # Couple translation and rotation on sampled Bezier curves. The old
+        # implementation recorded these control points but ignored them here,
+        # producing a nearly straight, deterministic alignment segment.
         def align_target(progress):
             blend = (
                 endpoint_velocity_progress(progress, initial_slope=0.65, final_slope=0.0)
@@ -2506,19 +2643,57 @@ class ThreadingScriptedPolicy:
                 else minimum_jerk(progress)
             )
             offset = (1.0 - blend) * alignment_start["normal"] + blend * align_end_offset
-            lateral = (1.0 - blend) * alignment_start["lateral"] + blend * align_curve["lateral_end"]
-            vertical = (1.0 - blend) * alignment_start["vertical"] + blend * align_curve["vertical_end"]
-            twist = blend * align_curve["twist_end"]
-            tilt = blend * align_curve["tilt_end"]
+            lateral = quadratic_bezier(
+                alignment_start["lateral"],
+                align_curve["lateral_control"],
+                align_curve["lateral_end"],
+                blend,
+            )
+            vertical = quadratic_bezier(
+                alignment_start["vertical"],
+                align_curve["vertical_control"],
+                align_curve["vertical_end"],
+                blend,
+            )
+            rotation_clock = delayed_smooth_progress(
+                progress,
+                align_curve["rotation_delay"],
+                align_curve["rotation_span"],
+            )
+            rotation_fraction = quadratic_bezier(
+                0.0,
+                align_curve["rotation_fraction_control"],
+                1.0,
+                rotation_clock,
+            )
+            twist = quadratic_bezier(
+                0.0,
+                align_curve["twist_control"],
+                align_curve["twist_end"],
+                rotation_clock,
+            )
+            tilt = quadratic_bezier(
+                0.0,
+                align_curve["tilt_control"],
+                align_curve["tilt_end"],
+                rotation_clock,
+            )
+            heading = quadratic_bezier(
+                0.0,
+                align_curve["heading_control"],
+                align_curve["heading_end"],
+                rotation_clock,
+            )
             target_fn = self._alignment_target(
                 offset,
                 lateral_offset=lateral,
                 vertical_offset=vertical,
                 twist=twist,
                 tilt=tilt,
-                rotation_fraction=blend,
+                rotation_fraction=rotation_fraction,
                 needle_to_eef=measured_needle_to_eef,
                 reference_needle_mat=align_reference_needle_mat,
+                heading=heading,
             )
             return target_fn(env)
 
@@ -2613,7 +2788,7 @@ class ThreadingScriptedPolicy:
             if self.control_mode == "joint_position"
             else "measured_after_lift"
         )
-        if self.collision_aware_threading:
+        if collision_aware_threading:
             stable_steps = 0
             gate_errors = None
             gate_steps = 0
@@ -2645,10 +2820,14 @@ class ThreadingScriptedPolicy:
                 )
                 gate_tripod_motion = self._tripod_motion(env, stats, max_displacement=0.012)
                 within_gate = (
-                    gate_errors["normal_error_m"] < 0.008
-                    and gate_errors["tangent_error_m"] < 0.004
-                    and gate_errors["vertical_error_m"] < 0.004
-                    and gate_errors["orientation_error_deg"] < 5.0
+                    gate_errors["normal_error_m"]
+                    < (0.006 if tight_aperture_profile else 0.008)
+                    and gate_errors["tangent_error_m"]
+                    < (0.003 if tight_aperture_profile else 0.004)
+                    and gate_errors["vertical_error_m"]
+                    < (0.003 if tight_aperture_profile else 0.004)
+                    and gate_errors["orientation_error_deg"]
+                    < (3.0 if tight_aperture_profile else 5.0)
                     and gate_tripod_motion["stable"]
                 )
                 stable_steps = stable_steps + 1 if within_gate else 0
@@ -2750,20 +2929,84 @@ class ThreadingScriptedPolicy:
             stats["aborted_stage"] = "pre_insert"
             return self._finish_rollout(env, stats, policy_state, gripper_axes)
 
+        # The needle can settle or slip slightly in the fingers while the arm
+        # finishes the precise pre-insertion motion.  Refreshing the measured
+        # grasp transform here prevents the insertion controller from carrying
+        # that stale relative rotation into the tight aperture.  This changes
+        # the commanded pose, not any success or quality threshold.
+        if self.control_mode == "joint_position":
+            threading_needle_to_eef = needle_to_eef_transform(env)
+            stats["threading_needle_to_eef_source"] = "measured_after_pre_insert"
+
         # insert_through: keep inserting past sparse env success instead of terminating early.
         # Sample here so the added RNG draws cannot alter this episode's grasp,
         # lift, alignment, or pre-insertion trajectory.
         insert_time_warp_skew = float(self.rng.uniform(*INSERT_TIME_WARP_SKEW_RANGE))
-        insert_lateral_bump = float(self.rng.uniform(*INSERT_LATERAL_BUMP_RANGE))
-        insert_vertical_bump = float(self.rng.uniform(*INSERT_VERTICAL_BUMP_RANGE))
+        insert_lateral_bump_range = (
+            TIGHT_APERTURE_INSERT_LATERAL_BUMP_RANGE
+            if tight_aperture_profile
+            else INSERT_LATERAL_BUMP_RANGE
+        )
+        insert_vertical_bump_range = (
+            TIGHT_APERTURE_INSERT_VERTICAL_BUMP_RANGE
+            if tight_aperture_profile
+            else INSERT_VERTICAL_BUMP_RANGE
+        )
+        insert_lateral_correction_range = (
+            TIGHT_APERTURE_INSERT_LATERAL_CORRECTION_RANGE
+            if tight_aperture_profile
+            else INSERT_LATERAL_CORRECTION_RANGE
+        )
+        insert_vertical_correction_range = (
+            TIGHT_APERTURE_INSERT_VERTICAL_CORRECTION_RANGE
+            if tight_aperture_profile
+            else INSERT_VERTICAL_CORRECTION_RANGE
+        )
+        insert_lateral_bump = float(self.rng.uniform(*insert_lateral_bump_range))
+        insert_vertical_bump = float(self.rng.uniform(*insert_vertical_bump_range))
+        insert_lateral_correction = float(
+            self.rng.uniform(*insert_lateral_correction_range)
+        )
+        insert_vertical_correction = float(
+            self.rng.uniform(*insert_vertical_correction_range)
+        )
+        if tight_aperture_profile:
+            crossing_twist_range = np.deg2rad((-0.35, 0.35))
+            crossing_tilt_range = np.deg2rad((-0.25, 0.25))
+            crossing_heading_range = np.deg2rad((-0.40, 0.40))
+            orientation_bump_range = np.deg2rad((-0.45, 0.45))
+        else:
+            crossing_twist_range = np.deg2rad((-1.0, 1.0))
+            crossing_tilt_range = np.deg2rad((-0.75, 0.75))
+            crossing_heading_range = np.deg2rad((-1.25, 1.25))
+            orientation_bump_range = np.deg2rad((-1.5, 1.5))
+        crossing_orientation = {
+            "twist": float(self.rng.uniform(*crossing_twist_range)),
+            "tilt": float(self.rng.uniform(*crossing_tilt_range)),
+            "heading": float(self.rng.uniform(*crossing_heading_range)),
+        }
+        insertion_orientation_bump = {
+            "tilt": float(self.rng.uniform(*orientation_bump_range)),
+            "heading": float(self.rng.uniform(*orientation_bump_range)),
+        }
         stats["insertion_diversity"] = {
-            "time_warp_profile": "endpoint_preserving_quartic",
+            "time_warp_profile": "endpoint_preserving_quartic_wide",
             "time_warp_skew": insert_time_warp_skew,
             "lateral_bump_amplitude_m": insert_lateral_bump,
             "vertical_bump_amplitude_m": insert_vertical_bump,
-            "bump_profile": "quartic_endpoint_clearance_gated",
+            "lateral_correction_amplitude_m": insert_lateral_correction,
+            "vertical_correction_amplitude_m": insert_vertical_correction,
+            "bump_profile": "two_basis_endpoint_and_ring_clearance_gated",
             "clearance_half_width_m": INSERT_BUMP_CLEARANCE_HALF_WIDTH,
             "clearance_ramp_m": INSERT_BUMP_CLEARANCE_RAMP,
+            "crossing_orientation_deg": {
+                key: float(np.rad2deg(value))
+                for key, value in crossing_orientation.items()
+            },
+            "orientation_bump_deg": {
+                key: float(np.rad2deg(value))
+                for key, value in insertion_orientation_bump.items()
+            },
         }
         insert_nominal_progress = np.linspace(0.0, 1.0, durations["insert_through"])
         insert_path_progress = np.asarray(
@@ -2776,9 +3019,10 @@ class ThreadingScriptedPolicy:
             insert_end_offset - insert_start_offset
         )
         gate_passed = (
-            not self.collision_aware_threading
+            not collision_aware_threading
             or bool(stats.get("pre_insert_gate", {}).get("passed", False))
         )
+        precision_retry = False
 
         def insert_target(progress):
             path_progress = float(insertion_time_warp(progress, insert_time_warp_skew))
@@ -2786,39 +3030,72 @@ class ThreadingScriptedPolicy:
                 insert_end_offset - insert_start_offset
             )
             bump_envelope = insertion_spatial_bump_envelope(path_progress, offset)
-            lateral_bump = insert_lateral_bump * bump_envelope
-            vertical_bump = insert_vertical_bump * bump_envelope
-            insert_curve = {
-                **align_curve,
-                "lateral_start": align_curve["lateral_end"],
-                "lateral_control": align_curve["lateral_end"] * (1.0 - path_progress),
-                "lateral_end": 0.0,
-                "vertical_start": align_curve["vertical_end"],
-                "vertical_control": align_curve["vertical_end"] * (1.0 - path_progress),
-                "vertical_end": 0.0,
-                "twist_start": align_curve["twist_end"],
-                "twist_control": align_curve["twist_end"] * (1.0 - path_progress),
-                "twist_end": 0.0,
-                "tilt_start": align_curve["tilt_end"],
-                "tilt_control": align_curve["tilt_end"] * (1.0 - path_progress),
-                "tilt_end": 0.0,
-                "rotation_delay": 0.0,
-                "rotation_span": 0.35,
-            }
-            # Adding the same displacement to all Bezier control values shifts
-            # the current target by exactly the requested bump without changing
-            # the existing alignment-decay curve.
-            for key in ("lateral_start", "lateral_control", "lateral_end"):
-                insert_curve[key] += lateral_bump
-            for key in ("vertical_start", "vertical_control", "vertical_end"):
-                insert_curve[key] += vertical_bump
-            return self._curved_alignment_target(
-                offset,
+            correction_envelope = insertion_correction_envelope(
                 path_progress,
-                insert_curve,
-                threading_needle_to_eef,
-                align_reference_needle_mat,
-                alignment_fraction=1.0,
+                offset,
+            )
+            lateral_bump = (
+                insert_lateral_bump * bump_envelope
+                + insert_lateral_correction * correction_envelope
+            )
+            vertical_bump = (
+                insert_vertical_bump * bump_envelope
+                + insert_vertical_correction * correction_envelope
+            )
+            if tight_aperture_profile:
+                # Settle onto the aperture centerline before the tip reaches
+                # the ring's 10 mm-deep contact zone. Smoothstep preserves zero
+                # endpoint velocity, so the centering motion adds no kink.
+                center_span = max(
+                    1e-6,
+                    TIGHT_APERTURE_CENTERED_BY_OFFSET - insert_start_offset,
+                )
+                center_progress = smoothstep(
+                    (offset - insert_start_offset) / center_span
+                )
+            else:
+                # Use the available distance to converge, but do not require a
+                # perfectly centered pose before the operator begins moving.
+                center_span = max(1e-6, -insert_start_offset)
+                center_progress = smoothstep(
+                    (offset - insert_start_offset) / center_span
+                )
+            residual = 1.0 - center_progress
+            orientation_bump = bump_envelope
+            twist = (
+                residual * align_curve["twist_end"]
+                + center_progress * crossing_orientation["twist"]
+            )
+            tilt = (
+                residual * align_curve["tilt_end"]
+                + center_progress * crossing_orientation["tilt"]
+                + insertion_orientation_bump["tilt"] * orientation_bump
+            )
+            heading = (
+                residual * align_curve["heading_end"]
+                + center_progress * crossing_orientation["heading"]
+                + insertion_orientation_bump["heading"] * orientation_bump
+            )
+            if precision_retry:
+                # After a stalled contact, retry on the nominal aperture
+                # centerline instead of replaying the perturbation that led to
+                # the rim. This changes recovery behavior, not success gates.
+                lateral_bump = 0.0
+                vertical_bump = 0.0
+                residual = 0.0
+                twist = 0.0
+                tilt = 0.0
+                heading = 0.0
+            return self._alignment_target(
+                offset,
+                lateral_offset=align_curve["lateral_end"] * residual + lateral_bump,
+                vertical_offset=align_curve["vertical_end"] * residual + vertical_bump,
+                twist=twist,
+                tilt=tilt,
+                rotation_fraction=1.0,
+                needle_to_eef=threading_needle_to_eef,
+                reference_needle_mat=align_reference_needle_mat,
+                heading=heading,
             )(env)
 
         def insert_completion(stage_env, target_pos, target_quat, motion):
@@ -2860,7 +3137,7 @@ class ThreadingScriptedPolicy:
             )
             return pose
 
-        if self.control_mode == "osc_pose" and not self.collision_aware_threading:
+        if self.control_mode == "osc_pose" and not collision_aware_threading:
             stats["insert_complete"] = self._run_bounded_trajectory_stage(
                 env,
                 insert_target,
@@ -2886,7 +3163,7 @@ class ThreadingScriptedPolicy:
                 "offsets_total": int(len(insert_offsets)),
                 "tripod_abort": False,
             }
-        elif self.control_mode == "joint_position" and not self.collision_aware_threading:
+        elif self.control_mode == "joint_position" and not collision_aware_threading:
             stats["insert_complete"] = self._run_joint_bounded_trajectory_stage(
                 env,
                 insert_target,
@@ -2927,7 +3204,23 @@ class ThreadingScriptedPolicy:
         else:
             insert_index = 0
             insert_steps = 0
-            max_insert_steps = len(insert_offsets) * (5 if self.collision_aware_threading else 1)
+            stall_steps = 0
+            recovery_count = 0
+            recovery_events = []
+            recent_insert_progress = []
+            insert_entry_tripod_pos = tripod_position(env).copy()
+            # A recoverable insertion contact may briefly exceed the ordinary
+            # 12 mm stage-abort threshold.  Keep the hard stop at the dataset's
+            # 20 mm quality limit while recovery is active, so the policy can
+            # retract instead of terminating before its recovery branch runs.
+            insert_tripod_abort_limit = (
+                0.020
+                if self.insert_stall_recovery and tight_aperture_profile
+                else 0.012
+            )
+            max_insert_steps = len(insert_offsets) * (
+                7 if tight_aperture_profile else (5 if collision_aware_threading else 1)
+            )
             while gate_passed and insert_index < len(insert_offsets) and insert_steps < max_insert_steps:
                 offset = insert_offsets[insert_index]
                 progress = insert_index / max(1, len(insert_offsets) - 1)
@@ -2944,33 +3237,156 @@ class ThreadingScriptedPolicy:
                     max_fr,
                 )
                 insert_steps += 1
-                if self.collision_aware_threading:
+                if collision_aware_threading:
                     tracking = self._needle_target_errors(env, offset)
                     stats["closed_loop_insert_last_tracking"] = tracking
                     near_aperture = offset >= -0.015
                     well_tracked = (
-                        tracking["normal_error_m"] < (0.007 if near_aperture else 0.010)
-                        and tracking["tangent_error_m"] < (0.002 if near_aperture else 0.004)
-                        and tracking["vertical_error_m"] < (0.002 if near_aperture else 0.004)
-                        and tracking["orientation_error_deg"] < (2.5 if near_aperture else 6.0)
+                        tracking["normal_error_m"]
+                        < (
+                            0.004
+                            if tight_aperture_profile and near_aperture
+                            else (0.007 if near_aperture else 0.010)
+                        )
+                        and tracking["tangent_error_m"]
+                        < (
+                            0.0012
+                            if tight_aperture_profile and near_aperture
+                            else (0.002 if near_aperture else 0.004)
+                        )
+                        and tracking["vertical_error_m"]
+                        < (
+                            0.0012
+                            if tight_aperture_profile and near_aperture
+                            else (0.002 if near_aperture else 0.004)
+                        )
+                        and tracking["orientation_error_deg"]
+                        < (
+                            1.5
+                            if tight_aperture_profile and near_aperture
+                            else (2.5 if near_aperture else 6.0)
+                        )
                     )
-                    if not self._tripod_motion(env, stats, max_displacement=0.012)["stable"]:
-                        break
+                    tripod_motion = self._tripod_motion(
+                        env,
+                        stats,
+                        max_displacement=insert_tripod_abort_limit,
+                    )
+                    current_progress = float(stats["final_insert_progress"])
+                    recent_insert_progress.append(current_progress)
+                    if len(recent_insert_progress) > INSERT_RECOVERY_PROGRESS_WINDOW_STEPS:
+                        recent_insert_progress.pop(0)
                     if well_tracked:
                         insert_index += 1
+                        stall_steps = 0
+                    else:
+                        stall_steps += 1
+                    progress_stalled = bool(
+                        len(recent_insert_progress)
+                        == INSERT_RECOVERY_PROGRESS_WINDOW_STEPS
+                        and max(recent_insert_progress) - min(recent_insert_progress)
+                        < INSERT_RECOVERY_PROGRESS_SPAN_M
+                        and offset - current_progress
+                        > INSERT_RECOVERY_MIN_COMMAND_GAP_M
+                    )
+                    insert_stage_tripod_displacement = float(
+                        np.linalg.norm(
+                            tripod_position(env) - insert_entry_tripod_pos
+                        )
+                    )
+                    contact_loaded = bool(
+                        stall_steps >= 2
+                        and insert_stage_tripod_displacement
+                        > INSERT_RECOVERY_STAGE_TRIPOD_DISPLACEMENT_M
+                    )
+                    should_recover = bool(
+                        self.insert_stall_recovery
+                        and tight_aperture_profile
+                        and offset >= INSERT_RECOVERY_CONTACT_ZONE_M[0]
+                        and recovery_count < INSERT_MAX_RECOVERY_ATTEMPTS
+                        and INSERT_RECOVERY_CONTACT_ZONE_M[0]
+                        < current_progress
+                        < INSERT_RECOVERY_CONTACT_ZONE_M[1]
+                        and (progress_stalled or contact_loaded)
+                    )
+                    if should_recover:
+                        recovery_count += 1
+                        recovery_event = {
+                            "recovery_index": int(recovery_count),
+                            "trigger_offset_m": float(offset),
+                            "trigger_insert_progress_m": float(
+                                stats["final_insert_progress"]
+                            ),
+                            "trigger_progress_stalled": progress_stalled,
+                            "trigger_contact_loaded": contact_loaded,
+                            "trigger_insert_stage_tripod_displacement_m": (
+                                insert_stage_tripod_displacement
+                            ),
+                            "trigger_tracking": dict(tracking),
+                            "trigger_tripod_motion": dict(tripod_motion),
+                        }
+                        precision_retry = True
+                        retreat_offset = max(
+                            pre_insert_offset,
+                            min(-0.014, current_progress - 0.008),
+                        )
+                        recovery_needle_to_eef = needle_to_eef_transform(env)
+                        threading_needle_to_eef = recovery_needle_to_eef
+                        retreat_target = self._alignment_target(
+                            retreat_offset,
+                            lateral_offset=0.0,
+                            vertical_offset=0.0,
+                            twist=0.0,
+                            tilt=0.0,
+                            rotation_fraction=1.0,
+                            needle_to_eef=recovery_needle_to_eef,
+                            reference_needle_mat=align_reference_needle_mat,
+                            heading=0.0,
+                        )
+                        self._track_target(
+                            env,
+                            lambda: retreat_target(env),
+                            1.0,
+                            24,
+                            policy_state,
+                            stats,
+                            "insert_through",
+                            render,
+                            max_fr,
+                            stop_on_reach=False,
+                        )
+                        recovery_event["post_retreat_tracking"] = dict(
+                            self._needle_target_errors(env, retreat_offset)
+                        )
+                        recovery_events.append(recovery_event)
+                        insert_index = int(
+                            np.searchsorted(insert_offsets, retreat_offset, side="left")
+                        )
+                        stall_steps = 0
+                        recent_insert_progress.clear()
+                        insert_entry_tripod_pos = tripod_position(env).copy()
+                    elif not tripod_motion["stable"]:
+                        break
                 else:
                     insert_index += 1
             stats["insert_complete"] = bool(insert_index >= len(insert_offsets))
             stats["closed_loop_insert"] = {
-                "enabled": bool(self.collision_aware_threading),
+                "enabled": collision_aware_threading,
                 "completed": bool(stats["insert_complete"]),
                 "steps": int(insert_steps),
                 "offsets_completed": int(insert_index),
                 "offsets_total": int(len(insert_offsets)),
                 "tripod_abort": bool(
-                    self.collision_aware_threading
-                    and not self._tripod_motion(env, stats, max_displacement=0.012)["stable"]
+                    collision_aware_threading
+                    and not self._tripod_motion(
+                        env,
+                        stats,
+                        max_displacement=insert_tripod_abort_limit,
+                    )["stable"]
                 ),
+                "stall_recovery_enabled": bool(self.insert_stall_recovery),
+                "stall_recovery_count": int(recovery_count),
+                "stall_recovery_events": recovery_events,
             }
 
         if not stats["insert_complete"]:
@@ -3073,7 +3489,7 @@ def parse_args():
     parser.add_argument("--num-demos", type=int, default=10)
     parser.add_argument("--max-attempts", type=int, default=100)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--action-noise-std", type=float, default=0.01)
+    parser.add_argument("--action-noise-std", type=float, default=0.02)
     parser.add_argument(
         "--control-mode",
         choices=("osc_pose", "joint_position"),
@@ -3082,6 +3498,14 @@ def parse_args():
     )
     parser.add_argument("--grasp-angle-min", type=float, default=80.0)
     parser.add_argument("--grasp-angle-max", type=float, default=120.0)
+    parser.add_argument(
+        "--grasp-offset-along-range-mm",
+        type=float,
+        nargs=2,
+        metavar=("MIN", "MAX"),
+        default=(-2.5, -2.0),
+        help="Sampled grasp offset along the needle shaft, in millimeters.",
+    )
     parser.add_argument(
         "--grasp-angle-list",
         nargs="+",
@@ -3124,6 +3548,15 @@ def parse_args():
         action=argparse.BooleanOptionalAction,
         default=False,
         help="Use staged D0 alignment, a pre-insertion gate, and closed-loop insertion tracking.",
+    )
+    parser.add_argument(
+        "--insert-stall-recovery",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "For tight apertures, retract, refresh the measured grasp transform, "
+            "and recenter when insertion makes no progress or loads the tripod."
+        ),
     )
     parser.add_argument("--insert-angle-threshold", type=float, default=95.0)
     parser.add_argument("--insert-angle-per-bin", type=int, default=25)
@@ -3581,6 +4014,10 @@ def main():
         grasp_angle_range=(args.grasp_angle_min, args.grasp_angle_max),
         control_mode=args.control_mode,
         collision_aware_threading=args.collision_aware_threading,
+        insert_stall_recovery=args.insert_stall_recovery,
+        grasp_offset_along_range=tuple(
+            0.001 * value for value in args.grasp_offset_along_range_mm
+        ),
     )
     target_total = 2 * args.insert_angle_per_bin if args.collect_insert_angle_split else args.num_demos
     motion_style_plan = make_motion_style_plan(rng, target_total) if args.balanced_motion_styles else None

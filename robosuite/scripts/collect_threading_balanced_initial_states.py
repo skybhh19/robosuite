@@ -35,6 +35,7 @@ from robosuite.scripts.collect_threading_scripted_grasp_angle import (
     finalize_episode,
     json_safe,
     make_controller_config,
+    smooth_collection_success,
 )
 from robosuite.wrappers import DataCollectionWrapper
 
@@ -86,7 +87,15 @@ def parse_args():
     parser.add_argument("--initial-states-per-angle", type=int, default=12)
     parser.add_argument("--max-retries", type=int, default=10)
     parser.add_argument("--seed", type=int, default=20260824)
-    parser.add_argument("--action-noise-std", type=float, default=0.01)
+    parser.add_argument("--action-noise-std", type=float, default=0.02)
+    parser.add_argument(
+        "--grasp-offset-along-range-mm",
+        type=float,
+        nargs=2,
+        metavar=("MIN", "MAX"),
+        default=(-2.5, -2.0),
+        help="Sampled grasp offset along the needle shaft, in millimeters.",
+    )
     parser.add_argument("--horizon", type=int, default=1000)
     parser.add_argument(
         "--resume",
@@ -136,9 +145,29 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--smooth-filter",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Require the scripted collector's action-continuity and tripod-stability quality gate.",
+    )
+    parser.add_argument("--max-action-delta", type=float, default=0.18)
+    parser.add_argument("--max-action-jerk", type=float, default=0.095)
+    parser.add_argument("--max-mean-action-delta", type=float, default=0.04)
+    parser.add_argument("--max-tripod-displacement", type=float, default=0.02)
+    parser.add_argument("--max-tripod-rotation-deg", type=float, default=5.0)
+    parser.add_argument(
         "--collision-aware-threading",
         action=argparse.BooleanOptionalAction,
         default=False,
+    )
+    parser.add_argument(
+        "--insert-stall-recovery",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "For tight apertures, retract, refresh the measured grasp transform, "
+            "and recenter when insertion makes no progress or loads the tripod."
+        ),
     )
     return parser.parse_args()
 
@@ -247,6 +276,12 @@ def empty_angle_summary(angle, target_successes, initial_count):
         "joint_margin_fail_attempts": 0,
         "pregrasp_contact_pass_attempts": 0,
         "pregrasp_contact_rejection_attempts": 0,
+        "smooth_pass_attempts": 0,
+        "smooth_rejection_attempts": 0,
+        "recovery_used_attempts": 0,
+        "recovery_events": 0,
+        "accepted_recovery_trajectories": 0,
+        "accepted_recovery_events": 0,
         "initial_states_sampled": int(initial_count),
         "initial_states_replaced": 0,
         "successful_initial_states": 0,
@@ -267,6 +302,24 @@ def update_rates(summary):
         "retry_attempt_success_rate": float(total_successes / total_attempts) if total_attempts else 0.0,
         "initial_states_sampled": int(total_states),
         "initial_states_replaced": int(total_replacements),
+        "smooth_rejection_attempts": int(
+            sum(item.get("smooth_rejection_attempts", 0) for item in summary["angles"].values())
+        ),
+        "recovery_used_attempts": int(
+            sum(item.get("recovery_used_attempts", 0) for item in summary["angles"].values())
+        ),
+        "recovery_events": int(
+            sum(item.get("recovery_events", 0) for item in summary["angles"].values())
+        ),
+        "accepted_recovery_trajectories": int(
+            sum(
+                item.get("accepted_recovery_trajectories", 0)
+                for item in summary["angles"].values()
+            )
+        ),
+        "accepted_recovery_events": int(
+            sum(item.get("accepted_recovery_events", 0) for item in summary["angles"].values())
+        ),
     }
     for item in summary["angles"].values():
         attempts = item["rollout_attempts"]
@@ -320,6 +373,14 @@ def validate_resume_summary(summary, args, record_joint_training_fields):
             else None
         ),
         "require_clean_pregrasp_contact": bool(args.require_clean_pregrasp_contact),
+        "smooth_filter": bool(args.smooth_filter),
+        "smooth_filter_thresholds": {
+            "max_action_delta": float(args.max_action_delta),
+            "max_action_jerk": float(args.max_action_jerk),
+            "max_mean_action_delta": float(args.max_mean_action_delta),
+            "max_tripod_displacement": float(args.max_tripod_displacement),
+            "max_tripod_rotation_deg": float(args.max_tripod_rotation_deg),
+        },
     }
     if summary.get("status") != "in_progress":
         raise ValueError("--resume requires an in-progress collection_summary.json")
@@ -572,6 +633,10 @@ def main():
         grasp_angle_range=(min(args.angles), max(args.angles)),
         control_mode=args.control_mode,
         collision_aware_threading=args.collision_aware_threading,
+        insert_stall_recovery=args.insert_stall_recovery,
+        grasp_offset_along_range=tuple(
+            0.001 * value for value in args.grasp_offset_along_range_mm
+        ),
     )
 
     new_summary = {
@@ -587,6 +652,10 @@ def main():
             if args.control_mode == "joint_position"
             else OSC_TRAJECTORY_TIMING_PROFILE
         ),
+        "insert_stall_recovery": bool(args.insert_stall_recovery),
+        "grasp_offset_along_range_mm": [
+            float(value) for value in args.grasp_offset_along_range_mm
+        ],
         "record_joint_training_fields": bool(record_joint_training_fields),
         "joint_delta_scale": float(args.joint_delta_scale) if record_joint_training_fields else None,
         "success_criterion": (
@@ -606,6 +675,14 @@ def main():
             else None
         ),
         "require_clean_pregrasp_contact": bool(args.require_clean_pregrasp_contact),
+        "smooth_filter": bool(args.smooth_filter),
+        "smooth_filter_thresholds": {
+            "max_action_delta": float(args.max_action_delta),
+            "max_action_jerk": float(args.max_action_jerk),
+            "max_mean_action_delta": float(args.max_mean_action_delta),
+            "max_tripod_displacement": float(args.max_tripod_displacement),
+            "max_tripod_rotation_deg": float(args.max_tripod_rotation_deg),
+        },
         "angles_deg": [float(angle) for angle in args.angles],
         "partial_observability_angles_deg": sorted(partial_angles),
         "full_observability_angles_deg": sorted(full_angles),
@@ -728,21 +805,41 @@ def main():
                         pregrasp_contact.get("passed", False)
                         and not pregrasp_contact.get("detected", True)
                     )
+                    smooth_passed = (
+                        bool(smooth_collection_success(stats, args))
+                        if args.smooth_filter
+                        else True
+                    )
+                    recovery_count = int(
+                        stats.get("closed_loop_insert", {}).get(
+                            "stall_recovery_count", 0
+                        )
+                    )
+                    if not args.smooth_filter:
+                        stats["smooth_filter"] = {
+                            "enabled": False,
+                            "passed": True,
+                            "failure_reasons": [],
+                        }
                     if args.success_criterion == "policy_composite_env_and_joint_margin":
                         accepted_success = bool(
                             composite_success
                             and final_env_success
                             and joint_margin_passed
                             and (not args.require_clean_pregrasp_contact or clean_pregrasp_contact)
+                            and smooth_passed
                         )
                     elif args.success_criterion == "final_env_and_joint_margin":
                         accepted_success = bool(
                             final_env_success
                             and joint_margin_passed
                             and (not args.require_clean_pregrasp_contact or clean_pregrasp_contact)
+                            and smooth_passed
                         )
                     else:
-                        accepted_success = bool(composite_success and final_env_success)
+                        accepted_success = bool(
+                            composite_success and final_env_success and smooth_passed
+                        )
                     final_debug = dict(
                         getattr(collection_env.unwrapped, "_threading_success_debug", {})
                     )
@@ -766,6 +863,24 @@ def main():
                     angle_summary["pregrasp_contact_rejection_attempts"] = int(
                         angle_summary.get("pregrasp_contact_rejection_attempts", 0)
                     ) + int(not clean_pregrasp_contact)
+                    angle_summary["smooth_pass_attempts"] = int(
+                        angle_summary.get("smooth_pass_attempts", 0)
+                    ) + int(smooth_passed)
+                    angle_summary["smooth_rejection_attempts"] = int(
+                        angle_summary.get("smooth_rejection_attempts", 0)
+                    ) + int(not smooth_passed)
+                    angle_summary["recovery_used_attempts"] = int(
+                        angle_summary.get("recovery_used_attempts", 0)
+                    ) + int(recovery_count > 0)
+                    angle_summary["recovery_events"] = int(
+                        angle_summary.get("recovery_events", 0)
+                    ) + recovery_count
+                    angle_summary["accepted_recovery_trajectories"] = int(
+                        angle_summary.get("accepted_recovery_trajectories", 0)
+                    ) + int(accepted_success and recovery_count > 0)
+                    angle_summary["accepted_recovery_events"] = int(
+                        angle_summary.get("accepted_recovery_events", 0)
+                    ) + (recovery_count if accepted_success else 0)
                     stats["env_check_success_final"] = final_env_success
                     stats["env_success_debug_final"] = final_debug
                     stats["joint_safety"] = {
@@ -801,17 +916,31 @@ def main():
                         "retry_index": retry_index,
                         "max_retries": args.max_retries,
                     }
-
+                    failure_reason = stats.get("failure_reason", "unknown")
+                    if accepted_success:
+                        rejection_reason = "none"
+                    elif not composite_success or not final_env_success:
+                        rejection_reason = failure_reason
+                    elif not joint_margin_passed:
+                        rejection_reason = "joint_margin"
+                    elif args.require_clean_pregrasp_contact and not clean_pregrasp_contact:
+                        rejection_reason = "pregrasp_contact"
+                    elif not smooth_passed:
+                        rejection_reason = "smooth:" + ",".join(
+                            stats.get("smooth_filter", {}).get("failure_reasons", [])
+                        )
+                    else:
+                        rejection_reason = "acceptance_gate"
+                    stats["collection_rejection_reason"] = rejection_reason
                     ep_dir = finalize_episode(
                         collection_env,
                         success=accepted_success,
                         cleanup_failed=True,
                         stats=stats,
                     )
-                    failure_reason = stats.get("failure_reason", "unknown")
                     aborted_stage = stats.get("aborted_stage")
                     if not accepted_success:
-                        failure_reasons[failure_reason] += 1
+                        failure_reasons[rejection_reason] += 1
                         if aborted_stage:
                             aborted_stages[aborted_stage] += 1
 
@@ -830,8 +959,15 @@ def main():
                         "pregrasp_contact_passed": bool(pregrasp_contact.get("passed", False)),
                         "pregrasp_contact_detected": bool(pregrasp_contact.get("detected", True)),
                         "clean_pregrasp_contact": clean_pregrasp_contact,
+                        "smooth_passed": smooth_passed,
+                        "smooth_failure_reasons": stats.get("smooth_filter", {}).get(
+                            "failure_reasons", []
+                        ),
+                        "stall_recovery_count": recovery_count,
+                        "stall_recovery_used": bool(recovery_count > 0),
                         "accepted_success": accepted_success,
                         "failure_reason": failure_reason,
+                        "rejection_reason": rejection_reason,
                         "aborted_stage": aborted_stage,
                         "steps": stats.get("steps"),
                         "actual_close_angle_deg": stats.get("actual_close_angle_deg"),
