@@ -155,10 +155,10 @@ class RatchetingWrenchObject(CompositeBodyObject):
                     ("grip_center", center, 0.0, self.center_grip_friction),
                     ("grip_positive", side, offset, self.grip_friction),
                 ]
-            for name, half_length, offset, segment_friction in segments:
+            for segment_name, half_length, offset, segment_friction in segments:
                 objects.append(
                     BoxObject(
-                        name=name,
+                        name=segment_name,
                         size=[self.grip_size[0], self.grip_size[0], half_length],
                         rgba=(0.13, 0.13, 0.13, 1.0),
                         density=self.grip_density,
