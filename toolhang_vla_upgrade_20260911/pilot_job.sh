@@ -62,7 +62,19 @@ elif [ "$MODE" = render ]; then
   "$PY" "$PIPELINE_ROOT/render.py" --root "$TARGET" \
     --index "${SLURM_ARRAY_TASK_ID:-0}"
 elif [ "$MODE" = summary ]; then
-  "$PY" "$PIPELINE_ROOT/summarize.py" --root "$TARGET"
+  SUMMARY_ARGS=()
+  if [ "$VARIANT" = production_random_f2 ]; then
+    SUMMARY_ARGS=(--target-pairs 200)
+  fi
+  "$PY" "$PIPELINE_ROOT/summarize.py" --root "$TARGET" "${SUMMARY_ARGS[@]}"
+elif [ "$MODE" = merge ]; then
+  "$PY" "$PIPELINE_ROOT/merge_images.py" --root "$TARGET"
+  "$PY" "$PIPELINE_ROOT/finalize_metadata.py" --root "$TARGET"
+  "$PY" "$PIPELINE_ROOT/integrity_audit.py" --root "$TARGET"
+elif [ "$MODE" = resample ]; then
+  "$PY" "$PIPELINE_ROOT/resample_human_rate.py" --root "$TARGET"
+  "$PY" "$PIPELINE_ROOT/fix_version_metadata.py" --root "$TARGET"
+  "$PY" "$PIPELINE_ROOT/validate_final.py" --root "$TARGET"
 else
   echo "unknown mode: $MODE" >&2
   exit 2
