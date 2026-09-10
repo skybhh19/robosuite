@@ -47,7 +47,8 @@ class Capture:
   self.actions.append(np.asarray(action).copy());self.stages.append(self.stage)
   return self.env.step(action)
 
-def components(kind,seed):
+def components(kind,seed,config=None):
+ config=config or {}
  if kind=='threading':
   from robosuite.scripts.collect_threading_balanced_initial_states import make_env,sample_initial_state,restore_initial_state
   from robosuite.scripts.collect_threading_scripted_grasp_angle import make_controller_config,ThreadingScriptedPolicy
@@ -57,29 +58,31 @@ def components(kind,seed):
   return env,dict(env_name='Threading_D06_Hard',type=1,env_kwargs=kwargs)
  from robosuite.scripts.collect_tool_hang_balanced_state_retries import make_env
  from robosuite.scripts.collect_tool_hang_wrench_joint import make_controller_config
- meta=dict(env_name='ToolHangWrenchOnly',type=1,env_kwargs=dict(robots=['Panda'],controller_configs=make_controller_config('Panda','joint_position'),initialization_noise=None,ignore_done=True,use_camera_obs=False,use_object_obs=True,has_renderer=False,has_offscreen_renderer=False,camera_names=['agentview','robot0_eye_in_hand'],horizon=700,hard_reset=False))
- return make_env(seed,84,84,True,'joint_position'),meta
+ friction=float(config.get('tool_grip_friction',2.0))
+ meta=dict(env_name='ToolHangWrenchOnly',type=1,env_kwargs=dict(robots=['Panda'],controller_configs=make_controller_config('Panda','joint_position'),initialization_noise=None,ignore_done=True,use_camera_obs=False,use_object_obs=True,has_renderer=False,has_offscreen_renderer=False,camera_names=['agentview','robot0_eye_in_hand'],horizon=700,hard_reset=False,tool_grip_friction=friction))
+ return make_env(seed,84,84,True,'joint_position',tool_grip_friction=friction),meta
 
 def prepare(a):
- env,meta=components(a.kind,a.seed)
+ config=dict(tool_grip_friction=a.tool_grip_friction,fixture_x_range_m=a.fixture_x_range_m,fixture_y_range_m=a.fixture_y_range_m,fixture_yaw_range_deg=a.fixture_yaw_range_deg)
+ env,meta=components(a.kind,a.seed,config)
  try:
   if a.kind=='threading':
    from robosuite.scripts.collect_threading_balanced_initial_states import sample_initial_state
    entries=[dict(pair=i,initial=sample_initial_state(env,i,i,0),bin=i%5) for i in range(a.pairs)]
   else:
    from robosuite.scripts.collect_tool_hang_balanced_state_retries import generate_state_pool
-   pool,_=generate_state_pool(env,a.pairs,a.seed+1)
+   pool,_=generate_state_pool(env,a.pairs,a.seed+1,fixture_x_range_m=a.fixture_x_range_m,fixture_y_range_m=a.fixture_y_range_m,fixture_yaw_range_deg=a.fixture_yaw_range_deg)
    entries=[dict(pair=i,initial=e['reset_variation'],bin=e['grasp_bin_index'],style=e['motion_style']) for i,e in enumerate(pool)]
  finally:env.close()
  versions=[a.human_version] if a.production else ['baseline',a.human_version]
- write(a.root/'manifest.json',dict(kind=a.kind,seed=a.seed,pairs=a.pairs,entries=entries,env_args=meta,versions=versions,regimes=['full','partial'],attempts_per_cell=1,protocol='frozen_reset_paired_fixed_budget',production=bool(a.production)))
+ write(a.root/'manifest.json',dict(kind=a.kind,seed=a.seed,pairs=a.pairs,entries=entries,env_args=meta,collection_config=config,versions=versions,regimes=['full','partial'],attempts_per_cell=1,protocol='frozen_reset_paired_fixed_budget',production=bool(a.production)))
 
 def trial(a,m,e,version,regime):
  target=a.root/a.output_dir/f"pair_{e['pair']:03d}_{version}_{regime}"
  if target.with_suffix('.json').exists():raise FileExistsError(target)
  target.parent.mkdir(parents=True,exist_ok=True)
  seed=m['seed']+10000+e['pair']+1000000*a.attempt
- env,_=components(a.kind,m['seed']);cap=Capture(env)
+ env,_=components(a.kind,m['seed'],m.get('collection_config'));cap=Capture(env)
  stats={};success=False;accepted=False;error=None
  try:
   if a.kind=='threading':
@@ -135,7 +138,7 @@ def trial(a,m,e,version,regime):
  print(json.dumps({k:row[k] for k in ['pair','version','regime','physical_success','accepted','steps','exception']}),flush=True)
 
 if __name__=='__main__':
- p=argparse.ArgumentParser();p.add_argument('mode',choices=['prepare','run']);p.add_argument('--kind',choices=['threading','toolhang'],required=True);p.add_argument('--root',type=Path,required=True);p.add_argument('--seed',type=int,default=202609071);p.add_argument('--pairs',type=int,default=40);p.add_argument('--index',type=int,default=0);p.add_argument('--shards',type=int,default=40);p.add_argument('--production',action='store_true');p.add_argument('--human-version',choices=['human_v2','human_v3','human_v4','human_v5','human_v6','human_v7','human_v8'],default='human_v2');p.add_argument('--attempt',type=int,default=0);p.add_argument('--output-dir',default='trials');p.add_argument('--retry-regime',choices=['full','partial']);p.add_argument('--failed-from',type=Path);a=p.parse_args()
+ p=argparse.ArgumentParser();p.add_argument('mode',choices=['prepare','run']);p.add_argument('--kind',choices=['threading','toolhang'],required=True);p.add_argument('--root',type=Path,required=True);p.add_argument('--seed',type=int,default=202609071);p.add_argument('--pairs',type=int,default=40);p.add_argument('--index',type=int,default=0);p.add_argument('--shards',type=int,default=40);p.add_argument('--production',action='store_true');p.add_argument('--human-version',choices=['human_v2','human_v3','human_v4','human_v5','human_v6','human_v7','human_v8','toolhang_vla_v1'],default='human_v2');p.add_argument('--attempt',type=int,default=0);p.add_argument('--output-dir',default='trials');p.add_argument('--retry-regime',choices=['full','partial']);p.add_argument('--failed-from',type=Path);p.add_argument('--fixture-x-range-m',nargs=2,type=float,default=(0.,0.));p.add_argument('--fixture-y-range-m',nargs=2,type=float,default=(0.,0.));p.add_argument('--fixture-yaw-range-deg',nargs=2,type=float,default=(0.,0.));p.add_argument('--tool-grip-friction',type=float,default=2.0);a=p.parse_args()
  if a.mode=='prepare':
   assert not (a.root/'manifest.json').exists();prepare(a)
  else:

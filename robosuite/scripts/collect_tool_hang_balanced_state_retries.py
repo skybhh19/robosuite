@@ -75,6 +75,7 @@ def make_env(
     camera_width,
     headless=False,
     controller_backend="osc_pose",
+    tool_grip_friction=2.0,
 ):
     return suite.make(
         "ToolHangWrenchOnly",
@@ -92,17 +93,32 @@ def make_env(
         horizon=700,
         hard_reset=False,
         seed=seed,
+        tool_grip_friction=tool_grip_friction,
     )
 
 
-def sample_screened_state(env, candidates):
+def sample_screened_state(
+    env,
+    candidates,
+    fixture_rng=None,
+    fixture_x_range_m=(0.0, 0.0),
+    fixture_y_range_m=(0.0, 0.0),
+    fixture_yaw_range_deg=(0.0, 0.0),
+):
     """Sample one assembled, collision-screened physical reset state."""
     base_env = env.unwrapped if hasattr(env, "unwrapped") else env
     while True:
         candidates += 1
         variation = base_env.sample_reset_variation()
-        variation["fixture_translation_m"] = [0.0, 0.0, 0.0]
-        variation["fixture_yaw_rad"] = 0.0
+        rng = base_env.rng if fixture_rng is None else fixture_rng
+        variation["fixture_translation_m"] = [
+            float(rng.uniform(*fixture_x_range_m)),
+            float(rng.uniform(*fixture_y_range_m)),
+            0.0,
+        ]
+        variation["fixture_yaw_rad"] = float(
+            np.deg2rad(rng.uniform(*fixture_yaw_range_deg))
+        )
         base_env.configure_reset_variation(deepcopy(variation))
         base_env.reset()
         qpos = np.asarray(variation["robot_qpos"], dtype=float)
@@ -116,12 +132,27 @@ def sample_screened_state(env, candidates):
         return variation, candidates
 
 
-def generate_state_pool(env, count, assignment_seed):
+def generate_state_pool(
+    env,
+    count,
+    assignment_seed,
+    fixture_x_range_m=(0.0, 0.0),
+    fixture_y_range_m=(0.0, 0.0),
+    fixture_yaw_range_deg=(0.0, 0.0),
+):
     """Generate and collision-screen all states before assigning regimes."""
     states = []
     candidates = 0
+    fixture_rng = np.random.RandomState(assignment_seed + 3)
     while len(states) < count:
-        variation, candidates = sample_screened_state(env, candidates)
+        variation, candidates = sample_screened_state(
+            env,
+            candidates,
+            fixture_rng=fixture_rng,
+            fixture_x_range_m=fixture_x_range_m,
+            fixture_y_range_m=fixture_y_range_m,
+            fixture_yaw_range_deg=fixture_yaw_range_deg,
+        )
         states.append(variation)
 
     # Regime assignment happens only after every physical state is frozen.

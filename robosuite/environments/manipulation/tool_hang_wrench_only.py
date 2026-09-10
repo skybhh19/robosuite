@@ -75,11 +75,22 @@ class ToolHangWrenchOnly(ToolHang):
     # before defining frame zero (while retaining settled gripper/object state).
     RESET_CONTROLLER_SETTLE_STEPS = 10
 
+    def __init__(self, *args, tool_grip_friction=2.0, **kwargs):
+        tool_grip_friction = float(tool_grip_friction)
+        if not np.isfinite(tool_grip_friction) or tool_grip_friction <= 0.0:
+            raise ValueError("tool_grip_friction must be finite and positive")
+        self.configured_tool_grip_friction = tool_grip_friction
+        super().__init__(*args, **kwargs)
+
     def _load_model(self):
         self.tool_handle_half_length = self.EXTENDED_HANDLE_HALF_LENGTH
         self.tool_grip_half_length = self.EXTENDED_GRIP_HALF_LENGTH
         self.tool_grip_density = 2000.0 * (0.040 / self.EXTENDED_GRIP_HALF_LENGTH)
-        self.tool_grip_friction = (2.0, 0.01, 0.0001)
+        self.tool_grip_friction = (
+            self.configured_tool_grip_friction,
+            0.01,
+            0.0001,
+        )
         super()._load_model()
 
     def _setup_references(self):
