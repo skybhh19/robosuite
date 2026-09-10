@@ -16,10 +16,16 @@ The first pilot uses 40 paired states per condition:
 | `fixed_f2` | 0 | 0 | 0 | 2.0 |
 | `random_f2` | +/-3.5 cm | +/-2.5 cm | +/-20 deg | 2.0 |
 | `random_f4` | +/-3.5 cm | +/-2.5 cm | +/-20 deg | 4.0 |
+| `random_center_f4` | +/-3.5 cm | +/-2.5 cm | +/-20 deg | 4.0 in central +/-2 cm; 2.0 elsewhere |
 
 `random_f2` isolates fixture randomization. Comparing `random_f4` against it
 isolates grip friction. The random-fixture variants use the same seeds and
 therefore the same reset variations.
+
+`random_center_f4` keeps the Partial grasp range at the original friction and
+places the Full grasp range entirely inside a higher-friction center segment.
+The three grip collision boxes are adjacent and non-overlapping, and their
+combined volume and mass equal the original single grip box.
 
 Run on Sherlock with `pilot_job.sh`. Do not scale to the final dataset until
 all three pilots finish, videos show the intended pose coverage, and Full and

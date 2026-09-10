@@ -36,6 +36,8 @@ class RatchetingWrenchObject(CompositeBodyObject):
         grip_size=None,
         grip_density=None,
         grip_friction=(1.0, 0.005, 0.0001),
+        center_grip_half_length=None,
+        center_grip_friction=None,
         # rgba=None,
         density=1000.0,
         solref=(0.02, 1.0),
@@ -51,6 +53,19 @@ class RatchetingWrenchObject(CompositeBodyObject):
         self.grip_size = tuple(grip_size) if grip_size is not None else None
         self.grip_density = density if grip_density is None else float(grip_density)
         self.grip_friction = tuple(grip_friction)
+        self.center_grip_half_length = (
+            None if center_grip_half_length is None else float(center_grip_half_length)
+        )
+        self.center_grip_friction = (
+            None if center_grip_friction is None else tuple(center_grip_friction)
+        )
+        if self.center_grip_half_length is not None:
+            if self.grip_size is None:
+                raise ValueError("center grip requires grip_size")
+            if not 0.0 < self.center_grip_half_length < self.grip_size[1]:
+                raise ValueError("center grip half length must be inside the full grip")
+            if self.center_grip_friction is None:
+                raise ValueError("center grip friction is required for a split grip")
 
         # Define materials we want to use for this object
         tex_attrib = {
@@ -128,20 +143,33 @@ class RatchetingWrenchObject(CompositeBodyObject):
 
         # maybe add grip
         if self.grip_size is not None:
-            objects.append(
-                BoxObject(
-                    name="grip",
-                    size=[self.grip_size[0], self.grip_size[0], self.grip_size[1]],
-                    rgba=(0.13, 0.13, 0.13, 1.0),
-                    density=self.grip_density,
-                    solref=solref,
-                    solimp=solimp,
-                    friction=self.grip_friction,
+            grip_quat = (np.sqrt(2) / 2.0, 0.0, np.sqrt(2) / 2.0, 0.0)
+            if self.center_grip_half_length is None:
+                segments = [("grip", self.grip_size[1], 0.0, self.grip_friction)]
+            else:
+                center = self.center_grip_half_length
+                side = (self.grip_size[1] - center) / 2.0
+                offset = center + side
+                segments = [
+                    ("grip_negative", side, -offset, self.grip_friction),
+                    ("grip_center", center, 0.0, self.center_grip_friction),
+                    ("grip_positive", side, offset, self.grip_friction),
+                ]
+            for name, half_length, offset, segment_friction in segments:
+                objects.append(
+                    BoxObject(
+                        name=name,
+                        size=[self.grip_size[0], self.grip_size[0], half_length],
+                        rgba=(0.13, 0.13, 0.13, 1.0),
+                        density=self.grip_density,
+                        solref=solref,
+                        solimp=solimp,
+                        friction=segment_friction,
+                    )
                 )
-            )
-            positions.append(np.zeros(3))
-            quats.append((np.sqrt(2) / 2.0, 0.0, np.sqrt(2) / 2.0, 0.0))  # rotate 90 degrees about y-axis
-            parents.append(None)
+                positions.append(np.array([offset, 0.0, 0.0]))
+                quats.append(grip_quat)  # rotate the segment's long axis onto wrench x
+                parents.append(None)
 
         # Run super init
         super().__init__(

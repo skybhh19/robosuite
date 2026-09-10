@@ -351,6 +351,8 @@ class ToolHang(ManipulationEnv):
             ),  # default: 8 cm full length, 3 cm thick
             grip_density=getattr(self, "tool_grip_density", 2000.0),
             grip_friction=getattr(self, "tool_grip_friction", (1.0, 0.005, 0.0001)),
+            center_grip_half_length=getattr(self, "tool_center_grip_half_length", None),
+            center_grip_friction=getattr(self, "tool_center_grip_friction", None),
             density=2000.0,
             solref=(0.02, 1.0),
             solimp=(0.998, 0.998, 0.001),

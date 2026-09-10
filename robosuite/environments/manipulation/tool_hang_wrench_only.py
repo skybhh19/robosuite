@@ -75,11 +75,38 @@ class ToolHangWrenchOnly(ToolHang):
     # before defining frame zero (while retaining settled gripper/object state).
     RESET_CONTROLLER_SETTLE_STEPS = 10
 
-    def __init__(self, *args, tool_grip_friction=2.0, **kwargs):
+    def __init__(
+        self,
+        *args,
+        tool_grip_friction=2.0,
+        tool_center_grip_half_length=None,
+        tool_center_grip_friction=None,
+        **kwargs,
+    ):
         tool_grip_friction = float(tool_grip_friction)
         if not np.isfinite(tool_grip_friction) or tool_grip_friction <= 0.0:
             raise ValueError("tool_grip_friction must be finite and positive")
         self.configured_tool_grip_friction = tool_grip_friction
+        self.configured_tool_center_grip_half_length = (
+            None
+            if tool_center_grip_half_length is None
+            else float(tool_center_grip_half_length)
+        )
+        self.configured_tool_center_grip_friction = (
+            None if tool_center_grip_friction is None else float(tool_center_grip_friction)
+        )
+        if (self.configured_tool_center_grip_half_length is None) != (
+            self.configured_tool_center_grip_friction is None
+        ):
+            raise ValueError("center grip half length and friction must be set together")
+        if self.configured_tool_center_grip_half_length is not None:
+            if not 0.0 < self.configured_tool_center_grip_half_length < self.EXTENDED_GRIP_HALF_LENGTH:
+                raise ValueError("tool center grip half length must be inside the full grip")
+            if (
+                not np.isfinite(self.configured_tool_center_grip_friction)
+                or self.configured_tool_center_grip_friction <= 0.0
+            ):
+                raise ValueError("tool center grip friction must be finite and positive")
         super().__init__(*args, **kwargs)
 
     def _load_model(self):
@@ -90,6 +117,12 @@ class ToolHangWrenchOnly(ToolHang):
             self.configured_tool_grip_friction,
             0.01,
             0.0001,
+        )
+        self.tool_center_grip_half_length = self.configured_tool_center_grip_half_length
+        self.tool_center_grip_friction = (
+            None
+            if self.configured_tool_center_grip_friction is None
+            else (self.configured_tool_center_grip_friction, 0.01, 0.0001)
         )
         super()._load_model()
 

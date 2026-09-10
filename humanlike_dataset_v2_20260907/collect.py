@@ -59,11 +59,12 @@ def components(kind,seed,config=None):
  from robosuite.scripts.collect_tool_hang_balanced_state_retries import make_env
  from robosuite.scripts.collect_tool_hang_wrench_joint import make_controller_config
  friction=float(config.get('tool_grip_friction',2.0))
- meta=dict(env_name='ToolHangWrenchOnly',type=1,env_kwargs=dict(robots=['Panda'],controller_configs=make_controller_config('Panda','joint_position'),initialization_noise=None,ignore_done=True,use_camera_obs=False,use_object_obs=True,has_renderer=False,has_offscreen_renderer=False,camera_names=['agentview','robot0_eye_in_hand'],horizon=700,hard_reset=False,tool_grip_friction=friction))
- return make_env(seed,84,84,True,'joint_position',tool_grip_friction=friction),meta
+ center_half=config.get('tool_center_grip_half_length');center_friction=config.get('tool_center_grip_friction')
+ meta=dict(env_name='ToolHangWrenchOnly',type=1,env_kwargs=dict(robots=['Panda'],controller_configs=make_controller_config('Panda','joint_position'),initialization_noise=None,ignore_done=True,use_camera_obs=False,use_object_obs=True,has_renderer=False,has_offscreen_renderer=False,camera_names=['agentview','robot0_eye_in_hand'],horizon=700,hard_reset=False,tool_grip_friction=friction,tool_center_grip_half_length=center_half,tool_center_grip_friction=center_friction))
+ return make_env(seed,84,84,True,'joint_position',tool_grip_friction=friction,tool_center_grip_half_length=center_half,tool_center_grip_friction=center_friction),meta
 
 def prepare(a):
- config=dict(tool_grip_friction=a.tool_grip_friction,fixture_x_range_m=a.fixture_x_range_m,fixture_y_range_m=a.fixture_y_range_m,fixture_yaw_range_deg=a.fixture_yaw_range_deg)
+ config=dict(tool_grip_friction=a.tool_grip_friction,tool_center_grip_half_length=a.tool_center_grip_half_length,tool_center_grip_friction=a.tool_center_grip_friction,fixture_x_range_m=a.fixture_x_range_m,fixture_y_range_m=a.fixture_y_range_m,fixture_yaw_range_deg=a.fixture_yaw_range_deg)
  env,meta=components(a.kind,a.seed,config)
  try:
   if a.kind=='threading':
@@ -138,7 +139,7 @@ def trial(a,m,e,version,regime):
  print(json.dumps({k:row[k] for k in ['pair','version','regime','physical_success','accepted','steps','exception']}),flush=True)
 
 if __name__=='__main__':
- p=argparse.ArgumentParser();p.add_argument('mode',choices=['prepare','run']);p.add_argument('--kind',choices=['threading','toolhang'],required=True);p.add_argument('--root',type=Path,required=True);p.add_argument('--seed',type=int,default=202609071);p.add_argument('--pairs',type=int,default=40);p.add_argument('--index',type=int,default=0);p.add_argument('--shards',type=int,default=40);p.add_argument('--production',action='store_true');p.add_argument('--human-version',choices=['human_v2','human_v3','human_v4','human_v5','human_v6','human_v7','human_v8','toolhang_vla_v1'],default='human_v2');p.add_argument('--attempt',type=int,default=0);p.add_argument('--output-dir',default='trials');p.add_argument('--retry-regime',choices=['full','partial']);p.add_argument('--failed-from',type=Path);p.add_argument('--fixture-x-range-m',nargs=2,type=float,default=(0.,0.));p.add_argument('--fixture-y-range-m',nargs=2,type=float,default=(0.,0.));p.add_argument('--fixture-yaw-range-deg',nargs=2,type=float,default=(0.,0.));p.add_argument('--tool-grip-friction',type=float,default=2.0);a=p.parse_args()
+ p=argparse.ArgumentParser();p.add_argument('mode',choices=['prepare','run']);p.add_argument('--kind',choices=['threading','toolhang'],required=True);p.add_argument('--root',type=Path,required=True);p.add_argument('--seed',type=int,default=202609071);p.add_argument('--pairs',type=int,default=40);p.add_argument('--index',type=int,default=0);p.add_argument('--shards',type=int,default=40);p.add_argument('--production',action='store_true');p.add_argument('--human-version',choices=['human_v2','human_v3','human_v4','human_v5','human_v6','human_v7','human_v8','toolhang_vla_v1'],default='human_v2');p.add_argument('--attempt',type=int,default=0);p.add_argument('--output-dir',default='trials');p.add_argument('--retry-regime',choices=['full','partial']);p.add_argument('--failed-from',type=Path);p.add_argument('--fixture-x-range-m',nargs=2,type=float,default=(0.,0.));p.add_argument('--fixture-y-range-m',nargs=2,type=float,default=(0.,0.));p.add_argument('--fixture-yaw-range-deg',nargs=2,type=float,default=(0.,0.));p.add_argument('--tool-grip-friction',type=float,default=2.0);p.add_argument('--tool-center-grip-half-length',type=float);p.add_argument('--tool-center-grip-friction',type=float);a=p.parse_args()
  if a.mode=='prepare':
   assert not (a.root/'manifest.json').exists();prepare(a)
  else:

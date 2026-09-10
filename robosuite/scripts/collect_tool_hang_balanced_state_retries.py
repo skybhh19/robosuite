@@ -76,6 +76,8 @@ def make_env(
     headless=False,
     controller_backend="osc_pose",
     tool_grip_friction=2.0,
+    tool_center_grip_half_length=None,
+    tool_center_grip_friction=None,
 ):
     return suite.make(
         "ToolHangWrenchOnly",
@@ -94,6 +96,8 @@ def make_env(
         hard_reset=False,
         seed=seed,
         tool_grip_friction=tool_grip_friction,
+        tool_center_grip_half_length=tool_center_grip_half_length,
+        tool_center_grip_friction=tool_center_grip_friction,
     )
 
 
