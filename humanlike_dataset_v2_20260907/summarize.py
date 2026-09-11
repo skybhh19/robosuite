@@ -1,7 +1,7 @@
 import argparse,json,hashlib
 from pathlib import Path
 import numpy as np,h5py
-p=argparse.ArgumentParser();p.add_argument('--root',type=Path,required=True);p.add_argument('--allow-incomplete',action='store_true');p.add_argument('--target-pairs',type=int);a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--root',type=Path,required=True);p.add_argument('--allow-incomplete',action='store_true');p.add_argument('--target-pairs',type=int);p.add_argument('--require-visibility-labels',action='store_true');a=p.parse_args()
 m=json.loads((a.root/'manifest.json').read_text());rows=[]
 for path in sorted((a.root/'trials').glob('*.json')):rows.append(json.loads(path.read_text()))
 expected={(e['pair'],v,r) for e in m['entries'] for v in m['versions'] for r in m['regimes']}
@@ -27,13 +27,21 @@ for v in m['versions']:
  x=np.array([int(lookup[(i,v,'full')]['physical_success'])-int(lookup[(i,v,'partial')]['physical_success']) for i in range(m['pairs'])])
  boot=np.random.default_rng(719).choice(x,size=(10000,len(x)),replace=True).mean(1)
  summary['results'][v]['full_minus_partial']=dict(point=float(x.mean()),paired_bootstrap95=np.quantile(boot,[.025,.975]).tolist(),discordant=int(np.count_nonzero(x)))
-selected=[i for i in range(m['pairs']) if all(lookup[(i,human_version,r)]['accepted'] for r in m['regimes'])]
+def visibility_label_passes(pair):
+ if not a.require_visibility_labels:return True
+ full=lookup[(pair,human_version,'full')].get('stats',{}).get('visibility_diagnostics',{})
+ partial=lookup[(pair,human_version,'partial')].get('stats',{}).get('visibility_diagnostics',{})
+ return bool(full.get('hole_center_visible_at_preinsert',False) and not partial.get('hole_center_visible_at_preinsert',False))
+accepted_pairs=[i for i in range(m['pairs']) if all(lookup[(i,human_version,r)]['accepted'] for r in m['regimes'])]
+selected=[i for i in accepted_pairs if visibility_label_passes(i)]
 eligible_pairs=list(selected)
 if a.target_pairs is not None:
  assert len(selected)>=a.target_pairs,(len(selected),a.target_pairs)
  selected=selected[:a.target_pairs]
+summary['accepted_pairs_before_visibility_gate']=len(accepted_pairs)
+summary['visibility_label_gate']=bool(a.require_visibility_labels)
 summary['eligible_pairs']=eligible_pairs
-summary['selected_pairs']=selected;summary['selection_rule']=f'both {human_version} regimes accepted on the same frozen initial state; fixed pair order; no smoothness ranking or score selection'
+summary['selected_pairs']=selected;summary['selection_rule']=f'both {human_version} regimes accepted on the same frozen initial state'+(' and preinsert wrist label verified (Full hole visible, Partial hole hidden)' if a.require_visibility_labels else '')+'; fixed pair order; no smoothness ranking or score selection'
 summary['selected_episodes']=len(selected)*2
 (a.root/'summary.json').write_text(json.dumps(summary,indent=2));(a.root/'selection.json').write_text(json.dumps(selected))
 out=a.root/'dataset_state.hdf5'

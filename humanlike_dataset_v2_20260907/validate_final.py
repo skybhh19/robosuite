@@ -25,7 +25,12 @@ def decoded(values):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", required=True, type=Path)
+    parser.add_argument("--expected-episodes", type=int, default=400)
+    parser.add_argument("--expected-full", type=int, default=200)
+    parser.add_argument("--expected-partial", type=int, default=200)
     args = parser.parse_args()
+    if args.expected_full + args.expected_partial != args.expected_episodes:
+        parser.error("expected Full and Partial counts must sum to expected episodes")
     source_path = args.root / "dataset_image84.hdf5"
     rate_path = args.root / "dataset_image84_14hz.hdf5"
     result = {
@@ -39,14 +44,14 @@ def main():
     with h5py.File(source_path, "r") as source, h5py.File(rate_path, "r") as rate:
         source_names = set(source["data"])
         rate_names = set(rate["data"])
-        assert source_names == rate_names and len(source_names) == 400
+        assert source_names == rate_names and len(source_names) == args.expected_episodes
         result["episodes"] = len(source_names)
         expected_masks = {
-            "all": 400,
-            "fully_observable": 200,
-            "partially_observable": 200,
-            "train": 320,
-            "valid": 80,
+            "all": args.expected_episodes,
+            "fully_observable": args.expected_full,
+            "partially_observable": args.expected_partial,
+            "train": args.expected_episodes - max(2, round(0.2 * args.expected_episodes)),
+            "valid": max(2, round(0.2 * args.expected_episodes)),
         }
         for name, expected in expected_masks.items():
             assert name in source["mask"] and name in rate["mask"]
