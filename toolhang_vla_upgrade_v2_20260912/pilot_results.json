@@ -1,0 +1,37 @@
+{
+  "selected_variant": "moderate_v2",
+  "linear_r2_protocol": "episode-grouped holdout; current 7D joint position predicts 7D action",
+  "variants": {
+    "v1_reference": {
+      "fixture_x_m": [-0.035, 0.035],
+      "fixture_y_m": [-0.025, 0.025],
+      "fixture_yaw_deg": [-20.0, 20.0],
+      "absolute_action_r2": 0.9917,
+      "delta_action_r2": 0.1245
+    },
+    "moderate_v2": {
+      "pairs": 40,
+      "fixture_x_m": [-0.055, 0.055],
+      "fixture_y_m": [-0.04, 0.04],
+      "fixture_yaw_deg": [-30.0, 35.0],
+      "physical_success": {"full": 29, "partial": 28},
+      "accepted_success": {"full": 25, "partial": 26},
+      "both_accepted_pairs": 19,
+      "strict_visibility_pairs": 17,
+      "absolute_action_r2": 0.9914,
+      "delta_action_r2": 0.1097
+    },
+    "d08_like_v2": {
+      "pairs": 40,
+      "fixture_x_m": [-0.07, 0.07],
+      "fixture_y_m": [-0.05, 0.05],
+      "fixture_yaw_deg": [-15.0, 45.0],
+      "physical_success": {"full": 30, "partial": 25},
+      "accepted_success": {"full": 27, "partial": 20},
+      "both_accepted_pairs": 14,
+      "strict_visibility_pairs": 12,
+      "absolute_action_r2": 0.9910,
+      "delta_action_r2": 0.1370
+    }
+  }
+}

@@ -20,3 +20,21 @@ only the grasp position and resulting wrist-camera occlusion differ.
 Production contains 150 pairs / 300 demos. The `all` mask contains all 300,
 while `fully_observable` and `partially_observable` each contain 150. Train and
 validation masks are split by pair.
+
+## Pilot decision
+
+`moderate_v2` was selected for production. On 40 frozen pairs, physical
+success was 29/40 Full and 28/40 Partial; accepted success was 25/40 and 26/40.
+Nineteen pairs succeeded in both regimes and 17 also passed the strict camera
+label check. The D08-like range was less balanced (30/40 Full versus 25/40
+Partial) and produced only 12 strictly eligible pairs.
+
+A linear episode-grouped holdout diagnostic predicting absolute action from
+current joint position remained high, as expected for absolute joint control.
+For delta action, R2 was 0.110 in `moderate_v2`, compared with 0.125 in v1 and
+0.137 in `d08_like_v2`. This diagnostic is supporting evidence only; it does
+not predict the final VLA ordering.
+
+The production pool uses 450 frozen pairs and selects the first 150 pairs that
+pass physical, quality, paired-state, and camera-label checks. This fixed-order
+rule does not rank trajectories by smoothness or model score.
