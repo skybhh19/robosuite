@@ -38,3 +38,28 @@ not predict the final VLA ordering.
 The production pool uses 450 frozen pairs and selects the first 150 pairs that
 pass physical, quality, paired-state, and camera-label checks. This fixed-order
 rule does not rank trajectories by smoothness or model score.
+
+## Production release
+
+The completed release is:
+
+`/iris/u/jasonyan/data/toolhang_vla_upgrade_v2_20260912/production_observability_v2/dataset_image84_14hz.hdf5`
+
+It contains 300 demos (150 Full and 150 Partial), with 240 train and 60 valid
+demos split by pair. The 450-state collection produced 227 pairs accepted in
+both regimes and 212 pairs that also passed the strict visibility gate; the
+first 150 in fixed pair order were released. First-attempt physical success was
+352/450 Full and 365/450 Partial. The difference was -2.9 percentage points,
+with paired bootstrap 95% interval [-8.2, +2.2] points.
+
+The selected poses cover x [-5.39, +5.39] cm, y [-3.97, +3.95] cm, and yaw
+[-29.74, +34.97] degrees. Exact initial simulator states match within every
+Full/Partial pair, and train/valid pair isolation passed. Episode-grouped
+delta-action R2 is 0.105, down from 0.125 in v1; absolute-action R2 remains high
+at 0.993 because the controller target is an absolute joint position.
+
+Final validation passed all image, state, action, action-chunk, mask, and
+resampling checks. The 14 Hz file SHA-256 is
+`7701f2f432d19900e24415892229fa8e3ff52bb87e18915b57d25a4e460d3d4c`.
+Collection evidence supports a stronger observability contrast, but the VLA
+Full / All / Partial ordering must still be measured by training and rollout.

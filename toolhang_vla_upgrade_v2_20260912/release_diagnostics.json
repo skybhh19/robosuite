@@ -1,0 +1,25 @@
+{
+  "passed": true,
+  "pairs": 150,
+  "episodes": 300,
+  "pair_split_isolation": true,
+  "paired_initial_states_exact": true,
+  "fixture_selected_range": {
+    "x_m": [
+      -0.05390385289300382,
+      0.053942425432054124
+    ],
+    "y_m": [
+      -0.03973188688899376,
+      0.03947711673481096
+    ],
+    "yaw_deg": [
+      -29.74368324535546,
+      34.965354211556175
+    ]
+  },
+  "episode_grouped_linear_r2": {
+    "absolute_action_from_current_joint": 0.9929233138195028,
+    "delta_action_from_current_joint": 0.10495654086337958
+  }
+}
