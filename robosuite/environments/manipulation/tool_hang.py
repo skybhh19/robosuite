@@ -336,11 +336,11 @@ class ToolHang(ManipulationEnv):
                 (1.75 / 200.0),
                 (0.32 / 200.0),
             ),  # default: 16.5 cm full length; phase-2 may extend the silver handle
-            outer_radius_1=(3.5 / 200.0),  # larger hole 3.5 cm outer diameter
-            inner_radius_1=(2.1 / 200.0),  # reduced larger hole 2.1 cm inner diameter (from real world 2.3 cm)
+            outer_radius_1=getattr(self, "tool_outer_radius_1", (3.5 / 200.0)),
+            inner_radius_1=getattr(self, "tool_inner_radius_1", (2.1 / 200.0)),
             height_1=(0.7 / 200.0),  # 0.7 cm height
-            outer_radius_2=(3.0 / 200.0),  # smaller hole 3 cm outer diameter
-            inner_radius_2=(2.0 / 200.0),  # smaller hole 2 cm outer diameter
+            outer_radius_2=getattr(self, "tool_outer_radius_2", (3.0 / 200.0)),
+            inner_radius_2=getattr(self, "tool_inner_radius_2", (2.0 / 200.0)),
             height_2=(0.7 / 200.0),  # 0.7 cm height
             ngeoms=8,
             # Scripted variants may override the metal-handle and black-grip
