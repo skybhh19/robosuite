@@ -160,13 +160,8 @@ THREADING_STYLE_JOINT_OPTIONS = {
     # frames and use short corrections near contact.
     "adaptive_insertion_servo": True,
     "collision_aware_grasp": True,
-    "joint_tracking_error_limit": 0.040,
     "insertion_correction_steps": 32,
-    # Tian's Threading collector allows up to 325 control steps for hard
-    # endpoint convergence. ToolHang needs less, but 48 still cuts off Full
-    # grasps that are visibly converging without contact.
-    "waypoint_tracking_max_steps": 200,
-    "training_step_limit": 520,
+    "waypoint_tracking_max_steps": 48,
     "insertion_tool_orientation_gain": 0.35,
     "joint_precision_frame_scale": 1.0,
 }
@@ -930,9 +925,7 @@ class GeometricJointPolicy:
         insertion_retime=False,
         transfer_ik_recovery_restarts=None,
         adaptive_insertion_servo=False,
-        training_step_limit=365,
         collision_aware_grasp=False,
-        joint_tracking_error_limit=None,
     ):
         self.stop_after_stage = stop_after_stage
         self.seed = int(seed)
@@ -983,19 +976,11 @@ class GeometricJointPolicy:
         self.insertion_wedge_attitude = bool(insertion_wedge_attitude)
         self.insertion_retime = bool(insertion_retime)
         self.adaptive_insertion_servo = bool(adaptive_insertion_servo)
-        self.training_step_limit = int(training_step_limit)
         self.collision_aware_grasp = bool(collision_aware_grasp)
-        self.joint_tracking_error_limit = (
-            None if joint_tracking_error_limit is None else float(joint_tracking_error_limit)
-        )
         if self.adaptive_insertion_servo and controller_backend != "joint_position":
             raise ValueError("adaptive insertion servo requires joint_position")
         if self.insertion_retime and controller_backend != "joint_position":
             raise ValueError("insertion retiming requires joint_position")
-        if self.training_step_limit < 365:
-            raise ValueError("training_step_limit must be at least 365")
-        if self.joint_tracking_error_limit is not None and self.joint_tracking_error_limit <= 0.0:
-            raise ValueError("joint_tracking_error_limit must be positive")
         self.transfer_ik_recovery_restarts = (
             None if transfer_ik_recovery_restarts is None
             else int(transfer_ik_recovery_restarts)
@@ -1114,14 +1099,7 @@ class GeometricJointPolicy:
         return bool(env._check_grasp(env.robots[0].gripper, env.tool))
 
     @staticmethod
-    def _joint_path_clear(
-        env,
-        start_qpos,
-        target_qpos,
-        samples=48,
-        check_gripper=False,
-        allow_gripper_tool_after=1.0,
-    ):
+    def _joint_path_clear(env, start_qpos, target_qpos, samples=48):
         """Kinematically reject phase-2 starts whose direct departure hits the scene."""
         robot = env.robots[0]
         controller = robot.composite_controller.part_controllers[robot.arms[0]]
@@ -1133,14 +1111,6 @@ class GeometricJointPolicy:
             geom_id
             for geom_id, name in enumerate(env.sim.model.geom_names)
             if name is not None and name.startswith("robot0_")
-        }
-        gripper_geoms = {
-            geom_id
-            for geom_id, name in enumerate(env.sim.model.geom_names)
-            if name is not None and name.startswith("gripper0_")
-        }
-        tool_geoms = {
-            env.sim.model.geom_name2id(name) for name in env.tool.contact_geoms
         }
         previous_eef = None
         site_id = robot.eef_site_id["right"]
@@ -1157,13 +1127,6 @@ class GeometricJointPolicy:
                 geom1, geom2 = int(contact.geom1), int(contact.geom2)
                 if (geom1 in robot_geoms) != (geom2 in robot_geoms):
                     return False
-                if check_gripper and ((geom1 in gripper_geoms) != (geom2 in gripper_geoms)):
-                    other = geom2 if geom1 in gripper_geoms else geom1
-                    if not (
-                        other in tool_geoms
-                        and index / samples >= allow_gripper_tool_after
-                    ):
-                        return False
         return True
 
     @classmethod
@@ -1620,9 +1583,7 @@ class GeometricJointPolicy:
             "pre_release_insertion_target": self.pre_release_insertion_target,
             "insertion_correction_steps": self.insertion_correction_steps,
             "adaptive_insertion_servo": self.adaptive_insertion_servo,
-            "training_step_limit": self.training_step_limit,
             "collision_aware_grasp_enabled": self.collision_aware_grasp,
-            "joint_tracking_error_limit": self.joint_tracking_error_limit,
             "pre_release_validation_steps": self.pre_release_validation_steps,
             "threading_pregrasp_frames": self.threading_pregrasp_frames,
             "transfer_retime": self.transfer_retime,
@@ -1780,34 +1741,25 @@ class GeometricJointPolicy:
                 "candidates": [],
             }
             if self.collision_aware_grasp:
-                def grasp_candidate_clear(candidate):
-                    return self._joint_path_clear(
-                        env,
-                        THREADING_STYLE_TASK_HOME_QPOS,
-                        candidate["pregrasp_qpos"],
-                        check_gripper=True,
-                    ) and self._joint_path_clear(
-                        env,
-                        candidate["pregrasp_qpos"],
-                        candidate["close_qpos"],
-                        check_gripper=True,
-                        allow_gripper_tool_after=0.90,
-                    )
-
-                baseline_clear = grasp_candidate_clear(selected_grasp)
+                baseline_clear = self._joint_path_clear(
+                    env,
+                    selected_grasp["pregrasp_qpos"],
+                    selected_grasp["close_qpos"],
+                )
                 collision_audit["baseline_clear"] = baseline_clear
                 if not baseline_clear:
                     clear_candidates = []
                     for yaw_delta_deg in (
-                        5.0, -5.0, 10.0, -10.0, 15.0, -15.0,
-                        20.0, -20.0, 25.0, -25.0, 30.0, -30.0,
-                        35.0, -35.0, 40.0, -40.0, 45.0, -45.0,
-                        50.0, -50.0, 55.0, -55.0, 60.0, -60.0,
+                        5.0, -5.0, 10.0, -10.0, 15.0, -15.0, 20.0, -20.0,
                     ):
                         candidate_yaw = episode_grasp_yaw_deg + yaw_delta_deg
                         self.ik_rng.set_state(initial_grasp_rng_state)
                         candidate = solve_grasp_yaw(candidate_yaw)
-                        clear = grasp_candidate_clear(candidate)
+                        clear = self._joint_path_clear(
+                            env,
+                            candidate["pregrasp_qpos"],
+                            candidate["close_qpos"],
+                        )
                         collision_audit["candidates"].append(
                             {
                                 "yaw_deg": candidate_yaw,
@@ -1820,10 +1772,7 @@ class GeometricJointPolicy:
                     if clear_candidates:
                         selected_grasp = min(
                             clear_candidates,
-                            key=lambda candidate: (
-                                abs(candidate["metrics"]["grasp_yaw_deg"] - episode_grasp_yaw_deg),
-                                candidate["metrics"]["grasp_ik_error"],
-                            ),
+                            key=lambda candidate: candidate["metrics"]["grasp_ik_error"],
                         )
                         collision_audit["selected_yaw_deg"] = selected_grasp["metrics"]["grasp_yaw_deg"]
                 variation_params["collision_aware_grasp"] = collision_audit
@@ -1879,13 +1828,6 @@ class GeometricJointPolicy:
             target_joints = np.asarray(target_joints, dtype=float).copy()
             target_position = target_matrix = None
             if self.controller_backend == "joint_position":
-                if self.joint_tracking_error_limit is not None:
-                    actual_qpos = np.asarray(env.sim.data.qpos[indexes], dtype=float)
-                    target_joints = np.clip(
-                        target_joints,
-                        actual_qpos - self.joint_tracking_error_limit,
-                        actual_qpos + self.joint_tracking_error_limit,
-                    )
                 action = np.r_[target_joints, gripper]
             else:
                 if target_pose is None:
@@ -3253,8 +3195,7 @@ class GeometricJointPolicy:
                 )
                 if (
                     self.robot_start_mode == "threading_continuous"
-                    and steps + correction_frames + remaining_training_frames
-                    > self.training_step_limit
+                    and steps + correction_frames + remaining_training_frames > 365
                 ):
                     insertion_correction_budget_limited = True
                     break
@@ -4157,14 +4098,7 @@ def collection_acceptance(native_success, stats, wrist_requirement="any", requir
         # Closed-loop centering can legitimately use all six bounded
         # corrections. Keep the lower quality bound while allowing that
         # authored motion plus the 15-frame retreat to remain eligible.
-        frame_low, frame_high = (
-            (
-                140,
-                int(stats.get("variation", {}).get("training_step_limit", 365)),
-            )
-            if threading_style_start
-            else (165, 240)
-        )
+        frame_low, frame_high = (140, 365) if threading_style_start else (165, 240)
         quality_frames = stats.get("training_recorded_steps", stats.get("steps", 0))
         controller_backend = stats.get("controller_backend", "joint_position")
         pregrasp_contact = stats.get("pregrasp_contact_check", {})
