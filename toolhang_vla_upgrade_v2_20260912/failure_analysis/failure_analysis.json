@@ -1,0 +1,541 @@
+{
+  "v1_400_demo_source_pool": {
+    "full": {
+      "rollouts": 320,
+      "physical_success": 270,
+      "physical_success_rate": 0.84375,
+      "accepted": 263,
+      "accepted_rate": 0.821875,
+      "physical_failures": 50,
+      "quality_only_rejections": 7,
+      "failure_reasons": {
+        "insert": 33,
+        "descend": 13,
+        "transfer_rotate": 3,
+        "preinsert": 1
+      },
+      "failed_stages": {
+        "insert": 33,
+        "descend": 13,
+        "transfer_rotate": 3,
+        "preinsert": 1
+      },
+      "quality_rejection_checks": {
+        "ph_frames_140_365": 5,
+        "clean_pre_release_contact": 2,
+        "clean_pre_release_insertion": 1
+      },
+      "examples": {
+        "insert": [
+          {
+            "pair": 3,
+            "steps": 342,
+            "last_stage": "insert",
+            "line_distance_m": 0.007724239924959351,
+            "normalized_insertion": 0.03439165554703881,
+            "hole_straddles_hook": true,
+            "tool_on_frame": null
+          },
+          {
+            "pair": 19,
+            "steps": 340,
+            "last_stage": "insert",
+            "line_distance_m": 0.006942955663420427,
+            "normalized_insertion": 0.033396734595297996,
+            "hole_straddles_hook": true,
+            "tool_on_frame": null
+          },
+          {
+            "pair": 33,
+            "steps": 340,
+            "last_stage": "insert",
+            "line_distance_m": 0.005857543214594303,
+            "normalized_insertion": 0.041797381903524576,
+            "hole_straddles_hook": true,
+            "tool_on_frame": null
+          }
+        ],
+        "transfer_rotate": [
+          {
+            "pair": 13,
+            "steps": 215,
+            "last_stage": "transfer_rotate",
+            "line_distance_m": 0.024789809611100604,
+            "normalized_insertion": -0.108429071285889,
+            "hole_straddles_hook": false,
+            "tool_on_frame": null
+          },
+          {
+            "pair": 87,
+            "steps": 216,
+            "last_stage": "transfer_rotate",
+            "line_distance_m": 0.004147396492979276,
+            "normalized_insertion": -0.17664863736751096,
+            "hole_straddles_hook": false,
+            "tool_on_frame": null
+          },
+          {
+            "pair": 312,
+            "steps": 223,
+            "last_stage": "transfer_rotate",
+            "line_distance_m": 0.007330121253716613,
+            "normalized_insertion": 0.07171821014275867,
+            "hole_straddles_hook": false,
+            "tool_on_frame": null
+          }
+        ],
+        "preinsert": [
+          {
+            "pair": 22,
+            "steps": 234,
+            "last_stage": "preinsert",
+            "line_distance_m": 0.01978662836208156,
+            "normalized_insertion": 0.08525693168887083,
+            "hole_straddles_hook": false,
+            "tool_on_frame": null
+          }
+        ],
+        "descend": [
+          {
+            "pair": 27,
+            "steps": 116,
+            "last_stage": "descend",
+            "line_distance_m": 0.2418054758248219,
+            "normalized_insertion": -0.6970156956892763,
+            "hole_straddles_hook": false,
+            "tool_on_frame": null
+          },
+          {
+            "pair": 44,
+            "steps": 116,
+            "last_stage": "descend",
+            "line_distance_m": 0.2550618985778745,
+            "normalized_insertion": -0.5965132151914292,
+            "hole_straddles_hook": false,
+            "tool_on_frame": null
+          },
+          {
+            "pair": 112,
+            "steps": 116,
+            "last_stage": "descend",
+            "line_distance_m": 0.2547084949382621,
+            "normalized_insertion": -0.6296282915071867,
+            "hole_straddles_hook": false,
+            "tool_on_frame": null
+          }
+        ]
+      }
+    },
+    "partial": {
+      "rollouts": 320,
+      "physical_success": 278,
+      "physical_success_rate": 0.86875,
+      "accepted": 267,
+      "accepted_rate": 0.834375,
+      "physical_failures": 42,
+      "quality_only_rejections": 11,
+      "failure_reasons": {
+        "insert": 33,
+        "preinsert": 4,
+        "transfer_rotate": 3,
+        "release_retreat": 2
+      },
+      "failed_stages": {
+        "insert": 33,
+        "preinsert": 4,
+        "transfer_rotate": 3,
+        "release_retreat": 2
+      },
+      "quality_rejection_checks": {
+        "ph_frames_140_365": 10,
+        "clean_grasp_ik": 1,
+        "clean_pre_release_contact": 1
+      },
+      "examples": {
+        "insert": [
+          {
+            "pair": 5,
+            "steps": 337,
+            "last_stage": "insert",
+            "line_distance_m": 0.008217026961773791,
+            "normalized_insertion": 0.07288513581274375,
+            "hole_straddles_hook": false,
+            "tool_on_frame": null
+          },
+          {
+            "pair": 7,
+            "steps": 342,
+            "last_stage": "insert",
+            "line_distance_m": 0.0014976760677833875,
+            "normalized_insertion": 0.06155439482667574,
+            "hole_straddles_hook": true,
+            "tool_on_frame": null
+          },
+          {
+            "pair": 31,
+            "steps": 342,
+            "last_stage": "insert",
+            "line_distance_m": 0.004192952647707655,
+            "normalized_insertion": 0.08016600602731011,
+            "hole_straddles_hook": true,
+            "tool_on_frame": null
+          }
+        ],
+        "preinsert": [
+          {
+            "pair": 65,
+            "steps": 217,
+            "last_stage": "preinsert",
+            "line_distance_m": 0.01683408328273534,
+            "normalized_insertion": -0.15512051978148061,
+            "hole_straddles_hook": false,
+            "tool_on_frame": null
+          },
+          {
+            "pair": 67,
+            "steps": 241,
+            "last_stage": "preinsert",
+            "line_distance_m": 0.017004765531280757,
+            "normalized_insertion": -0.11891705581993592,
+            "hole_straddles_hook": false,
+            "tool_on_frame": null
+          },
+          {
+            "pair": 99,
+            "steps": 225,
+            "last_stage": "preinsert",
+            "line_distance_m": 0.022445757817505737,
+            "normalized_insertion": 0.20023127071372487,
+            "hole_straddles_hook": false,
+            "tool_on_frame": null
+          }
+        ],
+        "release_retreat": [
+          {
+            "pair": 84,
+            "steps": 366,
+            "last_stage": "release_retreat",
+            "line_distance_m": 0.0009450101400884812,
+            "normalized_insertion": 0.046288274144921655,
+            "hole_straddles_hook": true,
+            "tool_on_frame": null
+          },
+          {
+            "pair": 256,
+            "steps": 403,
+            "last_stage": "release_retreat",
+            "line_distance_m": 0.00417587432125921,
+            "normalized_insertion": 0.36433299342395814,
+            "hole_straddles_hook": true,
+            "tool_on_frame": null
+          }
+        ],
+        "transfer_rotate": [
+          {
+            "pair": 149,
+            "steps": 227,
+            "last_stage": "transfer_rotate",
+            "line_distance_m": 0.01685513085741508,
+            "normalized_insertion": -0.11024414020921823,
+            "hole_straddles_hook": false,
+            "tool_on_frame": null
+          },
+          {
+            "pair": 153,
+            "steps": 225,
+            "last_stage": "transfer_rotate",
+            "line_distance_m": 0.011713432220885526,
+            "normalized_insertion": -0.16274818340513247,
+            "hole_straddles_hook": false,
+            "tool_on_frame": null
+          },
+          {
+            "pair": 273,
+            "steps": 247,
+            "last_stage": "transfer_rotate",
+            "line_distance_m": 0.018303903999536703,
+            "normalized_insertion": -0.1169395561917711,
+            "hole_straddles_hook": false,
+            "tool_on_frame": null
+          }
+        ]
+      }
+    }
+  },
+  "v2_300_demo_source_pool": {
+    "full": {
+      "rollouts": 450,
+      "physical_success": 352,
+      "physical_success_rate": 0.7822222222222223,
+      "accepted": 307,
+      "accepted_rate": 0.6822222222222222,
+      "physical_failures": 98,
+      "quality_only_rejections": 45,
+      "failure_reasons": {
+        "insert": 55,
+        "descend": 36,
+        "release_retreat": 4,
+        "transfer_rotate": 3
+      },
+      "failed_stages": {
+        "insert": 55,
+        "descend": 36,
+        "release_retreat": 4,
+        "transfer_rotate": 3
+      },
+      "quality_rejection_checks": {
+        "ph_frames_140_365": 38,
+        "clean_pre_release_contact": 7,
+        "clean_grasp_ik": 1,
+        "clean_transfer_ik": 1,
+        "clean_pre_release_insertion": 1
+      },
+      "examples": {
+        "insert": [
+          {
+            "pair": 2,
+            "steps": 341,
+            "last_stage": "insert",
+            "line_distance_m": 0.006037491660332602,
+            "normalized_insertion": 0.041489201614059286,
+            "hole_straddles_hook": true,
+            "tool_on_frame": null
+          },
+          {
+            "pair": 6,
+            "steps": 339,
+            "last_stage": "insert",
+            "line_distance_m": 0.006446311604853625,
+            "normalized_insertion": 0.04019627099425253,
+            "hole_straddles_hook": true,
+            "tool_on_frame": null
+          },
+          {
+            "pair": 7,
+            "steps": 336,
+            "last_stage": "insert",
+            "line_distance_m": 0.006492432995618218,
+            "normalized_insertion": 0.03438088131007382,
+            "hole_straddles_hook": true,
+            "tool_on_frame": null
+          }
+        ],
+        "descend": [
+          {
+            "pair": 5,
+            "steps": 120,
+            "last_stage": "descend",
+            "line_distance_m": 0.2463538645434646,
+            "normalized_insertion": -0.009893210597327545,
+            "hole_straddles_hook": false,
+            "tool_on_frame": null
+          },
+          {
+            "pair": 21,
+            "steps": 120,
+            "last_stage": "descend",
+            "line_distance_m": 0.2684986648228175,
+            "normalized_insertion": 0.014189971777128534,
+            "hole_straddles_hook": false,
+            "tool_on_frame": null
+          },
+          {
+            "pair": 46,
+            "steps": 120,
+            "last_stage": "descend",
+            "line_distance_m": 0.25773048272677046,
+            "normalized_insertion": -0.6096792508248198,
+            "hole_straddles_hook": false,
+            "tool_on_frame": null
+          }
+        ],
+        "release_retreat": [
+          {
+            "pair": 34,
+            "steps": 385,
+            "last_stage": "release_retreat",
+            "line_distance_m": 0.001109384683320454,
+            "normalized_insertion": 0.0435812414173528,
+            "hole_straddles_hook": true,
+            "tool_on_frame": null
+          },
+          {
+            "pair": 183,
+            "steps": 405,
+            "last_stage": "release_retreat",
+            "line_distance_m": 0.0010579983089253667,
+            "normalized_insertion": 0.04195814988810897,
+            "hole_straddles_hook": true,
+            "tool_on_frame": null
+          },
+          {
+            "pair": 368,
+            "steps": 401,
+            "last_stage": "release_retreat",
+            "line_distance_m": 0.0015289362453597389,
+            "normalized_insertion": 0.045511921155592286,
+            "hole_straddles_hook": true,
+            "tool_on_frame": null
+          }
+        ],
+        "transfer_rotate": [
+          {
+            "pair": 105,
+            "steps": 253,
+            "last_stage": "transfer_rotate",
+            "line_distance_m": 0.011677818471604259,
+            "normalized_insertion": -0.1530861664774199,
+            "hole_straddles_hook": false,
+            "tool_on_frame": null
+          },
+          {
+            "pair": 238,
+            "steps": 220,
+            "last_stage": "transfer_rotate",
+            "line_distance_m": 0.025791044861285584,
+            "normalized_insertion": -0.12389798105632563,
+            "hole_straddles_hook": false,
+            "tool_on_frame": null
+          },
+          {
+            "pair": 285,
+            "steps": 215,
+            "last_stage": "transfer_rotate",
+            "line_distance_m": 0.011817949122052087,
+            "normalized_insertion": -0.1561466844163095,
+            "hole_straddles_hook": false,
+            "tool_on_frame": null
+          }
+        ]
+      }
+    },
+    "partial": {
+      "rollouts": 450,
+      "physical_success": 365,
+      "physical_success_rate": 0.8111111111111111,
+      "accepted": 330,
+      "accepted_rate": 0.7333333333333333,
+      "physical_failures": 85,
+      "quality_only_rejections": 35,
+      "failure_reasons": {
+        "insert": 58,
+        "transfer_rotate": 16,
+        "preinsert": 10,
+        "lift_verify": 1
+      },
+      "failed_stages": {
+        "insert": 58,
+        "transfer_rotate": 16,
+        "preinsert": 10,
+        "lift_verify": 1
+      },
+      "quality_rejection_checks": {
+        "ph_frames_140_365": 25,
+        "clean_pre_release_contact": 6,
+        "clean_pre_release_insertion": 5,
+        "clean_transfer_ik": 3,
+        "clean_max_joint_target_delta": 1
+      },
+      "examples": {
+        "insert": [
+          {
+            "pair": 7,
+            "steps": 338,
+            "last_stage": "insert",
+            "line_distance_m": 0.005880065111208909,
+            "normalized_insertion": 0.05340664409952907,
+            "hole_straddles_hook": true,
+            "tool_on_frame": null
+          },
+          {
+            "pair": 14,
+            "steps": 340,
+            "last_stage": "insert",
+            "line_distance_m": 0.006187390379226618,
+            "normalized_insertion": 0.09704611378775566,
+            "hole_straddles_hook": false,
+            "tool_on_frame": null
+          },
+          {
+            "pair": 28,
+            "steps": 342,
+            "last_stage": "insert",
+            "line_distance_m": 0.0048790637216898705,
+            "normalized_insertion": 0.086562877858627,
+            "hole_straddles_hook": false,
+            "tool_on_frame": null
+          }
+        ],
+        "transfer_rotate": [
+          {
+            "pair": 20,
+            "steps": 240,
+            "last_stage": "transfer_rotate",
+            "line_distance_m": 0.01553112377760864,
+            "normalized_insertion": -0.1203073719131812,
+            "hole_straddles_hook": false,
+            "tool_on_frame": null
+          },
+          {
+            "pair": 24,
+            "steps": 236,
+            "last_stage": "transfer_rotate",
+            "line_distance_m": 0.0029664595948725356,
+            "normalized_insertion": -0.1750425878091767,
+            "hole_straddles_hook": false,
+            "tool_on_frame": null
+          },
+          {
+            "pair": 49,
+            "steps": 225,
+            "last_stage": "transfer_rotate",
+            "line_distance_m": 0.01379285965199962,
+            "normalized_insertion": -0.13795215087081494,
+            "hole_straddles_hook": false,
+            "tool_on_frame": null
+          }
+        ],
+        "preinsert": [
+          {
+            "pair": 27,
+            "steps": 248,
+            "last_stage": "preinsert",
+            "line_distance_m": 0.021022287487521663,
+            "normalized_insertion": 0.11123345990854347,
+            "hole_straddles_hook": false,
+            "tool_on_frame": null
+          },
+          {
+            "pair": 78,
+            "steps": 259,
+            "last_stage": "preinsert",
+            "line_distance_m": 0.10110928015817529,
+            "normalized_insertion": -0.018561690984629557,
+            "hole_straddles_hook": false,
+            "tool_on_frame": null
+          },
+          {
+            "pair": 104,
+            "steps": 283,
+            "last_stage": "preinsert",
+            "line_distance_m": 0.040474800969520705,
+            "normalized_insertion": 0.2651747746279654,
+            "hole_straddles_hook": false,
+            "tool_on_frame": null
+          }
+        ],
+        "lift_verify": [
+          {
+            "pair": 353,
+            "steps": 140,
+            "last_stage": "lift_verify",
+            "line_distance_m": 0.23861317157098672,
+            "normalized_insertion": 0.5196835927844886,
+            "hole_straddles_hook": false,
+            "tool_on_frame": null
+          }
+        ]
+      }
+    }
+  }
+}
