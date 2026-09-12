@@ -29,7 +29,11 @@ elif [ "$MODE" = run ]; then
     --human-version toolhang_vla_v3 --kind toolhang --root "$DATA_ROOT" \
     --index "${SLURM_ARRAY_TASK_ID:-0}" --shards "$PAIRS"
 elif [ "$MODE" = summary ]; then
-  "$PY" "$PIPELINE_ROOT/summarize.py" --root "$DATA_ROOT" --require-visibility-labels
+  ARGS=(--root "$DATA_ROOT" --require-visibility-labels)
+  if [ "$VARIANT" = production_observability_v3 ]; then
+    ARGS+=(--target-pairs 150)
+  fi
+  "$PY" "$PIPELINE_ROOT/summarize.py" "${ARGS[@]}"
 else
   echo "unknown mode: $MODE" >&2
   exit 2
