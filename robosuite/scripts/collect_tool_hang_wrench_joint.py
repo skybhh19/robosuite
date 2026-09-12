@@ -173,6 +173,11 @@ TOOLHANG_VLA_V4_OPTIONS = {
     "insertion_correction_steps": 48,
     "training_step_limit": 460,
 }
+TOOLHANG_VLA_V5_OPTIONS = {
+    **TOOLHANG_VLA_V4_OPTIONS,
+    "insertion_retry": True,
+    "training_step_limit": 650,
+}
 # Compatibility name retained for frozen evaluation scripts created while the
 # improvement was still a candidate.
 ROBUST_JOINT_INSERTION_RETIME_OPTIONS = ROBUST_JOINT_OPTIONS.copy()
@@ -936,6 +941,7 @@ class GeometricJointPolicy:
         collision_aware_grasp=False,
         safe_transfer_rise=False,
         training_step_limit=365,
+        insertion_retry=False,
     ):
         self.stop_after_stage = stop_after_stage
         self.seed = int(seed)
@@ -989,6 +995,7 @@ class GeometricJointPolicy:
         self.collision_aware_grasp = bool(collision_aware_grasp)
         self.safe_transfer_rise = bool(safe_transfer_rise)
         self.training_step_limit = int(training_step_limit)
+        self.insertion_retry = bool(insertion_retry)
         if self.adaptive_insertion_servo and controller_backend != "joint_position":
             raise ValueError("adaptive insertion servo requires joint_position")
         if self.insertion_retime and controller_backend != "joint_position":
@@ -1600,6 +1607,7 @@ class GeometricJointPolicy:
             "collision_aware_grasp_enabled": self.collision_aware_grasp,
             "safe_transfer_rise": self.safe_transfer_rise,
             "training_step_limit": self.training_step_limit,
+            "insertion_retry": self.insertion_retry,
             "pre_release_validation_steps": self.pre_release_validation_steps,
             "threading_pregrasp_frames": self.threading_pregrasp_frames,
             "transfer_retime": self.transfer_retime,
@@ -2279,7 +2287,12 @@ class GeometricJointPolicy:
             final_motion = float("inf")
             executed_steps = 0
             aborted = False
-            for _ in range(self.waypoint_tracking_max_steps):
+            stage_tracking_max_steps = (
+                max(self.waypoint_tracking_max_steps, 100)
+                if self.safe_transfer_rise and name in ("transfer_rotate", "preinsert")
+                else self.waypoint_tracking_max_steps
+            )
+            for _ in range(stage_tracking_max_steps):
                 command = target
                 if previous_joint_target is not None:
                     command = np.clip(
@@ -2326,7 +2339,7 @@ class GeometricJointPolicy:
                 "passed": passed,
                 "aborted_by_pregrasp_contact": aborted,
                 "steps": int(executed_steps),
-                "max_steps": int(self.waypoint_tracking_max_steps),
+                "max_steps": int(stage_tracking_max_steps),
                 "stable_steps": int(stable_steps),
                 "required_stable_steps": DEFAULT_WAYPOINT_TRACKING_STABLE_STEPS,
                 "position_tolerance_m": self.waypoint_position_tolerance_m,
@@ -3350,6 +3363,100 @@ class GeometricJointPolicy:
                     > self.pre_release_insertion_target
                 ):
                     break
+
+            retry_debug = tool_hang_debug(env)
+            retry_needed = bool(
+                self.insertion_retry
+                and self._grasped(env)
+                and not (
+                    retry_debug["hole_frame_contact"]
+                    and retry_debug["hole_straddles_hook"]
+                    and retry_debug["line_distance_m"] <= PRE_RELEASE_CORRECTION_LINE_MAX
+                    and retry_debug["normalized_insertion"]
+                    > self.pre_release_insertion_target
+                )
+            )
+            retry_audit = {
+                "enabled": self.insertion_retry,
+                "triggered": retry_needed,
+                "before": retry_debug,
+                "waypoints": [],
+            }
+            if retry_needed:
+                # A ring caught on the wrong side of the hook cannot be fixed
+                # by continuing to push in the same direction. Lift straight
+                # up first, then re-center above the hook and descend again.
+                actual_hole = np.asarray(env.sim.data.site_xpos[hole_site]).copy()
+                recovery_holes = [
+                    actual_hole + 0.035 * world_up,
+                    hook_start
+                    + (seat_along_fraction * hook_length + insert_along) * hook_direction
+                    + insert_side * side
+                    + (0.040 + insert_up) * world_up,
+                    canonical_holes[1],
+                    canonical_holes[2],
+                    canonical_holes[3],
+                ]
+                for retry_index, (target_hole, frames) in enumerate(
+                    zip(recovery_holes, (14, 14, 12, 12, 16))
+                ):
+                    actual_hole = np.asarray(env.sim.data.site_xpos[hole_site]).copy()
+                    current_eef_position, current_eef_matrix = get_eef_pose(env)
+                    target_position = current_eef_position + target_hole - actual_hole
+                    target_matrix = current_eef_matrix
+                    if retry_index > 0 and self.insertion_tool_orientation_gain > 0:
+                        _, actual_tool_matrix = body_pose(env, env.obj_body_id["tool"])
+                        rotation_error = Rotation.from_matrix(
+                            hanging_tool_matrix @ actual_tool_matrix.T
+                        ).as_rotvec() * self.insertion_tool_orientation_gain
+                        angle = float(np.linalg.norm(rotation_error))
+                        max_angle = np.deg2rad(3.0)
+                        if angle > max_angle:
+                            rotation_error *= max_angle / angle
+                        target_matrix = (
+                            Rotation.from_rotvec(rotation_error).as_matrix()
+                            @ current_eef_matrix
+                        )
+                        target_position = target_hole - target_matrix @ current_eef_matrix.T @ (
+                            actual_hole - current_eef_position
+                        )
+                    target_joints, retry_ik_error = self._global_ik(
+                        env,
+                        target_position,
+                        target_matrix,
+                        reference_qpos=np.asarray(
+                            env.sim.data.qpos[indexes], dtype=float
+                        ).copy(),
+                        restarts=32,
+                        position_weight=100.0,
+                    )
+                    move(
+                        target_joints,
+                        1.0,
+                        frames,
+                        cartesian_parameterization=True,
+                        start_slope=0.10,
+                        end_slope=0.10,
+                        retime_name=f"insertion_retry_{retry_index}",
+                        retime_second_difference_limit=0.055,
+                        retime_preserve_legacy_endpoint=True,
+                    )
+                    target_joints = np.asarray(target_joints, dtype=float)
+                    current_debug = tool_hang_debug(env)
+                    insertion_progress.append(current_debug["normalized_insertion"])
+                    insertion_debug.append(current_debug)
+                    retry_audit["waypoints"].append(
+                        {
+                            "index": retry_index,
+                            "target_hole": target_hole.tolist(),
+                            "ik_error": float(retry_ik_error),
+                            "after": current_debug,
+                        }
+                    )
+                    if not self._grasped(env):
+                        break
+                retry_audit["after"] = tool_hang_debug(env)
+            variation_params["insertion_retry_audit"] = retry_audit
 
             # Join insertion and release with one authored motion. The former
             # implementation held a fixed arm target for up to 32 frames and

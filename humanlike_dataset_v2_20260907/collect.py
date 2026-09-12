@@ -110,7 +110,7 @@ def trial(a,m,e,version,regime):
    contact=stats.get('pregrasp_contact_check',{});accepted=success and margin>=.05 and contact.get('passed',False) and not contact.get('detected',True)
    stats['joint_margin_rad']=margin
   else:
-   from robosuite.scripts.collect_tool_hang_wrench_joint import GeometricJointPolicy,ROBUST_JOINT_OPTIONS,THREADING_STYLE_JOINT_OPTIONS,TOOLHANG_VLA_V4_OPTIONS,VideoRecorder,collection_acceptance
+   from robosuite.scripts.collect_tool_hang_wrench_joint import GeometricJointPolicy,ROBUST_JOINT_OPTIONS,THREADING_STYLE_JOINT_OPTIONS,TOOLHANG_VLA_V4_OPTIONS,TOOLHANG_VLA_V5_OPTIONS,VideoRecorder,collection_acceptance
    lo=(-.005 if regime=='full' else .045)+e['bin']*.002
    opts=dict(seed=seed,variation=True,grasp_profile='full_visible' if regime=='full' else 'partial_hidden',robot_start_mode='threading_continuous',motion_style=e['style'],grasp_offset_range=(lo,lo+.002),controller_backend='joint_position',threading_pregrasp_frames=50,insertion_correction_steps=8,joint_line_correction_gain=.65)
    if version == 'toolhang_vla_v2':
@@ -119,7 +119,7 @@ def trial(a,m,e,version,regime):
     # closed-loop corrections so the late action stream follows the actual
     # hole-to-hook geometry instead of ending after a fixed nominal path.
     opts.update(insertion_correction_steps=12,joint_precision_frame_scale=1.15,waypoint_tracking_max_steps=24)
-   preset=(TOOLHANG_VLA_V4_OPTIONS if version == 'toolhang_vla_v4' else THREADING_STYLE_JOINT_OPTIONS if version == 'toolhang_vla_v3' else ROBUST_JOINT_OPTIONS)
+   preset=(TOOLHANG_VLA_V5_OPTIONS if version == 'toolhang_vla_v5' else TOOLHANG_VLA_V4_OPTIONS if version == 'toolhang_vla_v4' else THREADING_STYLE_JOINT_OPTIONS if version == 'toolhang_vla_v3' else ROBUST_JOINT_OPTIONS)
    opts.update(preset);p=GeometricJointPolicy(**opts);p.human_enabled=version!='baseline'
    success,stats=p.rollout(cap,VideoRecorder(None),reset_variation_override=e['initial'],allow_reset_resample=False)
    checks,accepted=collection_acceptance(success,stats,'any',True);stats['acceptance_checks']=checks
@@ -146,7 +146,7 @@ def trial(a,m,e,version,regime):
  print(json.dumps({k:row[k] for k in ['pair','version','regime','physical_success','accepted','steps','exception']}),flush=True)
 
 if __name__=='__main__':
- p=argparse.ArgumentParser();p.add_argument('mode',choices=['prepare','run']);p.add_argument('--kind',choices=['threading','toolhang'],required=True);p.add_argument('--root',type=Path,required=True);p.add_argument('--seed',type=int,default=202609071);p.add_argument('--pairs',type=int,default=40);p.add_argument('--index',type=int,default=0);p.add_argument('--shards',type=int,default=40);p.add_argument('--production',action='store_true');p.add_argument('--human-version',choices=['human_v2','human_v3','human_v4','human_v5','human_v6','human_v7','human_v8','toolhang_vla_v1','toolhang_vla_v2','toolhang_vla_v3','toolhang_vla_v4'],default='human_v2');p.add_argument('--attempt',type=int,default=0);p.add_argument('--output-dir',default='trials');p.add_argument('--retry-regime',choices=['full','partial']);p.add_argument('--failed-from',type=Path);p.add_argument('--fixture-x-range-m',nargs=2,type=float,default=(0.,0.));p.add_argument('--fixture-y-range-m',nargs=2,type=float,default=(0.,0.));p.add_argument('--fixture-yaw-range-deg',nargs=2,type=float,default=(0.,0.));p.add_argument('--tool-grip-friction',type=float,default=2.0);p.add_argument('--tool-center-grip-half-length',type=float);p.add_argument('--tool-center-grip-friction',type=float);a=p.parse_args()
+ p=argparse.ArgumentParser();p.add_argument('mode',choices=['prepare','run']);p.add_argument('--kind',choices=['threading','toolhang'],required=True);p.add_argument('--root',type=Path,required=True);p.add_argument('--seed',type=int,default=202609071);p.add_argument('--pairs',type=int,default=40);p.add_argument('--index',type=int,default=0);p.add_argument('--shards',type=int,default=40);p.add_argument('--production',action='store_true');p.add_argument('--human-version',choices=['human_v2','human_v3','human_v4','human_v5','human_v6','human_v7','human_v8','toolhang_vla_v1','toolhang_vla_v2','toolhang_vla_v3','toolhang_vla_v4','toolhang_vla_v5'],default='human_v2');p.add_argument('--attempt',type=int,default=0);p.add_argument('--output-dir',default='trials');p.add_argument('--retry-regime',choices=['full','partial']);p.add_argument('--failed-from',type=Path);p.add_argument('--fixture-x-range-m',nargs=2,type=float,default=(0.,0.));p.add_argument('--fixture-y-range-m',nargs=2,type=float,default=(0.,0.));p.add_argument('--fixture-yaw-range-deg',nargs=2,type=float,default=(0.,0.));p.add_argument('--tool-grip-friction',type=float,default=2.0);p.add_argument('--tool-center-grip-half-length',type=float);p.add_argument('--tool-center-grip-friction',type=float);a=p.parse_args()
  if a.mode=='prepare':
   assert not (a.root/'manifest.json').exists();prepare(a)
  else:
