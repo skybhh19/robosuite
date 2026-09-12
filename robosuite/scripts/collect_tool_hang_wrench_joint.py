@@ -168,7 +168,7 @@ THREADING_STYLE_JOINT_OPTIONS = {
 TOOLHANG_VLA_V4_OPTIONS = {
     **THREADING_STYLE_JOINT_OPTIONS,
     "safe_transfer_rise": True,
-    "high_hole_height_m": 0.090,
+    "high_hole_height_m": 0.060,
     "insertion_wedge_attitude": True,
     "insertion_correction_steps": 48,
     "training_step_limit": 460,
