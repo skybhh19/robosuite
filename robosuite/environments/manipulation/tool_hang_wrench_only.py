@@ -64,12 +64,14 @@ class ToolHangWrenchOnly(ToolHang):
     # handle almost edge-to-edge with black material.
     EXTENDED_HANDLE_HALF_LENGTH = 0.1025  # 20.5 cm full silver handle
     EXTENDED_GRIP_HALF_LENGTH = 0.080
-    # Reduce the visible metal rings while preserving both apertures. Keeping
-    # the inner radii unchanged avoids making hook insertion harder.
-    TOOL_OUTER_RADIUS_1 = 3.3 / 200.0  # 3.3 cm outer diameter, formerly 3.5
-    TOOL_INNER_RADIUS_1 = 2.1 / 200.0  # unchanged 2.1 cm aperture
-    TOOL_OUTER_RADIUS_2 = 2.8 / 200.0  # 2.8 cm outer diameter, formerly 3.0
-    TOOL_INNER_RADIUS_2 = 2.0 / 200.0  # unchanged 2.0 cm aperture
+    # Use smaller, thinner rings. The previous edit only reduced the outside
+    # diameter, so the hook clearance stayed identical and did not address the
+    # insertion failures. These dimensions reduce the visible ring and add
+    # 1 mm of radial clearance around the hook.
+    TOOL_OUTER_RADIUS_1 = 3.1 / 200.0  # 3.1 cm outer diameter, formerly 3.5
+    TOOL_INNER_RADIUS_1 = 2.3 / 200.0  # 2.3 cm aperture, formerly 2.1
+    TOOL_OUTER_RADIUS_2 = 2.6 / 200.0  # 2.6 cm outer diameter, formerly 3.0
+    TOOL_INNER_RADIUS_2 = 2.2 / 200.0  # 2.2 cm aperture, formerly 2.0
     # Restore Panda's centered eye-in-hand camera. Explicitly setting both pose
     # and lens prevents task-local XML edits from silently changing the data
     # observation geometry.

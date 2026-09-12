@@ -178,6 +178,12 @@ TOOLHANG_VLA_V5_OPTIONS = {
     "insertion_retry": True,
     "training_step_limit": 650,
 }
+TOOLHANG_VLA_V6_OPTIONS = {
+    **TOOLHANG_VLA_V4_OPTIONS,
+    # V6 evaluates the smaller ring independently from the experimental
+    # insertion retry, which regressed already-seated trajectories in V5.
+    "insertion_retry": False,
+}
 # Compatibility name retained for frozen evaluation scripts created while the
 # improvement was still a candidate.
 ROBUST_JOINT_INSERTION_RETIME_OPTIONS = ROBUST_JOINT_OPTIONS.copy()
