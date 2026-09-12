@@ -10,6 +10,7 @@ set -euo pipefail
 MODE=$1
 PAIRS=${2:-40}
 VARIANT=${3:-threading_style_ring_small_pilot}
+VERSION=${4:-toolhang_vla_v3}
 DATA_ROOT=/iris/u/jasonyan/data/toolhang_vla_upgrade_v3_20260912/$VARIANT
 CODE_ROOT=/iris/u/jasonyan/repos/robosuite-toolhang-vla-20260911
 PIPELINE_ROOT=$CODE_ROOT/humanlike_dataset_v2_20260907
@@ -20,13 +21,13 @@ cd "$CODE_ROOT"
 
 if [ "$MODE" = prepare ]; then
   "$PY" "$PIPELINE_ROOT/collect.py" prepare --production \
-    --human-version toolhang_vla_v3 --kind toolhang --root "$DATA_ROOT" \
+    --human-version "$VERSION" --kind toolhang --root "$DATA_ROOT" \
     --seed 202609121 --pairs "$PAIRS" \
     --fixture-x-range-m -0.055 0.055 --fixture-y-range-m -0.040 0.040 \
     --fixture-yaw-range-deg -30.0 35.0 --tool-grip-friction 2.0
 elif [ "$MODE" = run ]; then
   "$PY" "$PIPELINE_ROOT/collect.py" run \
-    --human-version toolhang_vla_v3 --kind toolhang --root "$DATA_ROOT" \
+    --human-version "$VERSION" --kind toolhang --root "$DATA_ROOT" \
     --index "${SLURM_ARRAY_TASK_ID:-0}" --shards "$PAIRS"
 elif [ "$MODE" = summary ]; then
   ARGS=(--root "$DATA_ROOT" --require-visibility-labels)

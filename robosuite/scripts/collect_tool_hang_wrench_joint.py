@@ -165,6 +165,14 @@ THREADING_STYLE_JOINT_OPTIONS = {
     "insertion_tool_orientation_gain": 0.35,
     "joint_precision_frame_scale": 1.0,
 }
+TOOLHANG_VLA_V4_OPTIONS = {
+    **THREADING_STYLE_JOINT_OPTIONS,
+    "safe_transfer_rise": True,
+    "high_hole_height_m": 0.090,
+    "insertion_wedge_attitude": True,
+    "insertion_correction_steps": 48,
+    "training_step_limit": 460,
+}
 # Compatibility name retained for frozen evaluation scripts created while the
 # improvement was still a candidate.
 ROBUST_JOINT_INSERTION_RETIME_OPTIONS = ROBUST_JOINT_OPTIONS.copy()
@@ -926,6 +934,8 @@ class GeometricJointPolicy:
         transfer_ik_recovery_restarts=None,
         adaptive_insertion_servo=False,
         collision_aware_grasp=False,
+        safe_transfer_rise=False,
+        training_step_limit=365,
     ):
         self.stop_after_stage = stop_after_stage
         self.seed = int(seed)
@@ -977,10 +987,14 @@ class GeometricJointPolicy:
         self.insertion_retime = bool(insertion_retime)
         self.adaptive_insertion_servo = bool(adaptive_insertion_servo)
         self.collision_aware_grasp = bool(collision_aware_grasp)
+        self.safe_transfer_rise = bool(safe_transfer_rise)
+        self.training_step_limit = int(training_step_limit)
         if self.adaptive_insertion_servo and controller_backend != "joint_position":
             raise ValueError("adaptive insertion servo requires joint_position")
         if self.insertion_retime and controller_backend != "joint_position":
             raise ValueError("insertion retiming requires joint_position")
+        if self.training_step_limit < 365:
+            raise ValueError("training_step_limit must be at least 365")
         self.transfer_ik_recovery_restarts = (
             None if transfer_ik_recovery_restarts is None
             else int(transfer_ik_recovery_restarts)
@@ -1584,6 +1598,8 @@ class GeometricJointPolicy:
             "insertion_correction_steps": self.insertion_correction_steps,
             "adaptive_insertion_servo": self.adaptive_insertion_servo,
             "collision_aware_grasp_enabled": self.collision_aware_grasp,
+            "safe_transfer_rise": self.safe_transfer_rise,
+            "training_step_limit": self.training_step_limit,
             "pre_release_validation_steps": self.pre_release_validation_steps,
             "threading_pregrasp_frames": self.threading_pregrasp_frames,
             "transfer_retime": self.transfer_retime,
@@ -2744,7 +2760,7 @@ class GeometricJointPolicy:
                 # hanging orientation at the lifted XY position, forcing a
                 # large in-place rotation; that made this style account for
                 # nearly the entire full-vs-partial state-success gap.
-                vertical_rise = 0.025
+                vertical_rise = 0.040 if self.safe_transfer_rise else 0.025
                 vertical_hole = lifted_hole + (vertical_rise * motion_scale) * world_up
                 blend_hole = (
                     0.45 * lifted_hole
@@ -2765,6 +2781,14 @@ class GeometricJointPolicy:
 
             if style != "vertical_first":
                 control_pose_overrides = [None] * len(control_holes)
+
+            if self.safe_transfer_rise and style != "vertical_first":
+                safe_rise = 0.040
+                control_holes = [lifted_hole + safe_rise * world_up] + control_holes
+                control_pose_overrides = [
+                    (eef_position + safe_rise * world_up, eef_matrix)
+                ] + control_pose_overrides
+                variation_params["safe_transfer_rise_m"] = safe_rise
 
             variation_params["transfer_control_offsets_hook_basis_m"] = [
                 hook_basis.T.dot(control - high_hole).tolist()
@@ -2836,7 +2860,11 @@ class GeometricJointPolicy:
             # motion and pushed otherwise clean Threading-reset trajectories
             # beyond the PH phase-2 frame envelope after adding replay-complete
             # grasp and seating dynamics.
-            transfer_frames = (54 if style == "vertical_first" else 46) + int(
+            transfer_frames = (
+                70 if self.safe_transfer_rise
+                else 54 if style == "vertical_first"
+                else 46
+            ) + int(
                 frame_offsets[3]
             )
             variation_params["transfer_path_length_m"] = transfer_path_length
@@ -3195,7 +3223,8 @@ class GeometricJointPolicy:
                 )
                 if (
                     self.robot_start_mode == "threading_continuous"
-                    and steps + correction_frames + remaining_training_frames > 365
+                    and steps + correction_frames + remaining_training_frames
+                    > self.training_step_limit
                 ):
                     insertion_correction_budget_limited = True
                     break
@@ -4098,7 +4127,14 @@ def collection_acceptance(native_success, stats, wrist_requirement="any", requir
         # Closed-loop centering can legitimately use all six bounded
         # corrections. Keep the lower quality bound while allowing that
         # authored motion plus the 15-frame retreat to remain eligible.
-        frame_low, frame_high = (140, 365) if threading_style_start else (165, 240)
+        frame_low, frame_high = (
+            (
+                140,
+                int(stats.get("variation", {}).get("training_step_limit", 365)),
+            )
+            if threading_style_start
+            else (165, 240)
+        )
         quality_frames = stats.get("training_recorded_steps", stats.get("steps", 0))
         controller_backend = stats.get("controller_backend", "joint_position")
         pregrasp_contact = stats.get("pregrasp_contact_check", {})
