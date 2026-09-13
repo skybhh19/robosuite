@@ -31,8 +31,14 @@ for directory in args.attempt_dir:
     attempt_lookup.append(lookup)
 
 for key in expected:
-    hashes = {lookup[key]["initial_state_sha256"] for lookup in attempt_lookup}
-    if len(hashes) != 1:
+    hashes = {
+        lookup[key]["initial_state_sha256"]
+        for lookup in attempt_lookup
+        if "initial_state_sha256" in lookup[key]
+    }
+    # An exception before the first recorded action has no state hash. Compare
+    # every available recording; accepted cells are guaranteed to have one.
+    if len(hashes) > 1:
         raise ValueError(f"initial state mismatch across attempts for {key}: {hashes}")
 
 chosen = {}
