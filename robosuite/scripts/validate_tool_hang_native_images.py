@@ -30,7 +30,8 @@ def compare_tree(output, source, path=""):
     if not equal_attrs(output, source):
         raise RuntimeError(f"attribute mismatch: {path or '/'}")
     expected = set(source)
-    if set(output) != expected:
+    allowed_extra = set(CAMERA_KEYS) if path.endswith("/obs") else set()
+    if set(output) != expected | allowed_extra:
         raise RuntimeError(f"member mismatch: {path or '/'}")
     for name in expected:
         item_path = f"{path}/{name}"
