@@ -55,7 +55,39 @@ eligible = {
 for regime in regimes:
     if len(eligible[regime]) < args.target_per_regime:
         raise ValueError(f"only {len(eligible[regime])} accepted {regime} states; need {args.target_per_regime}")
-selected = {regime: eligible[regime][: args.target_per_regime] for regime in regimes}
+
+# Match the grasp-bin histogram exactly across observability regimes. The
+# assignment itself is random, but acceptance can otherwise leave one regime
+# with more examples from an easier offset bin.
+entry_by_pair = {int(entry["pair"]): entry for entry in manifest["entries"]}
+bins = sorted({int(entry["bin"]) for entry in manifest["entries"]})
+common_capacity = {
+    bin_index: min(
+        sum(int(entry_by_pair[pair]["bin"]) == bin_index for pair in eligible[regime])
+        for regime in regimes
+    )
+    for bin_index in bins
+}
+base = args.target_per_regime // len(bins)
+quota = {bin_index: min(base, common_capacity[bin_index]) for bin_index in bins}
+while sum(quota.values()) < args.target_per_regime:
+    candidates = [bin_index for bin_index in bins if quota[bin_index] < common_capacity[bin_index]]
+    if not candidates:
+        raise ValueError(f"insufficient common grasp-bin capacity: {common_capacity}")
+    # Fill the currently smallest quota first; bin id breaks ties.
+    bin_index = min(candidates, key=lambda value: (quota[value], value))
+    quota[bin_index] += 1
+selected = {}
+for regime in regimes:
+    selected[regime] = [
+        pair
+        for bin_index in bins
+        for pair in [
+            candidate
+            for candidate in eligible[regime]
+            if int(entry_by_pair[candidate]["bin"]) == bin_index
+        ][: quota[bin_index]]
+    ]
 selected_cells = [(pair, regime) for regime in regimes for pair in selected[regime]]
 
 summary = {
@@ -66,6 +98,7 @@ summary = {
     "any_attempt": {},
     "eligible_states": eligible,
     "selected_states": selected,
+    "matched_grasp_bin_quota": quota,
     "selected_episodes": len(selected_cells),
     "unique_initial_states": len(selected_cells),
     "selection_rule": "each initial state is assigned to exactly one observability regime; first accepted attempt; fixed state order within regime",
