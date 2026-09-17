@@ -5,6 +5,7 @@ from robosuite.environments.manipulation.lift import Lift
 from robosuite.environments.manipulation.stack import Stack
 from robosuite.environments.manipulation.nut_assembly import NutAssembly
 from robosuite.environments.manipulation.pick_place import PickPlace
+from robosuite.environments.manipulation.play2perfect import MultiPartAssembly, YCBForkInRack
 from robosuite.environments.manipulation.door import Door
 from robosuite.environments.manipulation.wipe import Wipe
 from robosuite.environments.manipulation.tool_hang import ToolHang

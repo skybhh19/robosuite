@@ -1,0 +1,48 @@
+<mujoco model="play2perfect_fork">
+  <asset>
+    <mesh name="handle_visual" file="meshes/e501e6f78c2a50498394.obj" />
+    <mesh name="steel_visual" file="meshes/fe7259b58f60ca4e1ca0.obj" />
+    <mesh name="hull0" file="meshes/c3e37c20dad20eab7126.obj" />
+    <mesh name="hull1" file="meshes/8ada019eb226703de974.obj" />
+    <mesh name="hull2" file="meshes/dbcf56be3d131657267a.obj" />
+    <mesh name="hull3" file="meshes/a134b6435da660c6489e.obj" />
+    <mesh name="hull4" file="meshes/9bff83237e65f72e5120.obj" />
+    <mesh name="hull5" file="meshes/613ed081c791222dad9e.obj" />
+    <mesh name="hull6" file="meshes/aca9e123998dfd173ef1.obj" />
+    <mesh name="hull7" file="meshes/37d2ec245d188b00a512.obj" />
+    <mesh name="hull8" file="meshes/e17cf88f6f3446108258.obj" />
+  </asset>
+  <worldbody>
+    <body>
+      <body name="object">
+        <inertial mass="0.055" pos="-0.03391 0.000766 0.000337"
+          fullinertia="1.863806e-06 1.316788e-04 1.324597e-04 -1.330871e-07 -1.773305e-06 -1.041935e-07" />
+        <!-- The released handle hull has rounded / faceted sides that leave a
+             Panda parallel gripper on edge contacts. Use an equivalent box
+             approximation for the red handle so the two-finger adaptation
+             gets opposing contact faces; the original visual mesh is kept. -->
+        <geom name="handle_collision" type="box" pos="-0.063 0 0" size="0.036 0.0093 0.0077"
+          group="0" density="0" condim="6" friction="4.0 0.08 0.02" />
+        <!-- The flat steel neck is a legitimate second grasp region, but its
+             decomposed mesh leaves only small oblique contact facets. Replace
+             the two central hulls with an equivalent 60 x 18.6 x 13 mm box so
+             a Panda can take a repeatable cross-neck grasp. This preserves the
+             visible mesh and does not alter the handle / rack contact region. -->
+        <geom name="neck_collision" type="box" pos="-0.004 0 0.00035" size="0.030 0.0093 0.0065"
+          group="0" density="0" condim="6" friction="4.0 0.08 0.02" />
+        <geom name="hull1" type="mesh" mesh="hull1" group="0" density="0" friction="0.8 0.005 0.0001" />
+        <geom name="hull2" type="mesh" mesh="hull2" group="0" density="0" friction="0.8 0.005 0.0001" />
+        <geom name="hull5" type="mesh" mesh="hull5" group="0" density="0" friction="0.8 0.005 0.0001" />
+        <geom name="hull6" type="mesh" mesh="hull6" group="0" density="0" friction="0.8 0.005 0.0001" />
+        <geom name="hull7" type="mesh" mesh="hull7" group="0" density="0" friction="0.8 0.005 0.0001" />
+        <geom name="hull8" type="mesh" mesh="hull8" group="0" density="0" friction="0.8 0.005 0.0001" />
+        <geom name="handle_visual" type="mesh" mesh="handle_visual" group="1" contype="0" conaffinity="0" mass="1e-8" rgba="0.78 0.12 0.12 1" />
+        <geom name="steel_visual" type="mesh" mesh="steel_visual" group="1" contype="0" conaffinity="0" mass="1e-8" rgba="0.83 0.85 0.87 1" />
+        <site name="tip_site" pos="0.098777 0 0" size="0.002" rgba="1 0 0 0" />
+      </body>
+      <site name="bottom_site" pos="0 0 -0.014" size="0.002" rgba="0 0 0 0" />
+      <site name="top_site" pos="0 0 0.014" size="0.002" rgba="0 0 0 0" />
+      <site name="horizontal_radius_site" pos="0.10 0.014 0" size="0.002" rgba="0 0 0 0" />
+    </body>
+  </worldbody>
+</mujoco>

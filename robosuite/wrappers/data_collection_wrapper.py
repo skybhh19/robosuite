@@ -25,6 +25,7 @@ class DataCollectionWrapper(Wrapper):
         joint_delta_scale=0.05,
         joint_position_observation_key="robot0_joint_pos",
         reload_from_xml_on_episode_start=True,
+        joint_position_label_source="observation",
     ):
         """
         Initializes the data collection wrapper.
@@ -45,6 +46,9 @@ class DataCollectionWrapper(Wrapper):
                                                      after reset before recording. Disable when an
                                                      environment configures runtime anchors or other
                                                      post-reset simulator state that must remain live.
+            joint_position_label_source (str): "observation" preserves legacy cached labels;
+                                               "sim_qpos" labels the exact pre-step first-robot
+                                               joint state without updating observables or physics.
         """
         super().__init__(env)
 
@@ -55,6 +59,11 @@ class DataCollectionWrapper(Wrapper):
         self.joint_delta_scale = float(joint_delta_scale)
         self.joint_position_observation_key = joint_position_observation_key
         self.reload_from_xml_on_episode_start = bool(reload_from_xml_on_episode_start)
+        if joint_position_label_source not in ("observation", "sim_qpos"):
+            raise ValueError("unknown joint_position_label_source")
+        if joint_position_label_source == "sim_qpos" and joint_position_observation_key != "robot0_joint_pos":
+            raise ValueError("sim_qpos labels require the first-robot joint position key")
+        self.joint_position_label_source = joint_position_label_source
         if self.record_joint_position_fields and self.joint_delta_scale <= 0:
             raise ValueError("joint_delta_scale must be positive")
 
@@ -216,6 +225,17 @@ class DataCollectionWrapper(Wrapper):
                 self._current_task_instance_state = state
         self.recording_enabled = enabled
 
+    def _joint_position_for_labels(self, observation):
+        """Select labels only; never force observation refresh or advance simulation."""
+        observed = np.asarray(observation[self.joint_position_observation_key], dtype=float)
+        if self.joint_position_label_source == "observation":
+            return observed.copy()
+        indexes = self.env.robots[0]._ref_joint_pos_indexes
+        actual = np.asarray(self.env.sim.data.qpos[indexes], dtype=float).copy()
+        if actual.shape != observed.shape or not np.isfinite(actual).all():
+            raise ValueError("actual joint labels do not match the configured observation shape")
+        return actual
+
     def step(self, action):
         """
         Extends vanilla step() function call to accommodate data collection
@@ -246,7 +266,7 @@ class DataCollectionWrapper(Wrapper):
                     f"Missing joint-position observation {self.joint_position_observation_key!r}; "
                     f"available keys are {sorted(observation)}"
                 )
-            joint_position = np.asarray(observation[self.joint_position_observation_key], dtype=float).copy()
+            joint_position = self._joint_position_for_labels(observation)
             absolute_joint_target = np.asarray(action[: len(joint_position)], dtype=float).copy()
             joint_delta = absolute_joint_target - joint_position
             reference_scaled_joint_delta = joint_delta / self.joint_delta_scale
@@ -265,6 +285,8 @@ class DataCollectionWrapper(Wrapper):
                     [joint_delta, np.asarray(action[-1:], dtype=float)]
                 ),
             }
+            if self.joint_position_label_source == "sim_qpos":
+                joint_fields["joint_position_label_source"] = "sim_qpos_pre_step"
 
         ret = super().step(action)
         self.t += 1

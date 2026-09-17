@@ -1,0 +1,27 @@
+<mujoco model="play2perfect_beam_fixture">
+  <asset>
+    <mesh name="fixture_visual" file="meshes/2ab25bf2866adc6fefc6.obj" />
+  </asset>
+  <worldbody>
+    <body>
+      <body name="object">
+        <geom name="side_pos_y" type="box" pos="0 0.022338 0.01905" size="0.073125 0.0043325 0.01905" group="0" rgba="0.55 0.55 0.55 1" friction="0.5 0.001 0.00001" />
+        <geom name="side_neg_y" type="box" pos="0 -0.022337 0.01905" size="0.073125 0.0043325 0.01905" group="0" rgba="0.55 0.55 0.55 1" friction="0.5 0.001 0.00001" />
+        <geom name="left_end" type="box" pos="-0.068984 0 0.01905" size="0.004141 0.018005 0.01905" group="0" rgba="0.55 0.55 0.55 1" friction="0.5 0.001 0.00001" />
+        <geom name="right_bulk" type="box" pos="0.021395 0 0.01905" size="0.0517295 0.018005 0.01905" group="0" rgba="0.55 0.55 0.55 1" friction="0.5 0.001 0.00001" />
+        <!-- The source mesh below is only the SDF hole patch, not the full
+             part-6 beam. Mirror the four collision primitives into visual
+             group 1 so the complete receiver is visible in normal renders. -->
+        <geom name="side_pos_y_visual" type="box" pos="0 0.022338 0.01905" size="0.073125 0.0043325 0.01905" group="1" contype="0" conaffinity="0" mass="1e-8" rgba="0.28 0.55 0.82 1" />
+        <geom name="side_neg_y_visual" type="box" pos="0 -0.022337 0.01905" size="0.073125 0.0043325 0.01905" group="1" contype="0" conaffinity="0" mass="1e-8" rgba="0.28 0.55 0.82 1" />
+        <geom name="left_end_visual" type="box" pos="-0.068984 0 0.01905" size="0.004141 0.018005 0.01905" group="1" contype="0" conaffinity="0" mass="1e-8" rgba="0.28 0.55 0.82 1" />
+        <geom name="right_bulk_visual" type="box" pos="0.021395 0 0.01905" size="0.0517295 0.018005 0.01905" group="1" contype="0" conaffinity="0" mass="1e-8" rgba="0.28 0.55 0.82 1" />
+        <geom name="fixture_visual" type="mesh" mesh="fixture_visual" group="1" contype="0" conaffinity="0" mass="1e-8" rgba="0.65 0.65 0.68 1" />
+        <site name="insertion_site" pos="-0.047625 0 0.0381" size="0.002" rgba="0 1 0 0" />
+      </body>
+      <site name="bottom_site" pos="0 0 0" size="0.002" rgba="0 0 0 0" />
+      <site name="top_site" pos="0 0 0.0381" size="0.002" rgba="0 0 0 0" />
+      <site name="horizontal_radius_site" pos="0.0732 0.0267 0" size="0.002" rgba="0 0 0 0" />
+    </body>
+  </worldbody>
+</mujoco>

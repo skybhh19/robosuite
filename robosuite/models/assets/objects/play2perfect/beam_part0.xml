@@ -1,0 +1,50 @@
+<mujoco model="play2perfect_beam_part0">
+  <asset>
+    <mesh name="mesh0" file="meshes/0002e4b45aa4e73489c1.obj" />
+    <mesh name="mesh1" file="meshes/a47a9082806f47490e12.obj" />
+    <mesh name="mesh2" file="meshes/6fdb81a323dd11760f91.obj" />
+    <mesh name="mesh3" file="meshes/311f5fcc627f264ef7d3.obj" />
+    <mesh name="mesh4" file="meshes/d788efa81b85f8a59db6.obj" />
+    <mesh name="mesh5" file="meshes/be3d947cea2868f48cbe.obj" />
+    <mesh name="mesh6" file="meshes/f6d15a6f4c58310980d0.obj" />
+    <mesh name="mesh7" file="meshes/14cd556ab5567da33e6b.obj" />
+    <mesh name="mesh8" file="meshes/5822fb596504b49df15c.obj" />
+    <mesh name="mesh9" file="meshes/c700de129a5ef056ecb1.obj" />
+    <mesh name="mesh10" file="meshes/b24282f2564b58541122.obj" />
+    <mesh name="mesh11" file="meshes/9700c4a3d46b95500058.obj" />
+    <mesh name="mesh12" file="meshes/4c5adc06e51a37076df5.obj" />
+    <mesh name="mesh13" file="meshes/74edf36862acd28e0037.obj" />
+    <mesh name="mesh14" file="meshes/023a340acf19f0ba254a.obj" />
+    <mesh name="mesh15" file="meshes/c657949c7cd08bb004e9.obj" />
+    <mesh name="mesh16" file="meshes/f9cb06a7576fba9ecb48.obj" />
+    <mesh name="mesh17" file="meshes/074e269caee86dfc91aa.obj" />
+  </asset>
+  <worldbody>
+    <body>
+      <body name="object">
+        <inertial mass="0.06857" pos="0.002767 0 0.000034" fullinertia="1.322114e-05 2.235268e-04 2.249660e-04 1.702667e-12 9.878826e-08 -5.800965e-12" />
+        <geom name="mesh0" type="sdf" mesh="mesh0" group="0" density="0" rgba="0.9 0.5 0.12 1" friction="0.5 0.001 0.00001" />
+        <geom name="mesh1" type="mesh" mesh="mesh1" group="0" density="0" rgba="0.9 0.5 0.12 1" friction="0.5 0.001 0.00001" />
+        <geom name="mesh2" type="mesh" mesh="mesh2" group="0" density="0" rgba="0.9 0.5 0.12 1" friction="0.5 0.001 0.00001" />
+        <geom name="mesh3" type="mesh" mesh="mesh3" group="0" density="0" rgba="0.9 0.5 0.12 1" friction="0.5 0.001 0.00001" />
+        <geom name="mesh4" type="mesh" mesh="mesh4" group="0" density="0" rgba="0.9 0.5 0.12 1" friction="0.5 0.001 0.00001" />
+        <geom name="mesh5" type="mesh" mesh="mesh5" group="0" density="0" rgba="0.9 0.5 0.12 1" friction="0.5 0.001 0.00001" />
+        <geom name="mesh6" type="mesh" mesh="mesh6" group="0" density="0" rgba="0.9 0.5 0.12 1" friction="0.5 0.001 0.00001" />
+        <geom name="mesh7" type="mesh" mesh="mesh7" group="0" density="0" rgba="0.9 0.5 0.12 1" friction="0.5 0.001 0.00001" />
+        <geom name="mesh8" type="mesh" mesh="mesh8" group="0" density="0" rgba="0.9 0.5 0.12 1" friction="0.5 0.001 0.00001" />
+        <geom name="mesh9" type="mesh" mesh="mesh9" group="0" density="0" rgba="0.9 0.5 0.12 1" friction="0.5 0.001 0.00001" />
+        <geom name="mesh10" type="mesh" mesh="mesh10" group="0" density="0" rgba="0.9 0.5 0.12 1" friction="0.5 0.001 0.00001" />
+        <geom name="mesh11" type="mesh" mesh="mesh11" group="0" density="0" rgba="0.9 0.5 0.12 1" friction="0.5 0.001 0.00001" />
+        <geom name="mesh12" type="mesh" mesh="mesh12" group="0" density="0" rgba="0.9 0.5 0.12 1" friction="0.5 0.001 0.00001" />
+        <geom name="mesh13" type="mesh" mesh="mesh13" group="0" density="0" rgba="0.9 0.5 0.12 1" friction="0.5 0.001 0.00001" />
+        <geom name="mesh14" type="mesh" mesh="mesh14" group="0" density="0" rgba="0.9 0.5 0.12 1" friction="0.5 0.001 0.00001" />
+        <geom name="mesh15" type="mesh" mesh="mesh15" group="0" density="0" rgba="0.9 0.5 0.12 1" friction="0.5 0.001 0.00001" />
+        <geom name="mesh16" type="mesh" mesh="mesh16" group="0" density="0" rgba="0.9 0.5 0.12 1" friction="0.5 0.001 0.00001" />
+        <geom name="mesh17" type="sdf" mesh="mesh17" group="0" density="0" rgba="0.9 0.5 0.12 1" friction="0.5 0.001 0.00001" />
+      </body>
+      <site name="bottom_site" pos="0 0 -0.0191" size="0.002" rgba="0 0 0 0" />
+      <site name="top_site" pos="0 0 0.0191" size="0.002" rgba="0 0 0 0" />
+      <site name="horizontal_radius_site" pos="0.115 0.023 0" size="0.002" rgba="0 0 0 0" />
+    </body>
+  </worldbody>
+</mujoco>

@@ -1,0 +1,30 @@
+<mujoco model="play2perfect_fork_rack">
+  <asset>
+    <mesh name="rack_visual" file="meshes/c532f465cd9ec1678d9b.obj" />
+  </asset>
+  <worldbody>
+    <body>
+      <body name="object">
+        <!-- A dark recessed floor makes the aperture legible from the wrist
+             camera without changing any collision geometry. -->
+        <geom name="base" type="box" pos="0 0 -0.04" size="0.045 0.035 0.0025" group="0" rgba="0.07 0.08 0.09 1" friction="0.5 0.001 0.00001" />
+        <geom name="left" type="box" pos="-0.026858 0 0.0025" size="0.0181415 0.035 0.04" group="0" rgba="0.47 0.47 0.47 1" friction="0.5 0.001 0.00001" />
+        <geom name="right" type="box" pos="0.026858 0 0.0025" size="0.0181415 0.035 0.04" group="0" rgba="0.47 0.47 0.47 1" friction="0.5 0.001 0.00001" />
+        <geom name="front" type="box" pos="0 0.022673 0.0025" size="0.008717 0.012327 0.04" group="0" rgba="0.47 0.47 0.47 1" friction="0.5 0.001 0.00001" />
+        <geom name="back" type="box" pos="0 -0.022673 0.0025" size="0.008717 0.012327 0.04" group="0" rgba="0.47 0.47 0.47 1" friction="0.5 0.001 0.00001" />
+        <!-- Thin, visual-only inset rim: the source mesh and the table share
+             nearly the same gray value, so the actual slot boundary otherwise
+             disappears in wrist RGB despite being geometrically visible. -->
+        <geom name="slot_rim_left" type="box" pos="-0.0097 0 0.043" size="0.001 0.0114 0.00045" group="1" contype="0" conaffinity="0" mass="1e-8" rgba="0.06 0.07 0.08 1" />
+        <geom name="slot_rim_right" type="box" pos="0.0097 0 0.043" size="0.001 0.0114 0.00045" group="1" contype="0" conaffinity="0" mass="1e-8" rgba="0.06 0.07 0.08 1" />
+        <geom name="slot_rim_front" type="box" pos="0 0.0114 0.043" size="0.0107 0.001 0.00045" group="1" contype="0" conaffinity="0" mass="1e-8" rgba="0.06 0.07 0.08 1" />
+        <geom name="slot_rim_back" type="box" pos="0 -0.0114 0.043" size="0.0107 0.001 0.00045" group="1" contype="0" conaffinity="0" mass="1e-8" rgba="0.06 0.07 0.08 1" />
+        <geom name="visual" type="mesh" mesh="rack_visual" group="1" contype="0" conaffinity="0" mass="1e-8" rgba="0.86 0.88 0.91 1" />
+        <site name="slot_site" pos="0 0 0.04" size="0.002" rgba="0 1 0 0" />
+      </body>
+      <site name="bottom_site" pos="0 0 -0.0425" size="0.002" rgba="0 0 0 0" />
+      <site name="top_site" pos="0 0 0.0425" size="0.002" rgba="0 0 0 0" />
+      <site name="horizontal_radius_site" pos="0.045 0.035 0" size="0.002" rgba="0 0 0 0" />
+    </body>
+  </worldbody>
+</mujoco>

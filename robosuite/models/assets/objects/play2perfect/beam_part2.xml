@@ -1,0 +1,25 @@
+<mujoco model="play2perfect_beam_part2">
+  <asset>
+    <mesh name="mesh0" file="meshes/c18580330d82a9c39514.obj" />
+    <mesh name="mesh1" file="meshes/fc7df7de7359108e02d2.obj" />
+    <mesh name="mesh2" file="meshes/89abcfe996eefd3875be.obj" />
+    <mesh name="mesh3" file="meshes/33626fcc222da35f21cc.obj" />
+    <mesh name="mesh4" file="meshes/2ad8fb2f4547eeaae034.obj" />
+  </asset>
+  <worldbody>
+    <body>
+      <body name="object">
+        <inertial mass="0.08598" pos="0 -0.000698 0" fullinertia="2.311025e-05 3.401606e-04 3.414929e-04 -4.274376e-12 -9.955234e-11 -9.553174e-13" />
+        <!-- SDF preserves the keyed socket; a convex mesh would seal the hole. -->
+        <geom name="mesh0" type="sdf" mesh="mesh0" group="0" density="0" rgba="0.15 0.5 0.85 1" friction="0.5 0.001 0.00001" />
+        <geom name="mesh1" type="mesh" mesh="mesh1" group="0" density="0" rgba="0.15 0.5 0.85 1" friction="0.5 0.001 0.00001" />
+        <geom name="mesh2" type="mesh" mesh="mesh2" group="0" density="0" rgba="0.15 0.5 0.85 1" friction="0.5 0.001 0.00001" />
+        <geom name="mesh3" type="mesh" mesh="mesh3" group="0" density="0" rgba="0.15 0.5 0.85 1" friction="0.5 0.001 0.00001" />
+        <geom name="mesh4" type="mesh" mesh="mesh4" group="0" density="0" rgba="0.15 0.5 0.85 1" friction="0.5 0.001 0.00001" />
+      </body>
+      <site name="bottom_site" pos="0 0 -0.0191" size="0.002" rgba="0 0 0 0" />
+      <site name="top_site" pos="0 0 0.0191" size="0.002" rgba="0 0 0 0" />
+      <site name="horizontal_radius_site" pos="0.115 0.023 0" size="0.002" rgba="0 0 0 0" />
+    </body>
+  </worldbody>
+</mujoco>
