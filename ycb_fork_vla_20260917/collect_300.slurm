@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=fork-v2-collect
 #SBATCH --partition=sc-loprio
-#SBATCH --account=default
+#SBATCH --account=iliad
 #SBATCH --array=0-1%2
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
