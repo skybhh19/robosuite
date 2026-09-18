@@ -125,6 +125,7 @@ class Threading(ManipulationEnv):
         )
         mujoco_arena.set_origin([0, 0, 0])
         self._add_agentview_full_camera(mujoco_arena)
+        self._add_close_to_ring_camera(mujoco_arena)
 
         self.needle = NeedleObject(
             name="needle_obj",
@@ -162,13 +163,42 @@ class Threading(ManipulationEnv):
         return changed
 
     def edit_model_xml(self, xml_str):
-        """Preserve variant-specific gripper friction when replaying model XML."""
+        """Preserve variant-specific gripper friction and retrofit the close_to_ring camera when replaying model XML."""
         xml_str = super().edit_model_xml(xml_str)
-        if self.gripper_contact_friction is None:
-            return xml_str
         root = ET.fromstring(xml_str)
-        self._apply_gripper_contact_friction(root)
+        self._ensure_close_to_ring_camera_xml(root)
+        if self.gripper_contact_friction is not None:
+            self._apply_gripper_contact_friction(root)
         return ET.tostring(root, encoding="unicode")
+
+    @classmethod
+    def _ensure_close_to_ring_camera_xml(cls, root):
+        """Add (or refresh) the close_to_ring camera directly in a parsed model XML tree.
+
+        Needed so episodes saved before this camera existed still get it when
+        their model.xml is replayed via ``reset_from_xml_string``.
+        """
+        worldbody = root.find("worldbody")
+        camera = worldbody.find("./camera[@name='close_to_ring']")
+        if camera is None:
+            camera = ET.SubElement(worldbody, "camera")
+            camera.set("name", "close_to_ring")
+        camera.set("pos", "0.18 0.130 0.90")
+        camera.set("quat", "0.17160849 0.22352028 0.76104486 0.58429450")
+        camera.set("fovy", "31")
+
+    def _add_close_to_ring_camera(self, arena):
+        """Add a close-up camera framing the tripod ring.
+
+        Pose is a look-at from pos=(0.18, 0.130, 0.90) toward the ring
+        center target=(0.000, -0.150, 0.989), with world +Z as up.
+        """
+        arena.set_camera(
+            camera_name="close_to_ring",
+            pos=string_to_array("0.18 0.130 0.90"),
+            quat=string_to_array("0.17160849 0.22352028 0.76104486 0.58429450"),
+            camera_attribs={"fovy": "31"},
+        )
 
     def _add_agentview_full_camera(self, arena):
         """Add MimicGen's wider tabletop camera."""
