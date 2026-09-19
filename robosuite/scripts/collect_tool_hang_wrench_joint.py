@@ -2167,6 +2167,25 @@ class GeometricJointPolicy:
 
         def move_through(targets, gripper, frames, start_slope=0.0, end_slope=0.0):
             """Traverse joint waypoints as one continuous, pause-free curve."""
+            # HUMAN_V2_HOOK: human-calibrated continuous free-space transfer.
+            from human_motion import profile, smooth_progress
+            hp = profile(self.seed, "transfer") if getattr(self, "human_enabled", False) else None
+            if hp is not None:
+                frames = int(np.ceil(frames * hp["duration_scale"]))
+                variation_params["human_transfer_v2"] = hp
+            def transfer_progress(u, start_slope, end_slope):
+                progress = smooth_progress(u, hp) if hp else u
+                return self._hermite_progress(progress, start_slope, end_slope)
+            def human_joint_target(desired):
+                if hp is None:
+                    return desired
+                current = np.asarray(env.sim.data.qpos[indexes], dtype=float)
+                lower, upper = env.sim.model.jnt_range[indexes].T
+                lead = np.clip(current + hp["residual_gain"] * (desired - current), lower, upper)
+                if previous_joint_target is None:
+                    return lead
+                alpha = hp["command_alpha"]
+                return alpha * lead + (1.0 - alpha) * previous_joint_target
             start = (
                 np.asarray(env.sim.data.qpos[indexes], dtype=float).copy()
                 if previous_joint_target is None
@@ -2189,7 +2208,7 @@ class GeometricJointPolicy:
                 requested_frames = frames
                 for candidate_frames in range(frames, frames + 161):
                     progress = np.asarray([
-                        self._hermite_progress(i / candidate_frames, start_slope, end_slope)
+                        transfer_progress(i / candidate_frames, start_slope, end_slope)
                         for i in range(1, candidate_frames + 1)
                     ])
                     commands = np.asarray(curve(progress))
@@ -2221,11 +2240,11 @@ class GeometricJointPolicy:
                     "max_target_second_difference": float(np.max(np.linalg.norm(second, axis=1))),
                 }
                 for desired in commands:
-                    if not step(desired, gripper):
+                    if not step(human_joint_target(desired), gripper):
                         return False
                 return True
             for frame in range(frames):
-                progress = self._hermite_progress(
+                progress = transfer_progress(
                     (frame + 1) / frames,
                     start_slope,
                     end_slope,
@@ -2234,7 +2253,7 @@ class GeometricJointPolicy:
                 if previous_joint_target is not None:
                     prior = previous_joint_target
                     desired = np.clip(desired, prior - 0.030, prior + 0.030)
-                if not step(desired, gripper):
+                if not step(human_joint_target(desired), gripper):
                     return False
             return True
 
@@ -2798,6 +2817,18 @@ class GeometricJointPolicy:
             else:
                 raise RuntimeError(f"Unhandled ToolHang motion style: {style}")
 
+            if getattr(self, "human_enabled", False):
+                from human_motion import profile
+                hp_geometry = profile(self.seed, "transfer_geometry")
+                shift1 = np.asarray(hp_geometry["offset_first"])
+                shift2 = np.asarray(hp_geometry["offset_second"])
+                shift1[2] = abs(shift1[2])
+                weights = np.linspace(0.35, 1.0, len(control_holes))
+                control_holes = [
+                    point + hook_basis.dot(weight * shift1 + np.sin(np.pi * weight) * shift2)
+                    for point, weight in zip(control_holes, weights)
+                ]
+                variation_params["human_transfer_geometry_v2"] = hp_geometry
             if style != "vertical_first":
                 control_pose_overrides = [None] * len(control_holes)
 
