@@ -32,9 +32,12 @@ def copy_group(source, target, indices, original_length):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", required=True, type=Path)
+    parser.add_argument("--source-name", default="dataset_image84.hdf5")
+    parser.add_argument("--output-name", default="dataset_image84_14hz.hdf5")
+    parser.add_argument("--audit-name", default="human_rate_audit.json")
     args = parser.parse_args()
-    source_path = args.root / "dataset_image84.hdf5"
-    output_path = args.root / "dataset_image84_14hz.hdf5"
+    source_path = args.root / args.source_name
+    output_path = args.root / args.output_name
     if output_path.exists():
         raise FileExistsError(output_path)
     temporary = output_path.with_suffix(".partial.hdf5")
@@ -84,7 +87,7 @@ def main():
     temporary.replace(output_path)
     audit["episodes_count"] = len(audit["episodes"])
     audit["total_steps_14hz"] = total
-    (args.root / "human_rate_audit.json").write_text(json.dumps(audit, indent=2) + "\n")
+    (args.root / args.audit_name).write_text(json.dumps(audit, indent=2) + "\n")
     print(json.dumps({"output": str(output_path), "episodes": len(audit["episodes"]), "steps": total}))
 
 
