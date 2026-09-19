@@ -12,8 +12,21 @@ import numpy as np
 parser = argparse.ArgumentParser()
 parser.add_argument("--root", type=Path, required=True)
 parser.add_argument("--attempt-dir", action="append", required=True)
-parser.add_argument("--target-per-regime", type=int, required=True)
+parser.add_argument("--target-per-regime", type=int)
+parser.add_argument("--target-full", type=int)
+parser.add_argument("--target-partial", type=int)
+parser.add_argument("--require-visibility-labels", action="store_true")
 args = parser.parse_args()
+if args.target_per_regime is not None:
+    if args.target_full is not None or args.target_partial is not None:
+        parser.error("use target-per-regime or target-full/target-partial")
+    targets = {"full": args.target_per_regime, "partial": args.target_per_regime}
+elif args.target_full is not None and args.target_partial is not None:
+    targets = {"full": args.target_full, "partial": args.target_partial}
+else:
+    parser.error("set target-per-regime or both target-full and target-partial")
+if any(value <= 0 for value in targets.values()):
+    parser.error("target counts must be positive")
 
 manifest = json.loads((args.root / "manifest.json").read_text())
 version = manifest["versions"][0]
@@ -44,7 +57,10 @@ for key in expected:
 chosen = {}
 for key in sorted(expected):
     for attempt_index, lookup in enumerate(attempt_lookup):
-        if lookup[key]["accepted"]:
+        row = lookup[key]
+        visible = row.get("stats", {}).get("visibility_diagnostics", {}).get("hole_center_visible_at_preinsert")
+        label_ok = not args.require_visibility_labels or visible is (key[1] == "full")
+        if row["accepted"] and label_ok:
             chosen[key] = (attempt_index, lookup[key])
             break
 
@@ -53,8 +69,8 @@ eligible = {
     for regime in regimes
 }
 for regime in regimes:
-    if len(eligible[regime]) < args.target_per_regime:
-        raise ValueError(f"only {len(eligible[regime])} accepted {regime} states; need {args.target_per_regime}")
+    if len(eligible[regime]) < targets[regime]:
+        raise ValueError(f"only {len(eligible[regime])} accepted {regime} states; need {targets[regime]}")
 
 # Match the grasp-bin histogram exactly across observability regimes. The
 # assignment itself is random, but acceptance can otherwise leave one regime
@@ -68,15 +84,25 @@ common_capacity = {
     )
     for bin_index in bins
 }
-base = args.target_per_regime // len(bins)
-quota = {bin_index: min(base, common_capacity[bin_index]) for bin_index in bins}
-while sum(quota.values()) < args.target_per_regime:
-    candidates = [bin_index for bin_index in bins if quota[bin_index] < common_capacity[bin_index]]
-    if not candidates:
-        raise ValueError(f"insufficient common grasp-bin capacity: {common_capacity}")
-    # Fill the currently smallest quota first; bin id breaks ties.
-    bin_index = min(candidates, key=lambda value: (quota[value], value))
-    quota[bin_index] += 1
+if targets["full"] == targets["partial"]:
+    base = targets["full"] // len(bins)
+    matched = {bin_index: min(base, common_capacity[bin_index]) for bin_index in bins}
+    while sum(matched.values()) < targets["full"]:
+        candidates = [bin_index for bin_index in bins if matched[bin_index] < common_capacity[bin_index]]
+        if not candidates:
+            raise ValueError(f"insufficient common grasp-bin capacity: {common_capacity}")
+        bin_index = min(candidates, key=lambda value: (matched[value], value))
+        matched[bin_index] += 1
+    quota = {regime: matched.copy() for regime in regimes}
+else:
+    quota = {}
+    for regime in regimes:
+        target = targets[regime]
+        quota[regime] = {bin_index: target // len(bins) + int(position < target % len(bins)) for position, bin_index in enumerate(bins)}
+        for bin_index in bins:
+            capacity = sum(int(entry_by_pair[pair]["bin"]) == bin_index for pair in eligible[regime])
+            if capacity < quota[regime][bin_index]:
+                raise ValueError(f"insufficient {regime} grasp-bin {bin_index}: {capacity} < {quota[regime][bin_index]}")
 selected = {}
 for regime in regimes:
     selected[regime] = [
@@ -86,7 +112,7 @@ for regime in regimes:
             candidate
             for candidate in eligible[regime]
             if int(entry_by_pair[candidate]["bin"]) == bin_index
-        ][: quota[bin_index]]
+        ][: quota[regime][bin_index]]
     ]
 selected_cells = [(pair, regime) for regime in regimes for pair in selected[regime]]
 
@@ -98,10 +124,11 @@ summary = {
     "any_attempt": {},
     "eligible_states": eligible,
     "selected_states": selected,
-    "matched_grasp_bin_quota": quota,
+    "grasp_bin_quota": quota,
     "selected_episodes": len(selected_cells),
     "unique_initial_states": len(selected_cells),
     "selection_rule": "each initial state is assigned to exactly one observability regime; first accepted attempt; fixed state order within regime",
+    "visibility_label_gate": args.require_visibility_labels,
 }
 for directory, rows in zip(args.attempt_dir, attempt_rows):
     summary["attempt_results"][directory] = {}
@@ -126,7 +153,7 @@ if output.exists():
 rng = np.random.default_rng(720)
 valid_cells = set()
 for regime in regimes:
-    valid_cells.update((pair, regime) for pair in rng.permutation(selected[regime])[: round(0.2 * args.target_per_regime)])
+    valid_cells.update((pair, regime) for pair in rng.permutation(selected[regime])[: round(0.2 * targets[regime])])
 masks = {key: [] for key in ("train", "valid", "all", "full", "partial", "fully_observable", "partially_observable")}
 with h5py.File(output, "w") as destination:
     data = destination.create_group("data")

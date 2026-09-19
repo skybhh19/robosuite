@@ -89,8 +89,14 @@ class ToolHangWrenchOnly(ToolHang):
         tool_grip_friction=2.0,
         tool_center_grip_half_length=None,
         tool_center_grip_friction=None,
+        fixture_x_range_m=(0.0, 0.0),
+        fixture_y_range_m=(0.0, 0.0),
+        fixture_yaw_range_deg=(0.0, 0.0),
         **kwargs,
     ):
+        self.fixture_x_range_m = self._validate_fixture_range(fixture_x_range_m, "fixture_x_range_m")
+        self.fixture_y_range_m = self._validate_fixture_range(fixture_y_range_m, "fixture_y_range_m")
+        self.fixture_yaw_range_deg = self._validate_fixture_range(fixture_yaw_range_deg, "fixture_yaw_range_deg")
         tool_grip_friction = float(tool_grip_friction)
         if not np.isfinite(tool_grip_friction) or tool_grip_friction <= 0.0:
             raise ValueError("tool_grip_friction must be finite and positive")
@@ -116,6 +122,16 @@ class ToolHangWrenchOnly(ToolHang):
             ):
                 raise ValueError("tool center grip friction must be finite and positive")
         super().__init__(*args, **kwargs)
+
+    @staticmethod
+    def _validate_fixture_range(bounds, name):
+        values = np.asarray(bounds, dtype=float)
+        if values.shape != (2,) or not np.all(np.isfinite(values)) or values[0] > values[1]:
+            raise ValueError(f"{name} must be two finite values in ascending order")
+        return tuple(float(value) for value in values)
+
+    def _sample_fixture_offset(self, bounds):
+        return bounds[0] if bounds[0] == bounds[1] else float(self.rng.uniform(*bounds))
 
     def _load_model(self):
         self.tool_handle_half_length = self.EXTENDED_HANDLE_HALF_LENGTH
@@ -184,11 +200,11 @@ class ToolHangWrenchOnly(ToolHang):
                     self.rng.uniform(np.deg2rad(-120.0), np.deg2rad(-100.0)) - np.deg2rad(-100.74883)
                 ),
                 "fixture_translation_m": [
-                    0.0,
-                    0.0,
+                    self._sample_fixture_offset(self.fixture_x_range_m),
+                    self._sample_fixture_offset(self.fixture_y_range_m),
                     0.0,
                 ],
-                "fixture_yaw_rad": 0.0,
+                "fixture_yaw_rad": float(np.deg2rad(self._sample_fixture_offset(self.fixture_yaw_range_deg))),
             }
         )
         return variation

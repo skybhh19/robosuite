@@ -78,6 +78,9 @@ def make_env(
     tool_grip_friction=2.0,
     tool_center_grip_half_length=None,
     tool_center_grip_friction=None,
+    fixture_x_range_m=(0.0, 0.0),
+    fixture_y_range_m=(0.0, 0.0),
+    fixture_yaw_range_deg=(0.0, 0.0),
 ):
     return suite.make(
         "ToolHangWrenchOnly",
@@ -98,6 +101,9 @@ def make_env(
         tool_grip_friction=tool_grip_friction,
         tool_center_grip_half_length=tool_center_grip_half_length,
         tool_center_grip_friction=tool_center_grip_friction,
+        fixture_x_range_m=fixture_x_range_m,
+        fixture_y_range_m=fixture_y_range_m,
+        fixture_yaw_range_deg=fixture_yaw_range_deg,
     )
 
 
