@@ -208,7 +208,7 @@ selected_cells = [(pair, regime) for regime in regimes for pair in selected[regi
 
 summary = {
     "complete": True,
-    "protocol": "independent_initial_states_balanced_by_observability_with_one_retry",
+    "protocol": "independent_initial_states_with_one_retry_and_fixture_pose_matching" if args.match_fixture_yaw else "independent_initial_states_balanced_by_observability_with_one_retry",
     "attempt_dirs": args.attempt_dir,
     "attempt_results": {},
     "any_attempt": {},
@@ -217,7 +217,7 @@ summary = {
     "grasp_bin_quota": quota,
     "selected_episodes": len(selected_cells),
     "unique_initial_states": len(selected_cells),
-    "selection_rule": "each initial state is assigned to exactly one observability regime; first accepted attempt; fixed state order within regime",
+    "selection_rule": "each initial state is assigned to exactly one observability regime; first accepted attempt; grasp and fixture-yaw cells matched in proportion; x/y pose means and spreads balanced deterministically" if args.match_fixture_yaw else "each initial state is assigned to exactly one observability regime; first accepted attempt; fixed state order within regime",
     "visibility_label_gate": args.require_visibility_labels,
     "fixture_pose_matching": fixture_match,
 }
