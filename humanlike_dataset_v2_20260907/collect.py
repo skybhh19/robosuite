@@ -62,7 +62,9 @@ def components(kind,seed,config=None):
  center_half=config.get('tool_center_grip_half_length');center_friction=config.get('tool_center_grip_friction')
  fixture_ranges=dict(fixture_x_range_m=config.get('fixture_x_range_m',(0.,0.)),fixture_y_range_m=config.get('fixture_y_range_m',(0.,0.)),fixture_yaw_range_deg=config.get('fixture_yaw_range_deg',(0.,0.)))
  meta=dict(env_name='ToolHangWrenchOnly',type=1,env_kwargs=dict(robots=['Panda'],controller_configs=make_controller_config('Panda','joint_position'),initialization_noise=None,ignore_done=True,use_camera_obs=False,use_object_obs=True,has_renderer=False,has_offscreen_renderer=False,camera_names=['agentview','robot0_eye_in_hand'],horizon=700,hard_reset=False,tool_grip_friction=friction,tool_center_grip_half_length=center_half,tool_center_grip_friction=center_friction,**fixture_ranges))
- return make_env(seed,84,84,True,'joint_position',tool_grip_friction=friction,tool_center_grip_half_length=center_half,tool_center_grip_friction=center_friction,**fixture_ranges),meta
+ # The collector applies frozen manifest states explicitly. Keep its reset RNG
+ # unchanged; the serialized ranges configure fresh evaluation resets only.
+ return make_env(seed,84,84,True,'joint_position',tool_grip_friction=friction,tool_center_grip_half_length=center_half,tool_center_grip_friction=center_friction),meta
 
 def prepare(a):
  config=dict(tool_grip_friction=a.tool_grip_friction,tool_center_grip_half_length=a.tool_center_grip_half_length,tool_center_grip_friction=a.tool_center_grip_friction,fixture_x_range_m=a.fixture_x_range_m,fixture_y_range_m=a.fixture_y_range_m,fixture_yaw_range_deg=a.fixture_yaw_range_deg)
