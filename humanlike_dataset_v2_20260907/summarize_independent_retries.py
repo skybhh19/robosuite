@@ -7,6 +7,88 @@ from pathlib import Path
 
 import h5py
 import numpy as np
+from scipy.optimize import linprog
+
+
+def select_matched_fixture_poses(eligible, entries, grasp_bins, targets, yaw_range, seed=202609193):
+    """Match Full and Partial grasp/yaw cells at the target 1:2 ratio."""
+    ratio, remainder = divmod(targets["partial"], targets["full"])
+    if remainder or targets["full"] % len(grasp_bins):
+        raise ValueError("fixture matching requires an integer regime ratio and equal grasp-bin quotas")
+    yaw_edges = np.linspace(*yaw_range, 5)
+
+    def yaw_bin(pair):
+        yaw = np.rad2deg(entries[pair]["initial"]["fixture_yaw_rad"])
+        return int(np.clip(np.searchsorted(yaw_edges, yaw, side="right") - 1, 0, 3))
+
+    cells = {(regime, grasp_bin, yaw_bin_index): []
+             for regime in ("full", "partial") for grasp_bin in grasp_bins for yaw_bin_index in range(4)}
+    for regime in ("full", "partial"):
+        for pair in eligible[regime]:
+            cells[(regime, int(entries[pair]["bin"]), yaw_bin(pair))].append(pair)
+    capacity = np.asarray([
+        [min(len(cells[("full", grasp_bin, yaw)]), len(cells[("partial", grasp_bin, yaw)]) // ratio)
+         for yaw in range(4)] for grasp_bin in grasp_bins
+    ], dtype=int)
+    grasp_target = targets["full"] // len(grasp_bins)
+    yaw_quota = np.minimum(targets["full"] // 4, capacity.sum(axis=0))
+    while yaw_quota.sum() < targets["full"]:
+        candidates = [yaw for yaw in range(4) if yaw_quota[yaw] < capacity[:, yaw].sum()]
+        if not candidates:
+            raise ValueError(f"insufficient matched fixture-yaw capacity: {capacity.tolist()}")
+        yaw = min(candidates, key=lambda index: (yaw_quota[index], index))
+        yaw_quota[yaw] += 1
+
+    # Each unit of cell capacity is a separate flow edge. Increasing marginal
+    # costs keep the selection spread across grasp/yaw cells when possible.
+    units = [(grasp, yaw, unit) for grasp in range(len(grasp_bins)) for yaw in range(4)
+             for unit in range(int(capacity[grasp, yaw]))]
+    equations = np.zeros((len(grasp_bins) + 4, len(units)))
+    for column, (grasp, yaw, _) in enumerate(units):
+        equations[grasp, column] = 1
+        equations[len(grasp_bins) + yaw, column] = 1
+    costs = np.asarray([(unit + 1) ** 2 for _, _, unit in units], dtype=float)
+    flow = linprog(costs, A_eq=equations,
+                   b_eq=[grasp_target] * len(grasp_bins) + yaw_quota.tolist(),
+                   bounds=(0, 1), method="highs")
+    if not flow.success or not np.allclose(flow.x, np.rint(flow.x), atol=1e-7):
+        raise ValueError(f"cannot match grasp and fixture yaw: {flow.message}")
+    cell_quota = np.zeros_like(capacity)
+    for (grasp, yaw, _), value in zip(units, np.rint(flow.x).astype(int)):
+        cell_quota[grasp, yaw] += value
+
+    # The cell counts match exactly; among feasible states, choose the sample
+    # whose x/y/yaw means and spreads are closest across regimes.
+    def features(pairs):
+        return np.asarray([[*entries[pair]["initial"]["fixture_translation_m"][:2],
+                            np.rad2deg(entries[pair]["initial"]["fixture_yaw_rad"])]
+                           for pair in pairs], dtype=float)
+
+    best = None
+    scale = np.asarray([0.08, 0.06, max(abs(yaw_edges[0]), abs(yaw_edges[-1]))])
+    for trial in range(128):
+        rng = np.random.default_rng(seed + trial)
+        selected = {"full": [], "partial": []}
+        for grasp_index, grasp_bin in enumerate(grasp_bins):
+            for yaw in range(4):
+                for regime, multiplier in (("full", 1), ("partial", ratio)):
+                    pool = cells[(regime, grasp_bin, yaw)]
+                    count = int(cell_quota[grasp_index, yaw]) * multiplier
+                    selected[regime].extend(int(pair) for pair in rng.choice(pool, size=count, replace=False))
+        full, partial = features(selected["full"]) / scale, features(selected["partial"]) / scale
+        score = float(np.sum((full.mean(axis=0) - partial.mean(axis=0)) ** 2)
+                      + 0.25 * np.sum((full.std(axis=0) - partial.std(axis=0)) ** 2))
+        if best is None or score < best[0]:
+            best = score, selected
+    selected = {regime: sorted(best[1][regime]) for regime in ("full", "partial")}
+    return selected, {
+        "yaw_edges_deg": yaw_edges.tolist(),
+        "full_yaw_quota": yaw_quota.tolist(),
+        "partial_yaw_quota": (yaw_quota * ratio).tolist(),
+        "full_grasp_yaw_cell_quota": cell_quota.tolist(),
+        "partial_grasp_yaw_cell_quota": (cell_quota * ratio).tolist(),
+        "position_balance_score": best[0],
+    }
 
 
 parser = argparse.ArgumentParser()
@@ -16,6 +98,7 @@ parser.add_argument("--target-per-regime", type=int)
 parser.add_argument("--target-full", type=int)
 parser.add_argument("--target-partial", type=int)
 parser.add_argument("--require-visibility-labels", action="store_true")
+parser.add_argument("--match-fixture-yaw", action="store_true")
 args = parser.parse_args()
 if args.target_per_regime is not None:
     if args.target_full is not None or args.target_partial is not None:
@@ -103,17 +186,24 @@ else:
             capacity = sum(int(entry_by_pair[pair]["bin"]) == bin_index for pair in eligible[regime])
             if capacity < quota[regime][bin_index]:
                 raise ValueError(f"insufficient {regime} grasp-bin {bin_index}: {capacity} < {quota[regime][bin_index]}")
-selected = {}
-for regime in regimes:
-    selected[regime] = [
-        pair
-        for bin_index in bins
-        for pair in [
-            candidate
-            for candidate in eligible[regime]
-            if int(entry_by_pair[candidate]["bin"]) == bin_index
-        ][: quota[regime][bin_index]]
-    ]
+fixture_match = None
+if args.match_fixture_yaw:
+    selected, fixture_match = select_matched_fixture_poses(
+        eligible, entry_by_pair, bins, targets,
+        manifest["collection_config"]["fixture_yaw_range_deg"],
+    )
+else:
+    selected = {}
+    for regime in regimes:
+        selected[regime] = [
+            pair
+            for bin_index in bins
+            for pair in [
+                candidate
+                for candidate in eligible[regime]
+                if int(entry_by_pair[candidate]["bin"]) == bin_index
+            ][: quota[regime][bin_index]]
+        ]
 selected_cells = [(pair, regime) for regime in regimes for pair in selected[regime]]
 
 summary = {
@@ -129,6 +219,7 @@ summary = {
     "unique_initial_states": len(selected_cells),
     "selection_rule": "each initial state is assigned to exactly one observability regime; first accepted attempt; fixed state order within regime",
     "visibility_label_gate": args.require_visibility_labels,
+    "fixture_pose_matching": fixture_match,
 }
 for directory, rows in zip(args.attempt_dir, attempt_rows):
     summary["attempt_results"][directory] = {}
