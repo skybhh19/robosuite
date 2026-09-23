@@ -212,6 +212,18 @@ class YCBForkInRack(_Play2PerfectAssemblyBase):
     POS_TOLERANCE = 0.018
     ROT_TOLERANCE = np.deg2rad(20.0)
 
+    def __init__(self, *args, grasp_contact_profile="legacy", **kwargs):
+        """Initialize the fork task with an explicit contact profile.
+
+        ``legacy`` preserves the original task physics. ``balanced`` is the
+        shared Full / Partial setup used by the balanced-v5 dataset; it never
+        switches physics based on the observability label.
+        """
+        if grasp_contact_profile not in ("legacy", "balanced"):
+            raise ValueError(f"Unknown fork grasp contact profile: {grasp_contact_profile}")
+        self.grasp_contact_profile = grasp_contact_profile
+        super().__init__(*args, **kwargs)
+
     def _load_task_objects(self):
         self.fork = Play2PerfectForkObject(name="fork")
         self.rack = Play2PerfectForkRackObject(name="rack")
@@ -223,6 +235,29 @@ class YCBForkInRack(_Play2PerfectAssemblyBase):
 
     def _reset_internal(self):
         super()._reset_internal()
+        if self.grasp_contact_profile == "balanced":
+            # Shared Full / Partial contact setup used to collect balanced-v5.
+            # The handle needs higher torsional friction to prevent contact-
+            # induced rotation; both grasp regions and both fingers otherwise
+            # use the same physical parameters for every episode.
+            for geom_id, name in enumerate(self.sim.model.geom_names):
+                if not name:
+                    continue
+                if name.startswith("fork_") and "handle_collision" in name:
+                    self.sim.model.geom_friction[geom_id] = (4.0, 0.3, 0.02)
+                    self.sim.model.geom_condim[geom_id] = 6
+                elif name.startswith("fork_") and "neck_collision" in name:
+                    self.sim.model.geom_friction[geom_id] = (4.0, 0.08, 0.02)
+                    self.sim.model.geom_condim[geom_id] = 6
+                elif "finger" in name or "pad" in name:
+                    self.sim.model.geom_friction[geom_id] = (8.0, 0.08, 0.02)
+                    self.sim.model.geom_condim[geom_id] = 6
+            for actuator_id, name in enumerate(self.sim.model.actuator_names):
+                if name and ("gripper" in name or "finger" in name):
+                    self.sim.model.actuator_forcerange[actuator_id] = (-100.0, 100.0)
+                    self.sim.model.actuator_forcelimited[actuator_id] = 1
+            wrist_camera_id = self.sim.model.camera_name2id("robot0_eye_in_hand")
+            self.sim.model.cam_fovy[wrist_camera_id] = 40.0
         if not self.deterministic_reset:
             pos = (
                 self.rng.uniform(0.08, 0.16),

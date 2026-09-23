@@ -88,3 +88,50 @@ def test_multi_part_assembly_matches_released_beam_frame_and_has_full_fixture_vi
         assert "assemblyview" in env.sim.model.camera_names
     finally:
         env.close()
+
+
+def test_fork_balanced_contact_profile_matches_v5_environment():
+    env = suite.make(
+        "YCBForkInRack",
+        robots="Panda",
+        grasp_contact_profile="balanced",
+        has_renderer=False,
+        has_offscreen_renderer=False,
+        use_camera_obs=False,
+        hard_reset=False,
+        seed=7,
+    )
+    try:
+        env.reset()
+        model = env.sim.model
+        np.testing.assert_allclose(
+            model.geom_friction[model.geom_name2id("fork_handle_collision")],
+            (4.0, 0.3, 0.02),
+        )
+        np.testing.assert_allclose(
+            model.geom_friction[model.geom_name2id("fork_neck_collision")],
+            (4.0, 0.08, 0.02),
+        )
+        np.testing.assert_allclose(
+            model.geom_friction[model.geom_name2id("gripper0_right_finger1_pad_collision")],
+            (8.0, 0.08, 0.02),
+        )
+        assert model.cam_fovy[model.camera_name2id("robot0_eye_in_hand")] == 40.0
+        for actuator_id, name in enumerate(model.actuator_names):
+            if name and ("gripper" in name or "finger" in name):
+                np.testing.assert_allclose(model.actuator_forcerange[actuator_id], (-100.0, 100.0))
+                assert model.actuator_forcelimited[actuator_id] == 1
+    finally:
+        env.close()
+
+
+def test_fork_contact_profile_rejects_unknown_values():
+    with pytest.raises(ValueError, match="Unknown fork grasp contact profile"):
+        suite.make(
+            "YCBForkInRack",
+            robots="Panda",
+            grasp_contact_profile="not-a-profile",
+            has_renderer=False,
+            has_offscreen_renderer=False,
+            use_camera_obs=False,
+        )
