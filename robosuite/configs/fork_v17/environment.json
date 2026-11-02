@@ -1,0 +1,72 @@
+{
+  "env_name": "YCBForkInRack",
+  "type": 1,
+  "env_kwargs": {
+    "robots": [
+      "Panda"
+    ],
+    "controller_configs": {
+      "type": "BASIC",
+      "body_parts": {
+        "right": {
+          "type": "JOINT_POSITION",
+          "input_type": "absolute",
+          "input_max": 1,
+          "input_min": -1,
+          "output_max": 0.05,
+          "output_min": -0.05,
+          "kp": 300,
+          "damping_ratio": 1,
+          "impedance_mode": "fixed",
+          "kp_limits": [
+            0,
+            300
+          ],
+          "damping_ratio_limits": [
+            0,
+            10
+          ],
+          "qpos_limits": null,
+          "interpolation": null,
+          "ramp_ratio": 0.2,
+          "gripper": {
+            "type": "GRIP"
+          }
+        }
+      }
+    },
+    "has_renderer": false,
+    "has_offscreen_renderer": true,
+    "use_camera_obs": true,
+    "hard_reset": false,
+    "reward_shaping": true,
+    "initialization_noise": null,
+    "control_freq": 20,
+    "horizon": 3000,
+    "ignore_done": true,
+    "grasp_contact_profile": "moderate",
+    "fork_geometry_profile": "legacy_precision_guided",
+    "fork_appearance_profile": "default",
+    "fork_handle_extension_m": 0.0,
+    "fork_grasp_front_extension_m": 0.0,
+    "fork_continuous_grasp": false,
+    "fork_mass_redistribution_kg": 0.0,
+    "fork_finger_torsional_friction_m": 0.01,
+    "fork_wrist_camera_x_m": 0.07795106529744401,
+    "fork_wrist_camera_y_m": -0.00347470457412815,
+    "fork_wrist_camera_z_m": 0.05098043012681654,
+    "fork_wrist_camera_tilt_deg": 15.021564613013302,
+    "fork_wrist_camera_pan_deg": 0.41043860943979865,
+    "fork_wrist_camera_roll_deg": -0.12387186676277077,
+    "fork_wrist_camera_fovy_deg": 50.0,
+    "fork_pad_contact_dynamics": "low_slip_stiff",
+    "fork_gripper_command_rate_per_s": 12.0,
+    "fork_gripper_position_gain": 1500.0,
+    "camera_names": [
+      "agentview",
+      "robot0_eye_in_hand"
+    ],
+    "camera_heights": 256,
+    "camera_widths": 256
+  }
+}

@@ -1,7 +1,10 @@
 <mujoco model="play2perfect_fork">
   <asset>
     <mesh name="handle_visual" file="meshes/e501e6f78c2a50498394.obj" />
+    <!-- Slightly broader red handle used only by the opt-in thick_wide profile. -->
+    <mesh name="handle_visual_thick" file="meshes/e501e6f78c2a50498394.obj" scale="1 1.0753 1" />
     <mesh name="steel_visual" file="meshes/fe7259b58f60ca4e1ca0.obj" />
+    <mesh name="steel_visual_thick" file="meshes/fe7259b58f60ca4e1ca0.obj" scale="1 1.0753 1" />
     <mesh name="hull0" file="meshes/c3e37c20dad20eab7126.obj" />
     <mesh name="hull1" file="meshes/8ada019eb226703de974.obj" />
     <mesh name="hull2" file="meshes/dbcf56be3d131657267a.obj" />
@@ -37,7 +40,9 @@
         <geom name="hull7" type="mesh" mesh="hull7" group="0" density="0" friction="0.8 0.005 0.0001" />
         <geom name="hull8" type="mesh" mesh="hull8" group="0" density="0" friction="0.8 0.005 0.0001" />
         <geom name="handle_visual" type="mesh" mesh="handle_visual" group="1" contype="0" conaffinity="0" mass="1e-8" rgba="0.78 0.12 0.12 1" />
+        <geom name="handle_visual_thick" type="mesh" mesh="handle_visual_thick" group="1" contype="0" conaffinity="0" mass="1e-8" rgba="0.78 0.12 0.12 0" />
         <geom name="steel_visual" type="mesh" mesh="steel_visual" group="1" contype="0" conaffinity="0" mass="1e-8" rgba="0.83 0.85 0.87 1" />
+        <geom name="steel_visual_thick" type="mesh" mesh="steel_visual_thick" group="1" contype="0" conaffinity="0" mass="1e-8" rgba="0.83 0.85 0.87 0" />
         <site name="tip_site" pos="0.098777 0 0" size="0.002" rgba="1 0 0 0" />
       </body>
       <site name="bottom_site" pos="0 0 -0.014" size="0.002" rgba="0 0 0 0" />
