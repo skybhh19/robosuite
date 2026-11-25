@@ -27,6 +27,10 @@ from robosuite.environments.manipulation.threading import (
     Threading_D1,
     Threading_D2,
 )
+from robosuite.environments.manipulation.threading_v15 import (
+    Threading_D09_Aperture14_NoSlip,
+    Threading_D09_Aperture14_NoSlip_WristD,
+)
 from robosuite.environments.manipulation.two_arm_lift import TwoArmLift
 from robosuite.environments.manipulation.two_arm_peg_in_hole import TwoArmPegInHole
 from robosuite.environments.manipulation.two_arm_handover import TwoArmHandover
